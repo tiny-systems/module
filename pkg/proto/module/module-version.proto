@@ -1,0 +1,8 @@
+syntax = "proto3";
+package server;
+option go_package = "./module-go;module";
+message ModuleVersion {
+  string ID = 1;
+  string ModuleName = 2;
+  string Version = 3;
+}
