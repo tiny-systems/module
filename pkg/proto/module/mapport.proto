@@ -1,0 +1,9 @@
+syntax = "proto3";
+package server;
+option go_package = "./module-go;module";
+
+message MapPort {
+  string From = 1; // full port name name
+  string To = 2;
+  string EdgeID = 3;
+}

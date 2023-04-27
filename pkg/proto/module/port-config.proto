@@ -1,0 +1,12 @@
+syntax = "proto3";
+package server;
+option go_package = "./module-go;module";
+
+message PortConfig {
+  string From = 1; // full port name, may be empty for a node's own config
+  string PortName = 2; // port name of a node being configured
+  bytes Configuration = 3; // json encoded data, not necessarily an object
+  bytes Schema = 5; // port schema which might be customized
+  bytes SchemaDefault = 6; // default json schema of the port (for the reset)
+  bytes ConfigurationDefault = 7; // default configuration of the port (for the reset)
+}

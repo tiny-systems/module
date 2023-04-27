@@ -1,0 +1,57 @@
+syntax = "proto3";
+package server;
+option go_package = "./module-go;module";
+import "google/protobuf/struct.proto";
+import "mapport.proto";
+import "port-config.proto";
+
+enum GraphChangeOp {
+  UPDATE = 0;
+  DELETE = 1;
+}
+
+message Node {
+  //string Label = 1;
+  // if implements runnable interface
+  bool Runnable = 2;
+
+  string ComponentID = 5;
+  Position Position = 6;
+  repeated NodePort Ports = 7;
+  // if we want to see its running
+  bool Run = 8;
+  // connection between other nodes
+
+  repeated MapPort Destinations = 9;
+  repeated PortConfig PortConfigs = 13;
+  //string Name = 10;
+  google.protobuf.Struct Data = 11;
+}
+
+message Position {
+  int32 X = 1;
+  int32 Y = 2;
+  int32 Spin = 3;
+}
+
+message Edge {
+  string Source = 1;
+  string Target = 2;
+  string SourceHandle = 3;
+  string TargetHandle = 4;
+}
+
+message NodePort {
+  bool Source = 1;
+  int32 Position = 2;
+  string  PortName = 3;
+  string  Label = 4;
+  bool IsSettings = 5;
+  // schema generated from DTO
+  bytes SchemaDefault = 6;
+  // schema with adjustments using schema editor
+  bool Status = 7;
+  // default setup of the port/handle
+  //bytes Configuration = 8;
+  bytes ConfigurationDefault = 9;
+}

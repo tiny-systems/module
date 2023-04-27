@@ -1,0 +1,11 @@
+syntax = "proto3";
+package server;
+option go_package = "./module-go;module";
+
+message RunnerConfig {
+  string ServerID = 1;
+  bool DevMode = 2;
+  string WorkspaceID = 4;
+}
+
+
