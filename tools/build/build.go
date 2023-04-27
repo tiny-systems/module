@@ -68,6 +68,8 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 		return err
 	}
 
+	var copyCommands string
+
 	for _, r := range goMod.Replace {
 		// copy to context
 		if r.New.Version != "" {
@@ -79,18 +81,16 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 			return err
 		}
 		prepare = append(prepare, fmt.Sprintf("RUN go mod edit -replace %s=%s", r.Old.Path, fmt.Sprintf("./%s", replaceTarPath)))
+		copyCommands = "#COPY# = COPY __replaces /app/__replaces"
 	}
 
-	dockerfile =
-		strings.ReplaceAll(
-			strings.ReplaceAll(
-				strings.ReplaceAll(
-					strings.ReplaceAll(dockerfile,
-						"%VERSION_ID%", bOpts.VersionID),
-					"%MAIN_PATH%", pathToMain),
-				"%MOD_PREPARE%", strings.Join(prepare, "\n")),
-			"%PLATFORM%", platform,
-		)
+	dockerfile = replaceStringMap(dockerfile, map[string]string{
+		"#VERSION_ID#":  bOpts.VersionID,
+		"#MAIN_PATH#":   pathToMain,
+		"#MOD_PREPARE#": strings.Join(prepare, "\n"),
+		"#PLATFORM#":    platform,
+		"#COPY#":        copyCommands,
+	})
 
 	dockerFileName := fmt.Sprintf("Dockerfile.%s", u.String())
 
@@ -190,4 +190,10 @@ func getClient() (*client.Client, error) {
 		return nil, err
 	}
 	return client, err
+}
+func replaceStringMap(in string, replace map[string]string) string {
+	for k, v := range replace {
+		in = strings.ReplaceAll(in, k, v)
+	}
+	return in
 }
