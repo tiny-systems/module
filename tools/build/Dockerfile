@@ -1,4 +1,4 @@
-# Step 1: Modules caching
+# Step 1: Prepare modules
 FROM --platform=#PLATFORM# golang:1.20.3-alpine3.17 as builder
 COPY go.mod go.sum /app/
 #COPY#
