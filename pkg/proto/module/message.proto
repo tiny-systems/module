@@ -15,3 +15,4 @@ message MessageResponse {
   bool HasError = 3;
   string Error = 4;
 }
+

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -11,9 +12,8 @@ import (
 	m "github.com/tiny-systems/module/pkg/module"
 	"github.com/tiny-systems/module/pkg/service-discovery/client"
 	"github.com/tiny-systems/module/pkg/service-discovery/discovery"
+	"github.com/tiny-systems/module/platform"
 	"github.com/tiny-systems/module/registry"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"sync"
 )
 
@@ -42,7 +42,6 @@ var runCmd = &cobra.Command{
 			log.Fatal().Msg("no server key defined")
 		}
 
-		natsConnStr := viper.GetString("nats_conn_str")
 		if natsConnStr == "" {
 			natsConnStr = nats.DefaultURL
 		}
@@ -50,26 +49,15 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal().Err(err).Msg("unable to connect to NATS")
 		}
+		defer nc.Close()
 
 		discovery, err := client.NewClient(nc, discovery.DefaultLivecycle)
 		if err != nil {
 			log.Fatal().Err(err).Msg("unable to connect to NATS")
 		}
-		defer nc.Close()
 
-		var opts []grpc.DialOption
+		platformClient := platform.NewClient(nc)
 
-		if viper.GetBool("insecure") || grpcServerInsecureConnect {
-			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		}
-
-		conn, err := grpc.Dial(grpcConnStr, opts...)
-		if err != nil {
-			log.Fatal().Err(err).Msg("unable to connect to platform gRPC server")
-		}
-		defer conn.Close()
-
-		platformClient := tinyserver.NewPlatformServiceClient(conn)
 		manifestResp, err := platformClient.GetManifest(ctx, &tinyserver.GetManifestRequest{
 			ServerKey:       serverKey,
 			ModuleVersionID: versionID,
@@ -78,6 +66,8 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal().Err(err).Msg("manifest error")
 		}
+
+		spew.Dump(manifestResp)
 
 		errChan := make(chan error)
 		defer close(errChan)
