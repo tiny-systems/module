@@ -2,16 +2,15 @@ package cli
 
 import (
 	"fmt"
+	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	tinymodule "github.com/tiny-systems/module/pkg/api/module-go"
 	"github.com/tiny-systems/module/pkg/utils"
+	"github.com/tiny-systems/module/platform"
 	"github.com/tiny-systems/module/registry"
 	"github.com/tiny-systems/module/tools/build"
 	"github.com/tiny-systems/module/tools/readme"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"os"
 )
 
@@ -37,19 +36,16 @@ var buildCmd = &cobra.Command{
 			log.Fatal().Err(err).Msgf("unable to get README.md by path %s: %v", cwd, err)
 		}
 
-		var opts []grpc.DialOption
-
-		if viper.GetBool("insecure") || grpcServerInsecureConnect {
-			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if natsConnStr == "" {
+			natsConnStr = nats.DefaultURL
 		}
-
-		conn, err := grpc.Dial(grpcConnStr, opts...)
+		nc, err := nats.Connect(natsConnStr)
 		if err != nil {
-			log.Fatal().Err(err).Msg("unable to connect to platform gRPC server")
+			log.Fatal().Err(err).Msg("unable to connect to NATS")
 		}
-		defer conn.Close()
+		defer nc.Close()
 
-		platformClient := tinymodule.NewPlatformServiceClient(conn)
+		platformClient := platform.NewClient(nc)
 
 		componentsApi := make([]*tinymodule.Component, 0)
 		for _, c := range registry.Get() {
@@ -97,7 +93,6 @@ var buildCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal().Err(err).Str("image", image).Msg("unable to update server")
 		}
-
 		log.Info().Str("image", image).Msg("pushed")
 	},
 }

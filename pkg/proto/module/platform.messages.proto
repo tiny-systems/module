@@ -19,8 +19,8 @@ message GetManifestResponse {
   RunnerConfig RunnerConfig = 1;
   repeated ModuleVersion Modules = 2; // empty if dev mode is on
   repeated ConfigureInstanceRequest Instances = 3; // instances to bootstrap
+  string Error = 4;
 }
-
 
 message PublishModuleRequest {
   string Name = 1; // by publisher from module info
@@ -41,6 +41,7 @@ message BuildPushOptions {
 message PublishModuleResponse {
   ModuleVersion Module = 1;
   BuildPushOptions Options = 2;
+  string Error = 3;
 }
 
 message UpdateModuleVersionRequest {
@@ -50,5 +51,5 @@ message UpdateModuleVersionRequest {
 }
 
 message UpdateModuleVersionResponse {
-
+  string Error = 1;
 }

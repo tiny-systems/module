@@ -5,7 +5,7 @@ import "github.com/spf13/cobra"
 var (
 	serverKey                 string
 	grpcServerInsecureConnect bool
-	grpcConnStr               string
+	natsConnStr               string
 )
 
 func RegisterCommands(root *cobra.Command) {
@@ -28,8 +28,7 @@ func RegisterCommands(root *cobra.Command) {
 }
 
 func applyConnFlags(cmd *cobra.Command) {
-	cmd.Flags().BoolVarP(&grpcServerInsecureConnect, "insecure", "i", false, "gRPC connect with insecure credentials")
-	cmd.Flags().StringVarP(&grpcConnStr, "conn", "c", "localhost:50189", "gRPC server connection string")
+	cmd.Flags().StringVarP(&natsConnStr, "conn", "c", "nats://localhost:4222", "nats connection string")
 }
 
 func applyCommonBuildFlags(cmd *cobra.Command) {
