@@ -4,10 +4,20 @@ option go_package = "./module-go;module";
 import "google/protobuf/struct.proto";
 import "mapport.proto";
 import "port-config.proto";
+import "cmp.proto";
+import "module-version.proto";
+import "google/protobuf/timestamp.proto";
 
 enum GraphChangeOp {
   UPDATE = 0;
   DELETE = 1;
+}
+
+message PortState {
+  bytes Data = 1;
+  google.protobuf.Timestamp Date = 2;
+  string PortName = 3;
+  string NodeID = 4;
 }
 
 message Node {
@@ -17,15 +27,34 @@ message Node {
 
   string ComponentID = 5;
   Position Position = 6;
+
   repeated NodePort Ports = 7;
   // if we want to see its running
   bool Run = 8;
   // connection between other nodes
-
   repeated MapPort Destinations = 9;
   repeated PortConfig PortConfigs = 13;
   //string Name = 10;
   google.protobuf.Struct Data = 11;
+  //
+}
+
+message DiscoveryRequest {
+  string Reply = 1;
+  int32 Duration = 2;
+  int32 Period = 3;
+}
+
+message DiscoveryNode {
+  string ID = 1;
+  string ServerID = 3;
+  string WorkspaceID = 4;
+  string FlowID = 5;
+  ModuleVersion Module = 6;
+  Component Component = 10;
+  google.protobuf.Struct Graph = 11;
+  google.protobuf.Struct Stats = 12;
+  repeated PortState PortLastState = 14;
 }
 
 message Position {

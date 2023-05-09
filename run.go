@@ -7,13 +7,10 @@ import (
 	"github.com/tiny-systems/module/internal/instance"
 	"github.com/tiny-systems/module/pkg/api/module-go"
 	m "github.com/tiny-systems/module/pkg/module"
-	"github.com/tiny-systems/module/pkg/service-discovery/discovery"
 	"github.com/tiny-systems/module/pkg/utils"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -44,7 +41,6 @@ func (s *Server) newInstance(ctx context.Context, configMsg *instance.Msg) error
 	defer close(inputCh)
 
 	instanceID := getInstanceIDFromSubject(subj)
-
 	s.communicationChLock.Lock()
 
 	_, exists := s.communicationCh[instanceID]
@@ -195,18 +191,6 @@ func (s *Server) Run(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
 
 	wg.Go(func() error {
-		// make this server discoverable without any component/module running
-		serverDiscoveryNode := discovery.Node{
-			ServerID:    s.runnerConfig.ServerID,
-			WorkspaceID: s.runnerConfig.WorkspaceID,
-			ID:          s.runnerConfig.ServerID,
-		}
-		return s.discovery.KeepAlive(ctx, func() discovery.Node {
-			return serverDiscoveryNode
-		})
-	})
-
-	wg.Go(func() error {
 		<-ctx.Done()
 		// when context done - close all component subscriptions
 		for _, sub := range subscriptions {
@@ -232,21 +216,31 @@ loop:
 		case installMsg := <-s.installComponentsCh:
 			// install component
 			s.log.Debug().Str("id", installMsg.id).Msg("installing")
+			// registered in the instaleld components map
 			s.installedComponentsMap[installMsg.id] = installMsg
 
-			wg.Go(func() error {
-				var once sync.Once
-				var node discovery.Node
-				var install = *installMsg
+			node, err := installMsg.GetDiscoveryNode()
+			if err != nil {
+				return err
+			}
 
-				return s.discovery.KeepAlive(ctx, func() discovery.Node {
-					once.Do(func() {
-						// discovery of available type of node (for new node dialog)
-						node, _ = getInformerDiscoveryNode(&install)
-						node.WorkspaceID = s.runnerConfig.WorkspaceID
-						node.ServerID = s.runnerConfig.ServerID
-					})
-					return node
+			node.WorkspaceID = s.runnerConfig.WorkspaceID
+			node.ServerID = s.runnerConfig.ServerID
+
+			wg.Go(func() error {
+				// make it discoverable
+				return s.registry.Discover(ctx, utils.GetComponentLookupSubject(node.WorkspaceID), installMsg.id, func() []byte {
+					discoveryNode, err := installMsg.GetDiscoveryNode()
+					if err != nil {
+						s.errorCh <- fmt.Errorf("get component discover node error: %v", err)
+						return nil
+					}
+
+					data, err := proto.Marshal(discoveryNode)
+					if err != nil {
+						s.errorCh <- fmt.Errorf("discover error: %v", err)
+					}
+					return data
 				})
 			})
 
@@ -296,40 +290,6 @@ func (s *Server) unsubscribe(sub *nats.Subscription) {
 	if err := sub.Unsubscribe(); err != nil {
 		s.errorCh <- fmt.Errorf("unsubscribe error: %v", err)
 	}
-}
-
-func getInformerDiscoveryNode(install *installComponentMsg) (discovery.Node, error) {
-	var node = discovery.Node{
-		ID: m.InformerNodeID,
-	}
-	graphNode, err := instance.NewApiNode(install.component, nil)
-	if err != nil {
-		return node, err
-	}
-
-	cmpApi, err := utils.GetComponentApi(install.component)
-	if err != nil {
-		return discovery.Node{}, err
-	}
-	cmpApi.Name = install.id
-	//cmpApi.Version = install.module.Version
-
-	install.data["label"] = cmpApi.Description
-
-	nodeMap := utils.NodeToMap(graphNode, install.data)
-
-	node.Graph, err = structpb.NewStruct(nodeMap)
-	if err != nil {
-		return node, err
-	}
-
-	node.Component = cmpApi
-	modApi, err := utils.GetModuleApi(install.module)
-	if err != nil {
-		return node, err
-	}
-	node.Module = modApi
-	return node, nil
 }
 
 func getPort(s string) (string, bool) {

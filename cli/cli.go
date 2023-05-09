@@ -3,9 +3,8 @@ package cli
 import "github.com/spf13/cobra"
 
 var (
-	serverKey                 string
-	grpcServerInsecureConnect bool
-	natsConnStr               string
+	serverKey   string
+	natsConnStr string
 )
 
 func RegisterCommands(root *cobra.Command) {

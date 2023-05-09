@@ -27,8 +27,6 @@ func _floats(left, right *ajson.Node) (lnum, rnum float64, err error) {
 func init() {
 	ajson.AddOperation("-", 3, false, func(left *ajson.Node, right *ajson.Node) (result *ajson.Node, err error) {
 		if left.IsString() {
-
-			fmt.Println("STRING")
 			lNum, rNum, err := _strings(left, right)
 			if err != nil {
 				return nil, err
@@ -101,6 +99,8 @@ func init() {
 			}
 		case node.IsObject():
 			val = node.String()
+		case node.IsString():
+			val = node.MustString()
 		default:
 			val = "unknown"
 		}

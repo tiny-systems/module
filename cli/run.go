@@ -2,16 +2,14 @@ package cli
 
 import (
 	"context"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tiny-systems/module"
 	tinyserver "github.com/tiny-systems/module/pkg/api/module-go"
+	"github.com/tiny-systems/module/pkg/discovery"
 	m "github.com/tiny-systems/module/pkg/module"
-	"github.com/tiny-systems/module/pkg/service-discovery/client"
-	"github.com/tiny-systems/module/pkg/service-discovery/discovery"
 	"github.com/tiny-systems/module/platform"
 	"github.com/tiny-systems/module/registry"
 	"sync"
@@ -37,11 +35,9 @@ var runCmd = &cobra.Command{
 		if serverKey == "" {
 			serverKey = viper.GetString("server_key")
 		}
-
 		if serverKey == "" {
 			log.Fatal().Msg("no server key defined")
 		}
-
 		if natsConnStr == "" {
 			natsConnStr = nats.DefaultURL
 		}
@@ -51,14 +47,7 @@ var runCmd = &cobra.Command{
 		}
 		defer nc.Close()
 
-		discovery, err := client.NewClient(nc, discovery.DefaultLivecycle)
-		if err != nil {
-			log.Fatal().Err(err).Msg("unable to connect to NATS")
-		}
-
-		platformClient := platform.NewClient(nc)
-
-		manifestResp, err := platformClient.GetManifest(ctx, &tinyserver.GetManifestRequest{
+		manifestResp, err := platform.NewClient(nc).GetManifest(ctx, &tinyserver.GetManifestRequest{
 			ServerKey:       serverKey,
 			ModuleVersionID: versionID,
 			Version:         version,
@@ -66,8 +55,6 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal().Err(err).Msg("manifest error")
 		}
-
-		spew.Dump(manifestResp)
 
 		errChan := make(chan error)
 		defer close(errChan)
@@ -77,11 +64,12 @@ var runCmd = &cobra.Command{
 			}
 		}()
 
-		serv := module.New(manifestResp.RunnerConfig, errChan)
+		r := discovery.NewRegistry(nc)
 
+		serv := module.New(manifestResp.RunnerConfig, errChan)
 		serv.SetLogger(log.Logger)
-		serv.SetDiscovery(discovery)
 		serv.SetNats(nc)
+		serv.SetRegistry(r)
 
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
@@ -104,11 +92,9 @@ var runCmd = &cobra.Command{
 				log.Error().Err(err).Str("component", cmp.GetInfo().Name).Msg("unable to install component")
 			}
 		}
-
 		for _, instance := range manifestResp.Instances {
 			serv.RunInstance(instance)
 		}
-
 		wg.Wait()
 		log.Info().Msg("all done")
 	},
