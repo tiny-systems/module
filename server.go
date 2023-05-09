@@ -5,8 +5,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/tiny-systems/module/internal/instance"
 	"github.com/tiny-systems/module/pkg/api/module-go"
+	"github.com/tiny-systems/module/pkg/discovery"
 	m "github.com/tiny-systems/module/pkg/module"
-	"github.com/tiny-systems/module/pkg/service-discovery/client"
+	"github.com/tiny-systems/module/pkg/utils"
+	"google.golang.org/protobuf/types/known/structpb"
 	"sync"
 )
 
@@ -17,10 +19,45 @@ type installComponentMsg struct {
 	data      map[string]interface{}
 }
 
+// GetDiscoveryNode based on a installing compontent intention
+func (i *installComponentMsg) GetDiscoveryNode() (*module.DiscoveryNode, error) {
+	var node = &module.DiscoveryNode{
+		ID: i.id,
+	}
+	graphNode, err := instance.NewApiNode(i.component, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	cmpApi, err := utils.GetComponentApi(i.component)
+	if err != nil {
+		return nil, err
+	}
+	cmpApi.Name = i.id
+	//cmpApi.Version = install.module.Version
+	node.Component = cmpApi
+
+	i.data["label"] = cmpApi.Description
+	nodeMap := utils.NodeToMap(graphNode, i.data)
+
+	node.Graph, err = structpb.NewStruct(nodeMap)
+	if err != nil {
+		return nil, err
+	}
+
+	modApi, err := utils.GetModuleApi(i.module)
+	if err != nil {
+		return node, err
+	}
+	node.Module = modApi
+	return node, nil
+}
+
 type Server struct {
-	log          zerolog.Logger
-	nats         *nats.Conn
-	discovery    client.Discovery
+	log      zerolog.Logger
+	nats     *nats.Conn
+	registry *discovery.Registry
+	//discovery    client.Discovery
 	runnerConfig *module.RunnerConfig
 
 	installComponentsCh    chan *installComponentMsg // dev only purposes
@@ -52,10 +89,11 @@ func (s *Server) SetLogger(l zerolog.Logger) {
 	s.log = l
 }
 
-func (s *Server) SetDiscovery(d client.Discovery) {
-	s.discovery = d
-}
-
 func (s *Server) SetNats(n *nats.Conn) {
 	s.nats = n
+}
+
+// SetRegistry @todo replace with interface
+func (s *Server) SetRegistry(r *discovery.Registry) {
+	s.registry = r
 }

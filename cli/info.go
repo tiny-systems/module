@@ -11,10 +11,13 @@ var infoCmd = &cobra.Command{
 	Short: "get components info",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
+
 		components := registry.Get()
 		log.Info().Int("components", len(components)).Msg("registered")
 		for _, c := range registry.Get() {
 			log.Info().Msgf("%s - %s\n", c.GetInfo().Name, c.GetInfo().Description)
 		}
+		<-ctx.Done()
 	},
 }

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"github.com/tiny-systems/module/internal/instance"
 	"github.com/tiny-systems/module/pkg/api/module-go"
+	"github.com/tiny-systems/module/pkg/discovery"
 	m "github.com/tiny-systems/module/pkg/module"
-	"github.com/tiny-systems/module/pkg/service-discovery/discovery"
+	"github.com/tiny-systems/module/pkg/utils"
+	"google.golang.org/protobuf/proto"
 )
 
 func (s *Server) InstallComponent(ctx context.Context, info m.Info, c m.Component) error {
@@ -15,16 +17,15 @@ func (s *Server) InstallComponent(ctx context.Context, info m.Info, c m.Componen
 	if err != nil {
 		return err
 	}
-	data := map[string]interface{}{
-		"name":      "", // no actual Flow scope instance name
-		"run":       false,
-		"component": installID,
-	}
 	s.installComponentsCh <- &installComponentMsg{
 		id:        installID,
 		component: c.Instance(),
 		module:    info,
-		data:      data,
+		data: map[string]interface{}{
+			"name":      "", // no actual Flow scope instance name
+			"run":       false,
+			"component": installID,
+		},
 	}
 	return err
 }
@@ -39,25 +40,54 @@ func (s *Server) RunInstance(conf *module.ConfigureInstanceRequest) {
 func (s *Server) spinNewInstance(ctx context.Context, runConfigMsg *instance.Msg, cmp *installComponentMsg, inputCh chan *instance.Msg, outputCh chan *instance.Msg) error {
 	// make new instance discoverable
 	// deploy instance
-
 	// create component runner
 	runner := instance.NewRunner(cmp.component.Instance(), cmp.module).
 		SetLogger(s.log).
 		SetConfig(s.runnerConfig)
 
+	registry := discovery.NewRegistry(s.nats)
 	// deploy
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	waitCh, err := runner.Run(runCtx, runConfigMsg, inputCh, outputCh)
+	if err != nil {
+		return err
+	}
+
+	discoveryNode := runner.GetDiscoveryNode(false)
+
 	go func() {
-		if err := s.discovery.KeepAlive(runCtx, func() discovery.Node {
-			node := runner.Discovery(runCtx)
-			node.ServerID = s.runnerConfig.ServerID
-			node.WorkspaceID = s.runnerConfig.WorkspaceID
-			return node
+		// discover all nodes within flow including port states
+		if err := registry.Discover(runCtx, utils.GetNodesLookupSubject(discoveryNode.FlowID), discoveryNode.ID, func() []byte {
+			data, _ := proto.Marshal(runner.GetDiscoveryNode(true))
+			return data
 		}); err != nil {
-			s.errorCh <- fmt.Errorf("discovery keep alive error: %v", err)
+			s.errorCh <- fmt.Errorf("discover error: %v", err)
 		}
 	}()
-	return runner.Run(runCtx, runConfigMsg, inputCh, outputCh)
+
+	go func() {
+		if err := registry.Discover(runCtx, utils.GetFlowLookupSubject(discoveryNode.WorkspaceID), discoveryNode.FlowID, func() []byte {
+			data, _ := proto.Marshal(runner.GetDiscoveryNode(false))
+			return data
+		}); err != nil {
+			s.errorCh <- fmt.Errorf("discover error: %v", err)
+		}
+	}()
+
+	go func() {
+		if discoveryNode.Module == nil {
+			return
+		}
+		if err := registry.Discover(runCtx, utils.GetModuleLookupSubject(discoveryNode.WorkspaceID), discoveryNode.Module.ID, func() []byte {
+			data, _ := proto.Marshal(runner.GetDiscoveryNode(false))
+			return data
+		}); err != nil {
+			s.errorCh <- fmt.Errorf("discover error: %v", err)
+		}
+	}()
+
+	<-waitCh
+	return nil
 }

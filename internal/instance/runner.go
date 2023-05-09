@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 	"github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -13,17 +14,21 @@ import (
 	"github.com/tiny-systems/module/pkg/api/module-go"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	m "github.com/tiny-systems/module/pkg/module"
-	"github.com/tiny-systems/module/pkg/service-discovery/discovery"
 	"github.com/tiny-systems/module/pkg/utils"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"reflect"
 	"sort"
 	"sync/atomic"
 	"time"
 )
 
+const maxPortState = 1204 * 1024
+
 type Runner struct {
 	config *Configuration
+
+	nats *nats.Conn
 
 	cmpID string
 
@@ -38,8 +43,9 @@ type Runner struct {
 	startStopCtx        context.Context
 	startStopCancelFunc context.CancelFunc
 	//
-	errors cmap.ConcurrentMap[string, error]
-	stats  cmap.ConcurrentMap[string, *int64]
+	errors    cmap.ConcurrentMap[string, error]
+	stats     cmap.ConcurrentMap[string, *int64]
+	portState cmap.ConcurrentMap[string, []byte]
 }
 
 func NewRunner(component m.Component, module m.Info) *Runner {
@@ -48,6 +54,7 @@ func NewRunner(component m.Component, module m.Info) *Runner {
 		module:    module,
 		errors:    cmap.New[error](),
 		stats:     cmap.New[*int64](),
+		portState: cmap.New[[]byte](),
 		config:    new(Configuration),
 	}
 }
@@ -74,19 +81,16 @@ func (c *Runner) IsRunning() bool {
 	return false
 }
 
-// Run component makes its operational
-//   subject := utils.GetInstanceInputSubject(c.serverConfig.ID, c.config.FlowID, c.config.ID, "*")
-
-func (c *Runner) Run(ctx context.Context, runConfigMsg *Msg, inputCh chan *Msg, outputCh chan *Msg) error {
+func (c *Runner) Run(ctx context.Context, runConfigMsg *Msg, inputCh chan *Msg, outputCh chan *Msg) (chan struct{}, error) {
 	if err := c.updateConfiguration(runConfigMsg.Data); err != nil {
 		c.sendConfigureResponse(runConfigMsg, err)
-		return err
+		return nil, err
 	}
 
 	if err := c.applyConfigurationToComponent(ctx); err != nil {
 		c.log.Error().Err(err).Msg("apply component conf error")
 		c.sendConfigureResponse(runConfigMsg, err)
-		return err
+		return nil, err
 	}
 
 	// send success response
@@ -99,35 +103,41 @@ func (c *Runner) Run(ctx context.Context, runConfigMsg *Msg, inputCh chan *Msg, 
 		Module: c.getModuleMsg(),
 	})
 
+	wait := make(chan struct{})
+
 	if c.config.ShouldRun() {
 		// should run at start
 		// @todo check which context it should be
 		go c.run(ctx, runConfigMsg, outputCh)
 	}
 
-	for {
-		select {
-		case msg := <-inputCh:
-			c.log.Debug().Str("port", msg.Subject).Msg("incoming request")
+	go func() {
+		defer close(wait)
+		for {
+			select {
+			case msg := <-inputCh:
+				c.log.Debug().Str("port", msg.Subject).Msg("incoming request")
 
-			switch msg.Subject {
-			case m.RunPort:
-				c.run(ctx, msg, outputCh)
-			case m.ConfigurePort:
-				c.Configure(ctx, msg)
-			case m.DestroyPort:
-				c.destroy(ctx, msg)
-				return nil
-			case m.StopPort:
-				c.stop(ctx, msg)
-			default:
-				c.input(ctx, msg.Subject, msg, outputCh)
+				switch msg.Subject {
+				case m.RunPort:
+					c.run(ctx, msg, outputCh)
+				case m.ConfigurePort:
+					c.Configure(ctx, msg)
+				case m.DestroyPort:
+					c.destroy(ctx, msg)
+					return
+				case m.StopPort:
+					c.stop(ctx, msg)
+				default:
+					c.input(ctx, msg.Subject, msg, outputCh)
+				}
+				///
+			case <-ctx.Done():
+				return
 			}
-			///
-		case <-ctx.Done():
-			return nil
 		}
-	}
+	}()
+	return wait, nil
 }
 
 func (c *Runner) renderNode(configuration *Configuration) *module.Node {
@@ -342,7 +352,6 @@ func (c *Runner) stop(ctx context.Context, msg *Msg) {
 	if c.startStopCancelFunc != nil {
 		c.startStopCancelFunc()
 	}
-	_ = c.cleanRuntimePorts()
 	time.Sleep(time.Millisecond * 300)
 	// stopping is always a success (at-least so far)
 	c.sendConfigureResponse(msg, nil, &module.GraphChange{
@@ -351,23 +360,10 @@ func (c *Runner) stop(ctx context.Context, msg *Msg) {
 	})
 }
 
-func (c *Runner) cleanRuntimePorts() error {
-	//var err error
-	//if c.runtime == nil {
-	//	return nil
-	//}
-	//for _, p := range c.component.Node().Ports {
-	//	err = c.runtime.Purge(utils.GetPortFullName(c.config.ID, p.Name))
-	//}
-	//return err
-	return nil
-}
-
 func (c *Runner) destroy(ctx context.Context, msg *Msg) {
 	if c.startStopCancelFunc != nil {
 		c.startStopCancelFunc()
 	}
-	_ = c.cleanRuntimePorts()
 	// destroying is always a success (at-least so far)
 	c.sendConfigureResponse(msg, nil, &module.GraphChange{
 		Op:       module.GraphChangeOp_DELETE,
@@ -451,7 +447,10 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		return err
 	}
 
-	//_, err = c.runtime.Put(portFullName, dataBytes)
+	if len(dataBytes) < maxPortState {
+		c.portState.Set(portFullName, dataBytes)
+	}
+
 	destinations, ok := c.config.DestinationMap[portFullName]
 	if !ok {
 		return nil
@@ -546,10 +545,8 @@ func (c *Runner) updateConfiguration(data interface{}) error {
 	if !ok {
 		return fmt.Errorf("invalid configuration request")
 	}
-	sourcePortsMap := make(map[string]struct{})
 	for _, p := range c.component.Ports() {
 		if p.Source {
-			sourcePortsMap[p.Name] = struct{}{}
 			continue
 		}
 	}
@@ -641,8 +638,7 @@ func (c *Runner) sendConfigureResponse(msg *Msg, err error, changes ...*module.G
 	}
 }
 
-func (c *Runner) Discovery(ctx context.Context) discovery.Node {
-
+func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 	// read statistics
 	statsMap := map[string]interface{}{}
 	c.config.RLock()
@@ -685,7 +681,6 @@ func (c *Runner) Discovery(ctx context.Context) discovery.Node {
 			}
 		}
 	}
-
 	if _, ok := c.component.(m.Runnable); ok {
 		if statsMap[c.config.ID] == nil {
 			statsMap[c.config.ID] = map[string]interface{}{}
@@ -698,16 +693,33 @@ func (c *Runner) Discovery(ctx context.Context) discovery.Node {
 			}
 		}
 	}
-
 	stats, err := structpb.NewStruct(statsMap)
 	if err != nil {
 		c.log.Error().Err(err).Msg("stats struct error")
 	}
-	return discovery.Node{
-		ID:          c.config.ID,
-		FlowID:      &c.config.FlowID,
-		WorkspaceID: c.runnerConfig.WorkspaceID,
-		//Component:   c.renderComponent(),
-		Stats: stats,
+
+	var portLastState []*module.PortState
+	if full {
+		for _, k := range c.portState.Keys() {
+			v, _ := c.portState.Get(k)
+			portLastState = append(portLastState, &module.PortState{
+				Data:     v,
+				Date:     timestamppb.Now(),
+				PortName: k,
+				NodeID:   c.config.ID,
+			})
+		}
 	}
+
+	n := &module.DiscoveryNode{
+		ID:            c.config.ID,
+		FlowID:        c.config.FlowID,
+		Stats:         stats,
+		PortLastState: portLastState,
+	}
+	//
+	// non dev
+	n.ServerID = c.runnerConfig.ServerID
+	n.WorkspaceID = c.runnerConfig.WorkspaceID
+	return n
 }
