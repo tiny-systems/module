@@ -2,8 +2,6 @@ package discovery
 
 import (
 	"context"
-	"fmt"
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 	modulepb "github.com/tiny-systems/module/pkg/api/module-go"
@@ -31,43 +29,43 @@ func (s *Registry) SetLogger(l zerolog.Logger) *Registry {
 }
 
 func (s *Registry) LookupServers(ctx context.Context, workspaceID string) ([]*modulepb.DiscoveryNode, error) {
-	u, err := uuid.NewUUID()
+	callback, err := utils.GetCallbackSubject()
 	if err != nil {
 		return nil, err
 	}
-	return s.Lookup(fmt.Sprintf("discovery.callback.%s", u.String()), utils.GetServerLookupSubject(workspaceID), time.Second, time.Second*60)
+	return s.Lookup(callback, utils.GetServerLookupSubject(workspaceID), time.Millisecond*500, time.Second*60)
 }
 
 func (s *Registry) LookupModules(ctx context.Context, serverID string) ([]*modulepb.DiscoveryNode, error) {
-	u, err := uuid.NewUUID()
+	callback, err := utils.GetCallbackSubject()
 	if err != nil {
 		return nil, err
 	}
-	return s.Lookup(fmt.Sprintf("discovery.callback.%s", u.String()), utils.GetModuleLookupSubject(serverID), time.Second, time.Second*60)
+	return s.Lookup(callback, utils.GetModuleLookupSubject(serverID), time.Millisecond*500, time.Second*60)
 }
 
 func (s *Registry) LookupFlows(ctx context.Context, workspaceID string) ([]*modulepb.DiscoveryNode, error) {
-	u, err := uuid.NewUUID()
+	callback, err := utils.GetCallbackSubject()
 	if err != nil {
 		return nil, err
 	}
-	return s.Lookup(fmt.Sprintf("discovery.callback.%s", u.String()), utils.GetFlowLookupSubject(workspaceID), time.Second, time.Second*60)
+	return s.Lookup(callback, utils.GetFlowLookupSubject(workspaceID), time.Millisecond*500, time.Second*60)
 }
 
 func (s *Registry) LookupComponents(ctx context.Context, workspaceID string) ([]*modulepb.DiscoveryNode, error) {
-	u, err := uuid.NewUUID()
+	callback, err := utils.GetCallbackSubject()
 	if err != nil {
 		return nil, err
 	}
-	return s.Lookup(fmt.Sprintf("discovery.callback.%s", u.String()), utils.GetComponentLookupSubject(workspaceID), time.Second, time.Second*60)
+	return s.Lookup(callback, utils.GetComponentLookupSubject(workspaceID), time.Millisecond*500, time.Second*60)
 }
 
 func (s *Registry) LookupNodes(flowID string) ([]*modulepb.DiscoveryNode, error) {
-	u, err := uuid.NewUUID()
+	callback, err := utils.GetCallbackSubject()
 	if err != nil {
 		return nil, err
 	}
-	return s.Lookup(fmt.Sprintf("discovery.callback.%s", u.String()), utils.GetNodesLookupSubject(flowID), time.Second, time.Second*60)
+	return s.Lookup(callback, utils.GetNodesLookupSubject(flowID), time.Millisecond*500, time.Second*60)
 }
 
 func (s *Registry) Lookup(replySubject, subj string, minDur time.Duration, maxDur time.Duration) ([]*modulepb.DiscoveryNode, error) {
@@ -90,9 +88,8 @@ func (s *Registry) Lookup(replySubject, subj string, minDur time.Duration, maxDu
 // Discover universal method listens for subj messages and responses back to the reply subject
 func (s *Registry) Discover(ctx context.Context, subj string, instanceID string, getData func() []byte) error {
 
-	fmt.Println("discover", subj)
 	sub, err := s.nc.QueueSubscribe(subj, instanceID, func(msg *nats.Msg) {
-		// @todo parse msg
+
 		// publish few messages
 		if err := s.nc.PublishMsg(&nats.Msg{
 			Subject: msg.Reply,
@@ -125,18 +122,26 @@ func (s *Registry) lookup(ctx context.Context, replySubject, subject string, min
 	}
 	ready := make(chan struct{}, 0)
 	//
-	var resultMap = make(map[string][]byte)
+	type resultMapItem struct {
+		data       []byte
+		lastUpdate time.Time
+	}
+
+	var resultMap = make(map[string]*resultMapItem)
 	f = func() [][]byte {
 		<-ready
 		var result = make([][]byte, len(resultMap))
 		var i int
 		for _, v := range resultMap {
-			result[i] = v
+			if v.lastUpdate.Before(time.Now().Add(-minDur * 2)) {
+				// skip old records
+				continue
+			}
+			result[i] = v.data
 			i++
 		}
 		return result
 	}
-
 	s.cache.Store(subject, f)
 
 	go func() {
@@ -146,19 +151,25 @@ func (s *Registry) lookup(ctx context.Context, replySubject, subject string, min
 			if id == "" {
 				return
 			}
-			resultMap[id] = msg.Data
+			resultMap[id] = &resultMapItem{
+				data:       msg.Data,
+				lastUpdate: time.Now(),
+			}
 		})
 		if err != nil {
 			return
 		}
-		msg := &nats.Msg{
-			Reply:   replySubject,
-			Subject: subject,
+		var request = func() {
+			msg := &nats.Msg{
+				Reply:   replySubject,
+				Subject: subject,
+			}
+			if err := s.nc.PublishMsg(msg); err != nil {
+				return
+			}
 		}
 
-		if err := s.nc.PublishMsg(msg); err != nil {
-			return
-		}
+		request()
 		s.nc.Flush()
 
 		defer func() {
@@ -166,19 +177,24 @@ func (s *Registry) lookup(ctx context.Context, replySubject, subject string, min
 			sub.Unsubscribe()
 		}()
 
-		maxTicker := time.NewTimer(maxDur)
-		defer maxTicker.Stop()
+		maxTimer := time.NewTimer(maxDur)
+		defer maxTimer.Stop()
 
-		minTicker := time.NewTimer(minDur)
+		minTimer := time.NewTimer(minDur)
+		defer minTimer.Stop()
+
+		minTicker := time.NewTicker(minDur)
 		defer minTicker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-minTicker.C:
+			case <-minTimer.C:
 				close(ready)
-			case <-maxTicker.C:
+			case <-minTicker.C:
+				request()
+			case <-maxTimer.C:
 				return
 			}
 		}

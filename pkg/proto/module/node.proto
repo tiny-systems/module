@@ -39,12 +39,6 @@ message Node {
   //
 }
 
-message DiscoveryRequest {
-  string Reply = 1;
-  int32 Duration = 2;
-  int32 Period = 3;
-}
-
 message DiscoveryNode {
   string ID = 1;
   string ServerID = 3;

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 )
 
 const StreamName = "tinycloud"
@@ -28,4 +29,11 @@ func GetModuleLookupSubject(workspaceID string) string {
 }
 func GetServerLookupSubject(workspaceID string) string {
 	return fmt.Sprintf("%s.discovery.servers.workspace%s", StreamName, workspaceID)
+}
+func GetCallbackSubject() (string, error) {
+	u, err := uuid.NewUUID()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.discovery.callback.%s", StreamName, u.String()), nil
 }
