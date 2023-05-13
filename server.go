@@ -97,3 +97,10 @@ func (s *Server) SetNats(n *nats.Conn) {
 func (s *Server) SetRegistry(r *discovery.Registry) {
 	s.registry = r
 }
+
+func (s *Server) getDiscoveryNode() *module.DiscoveryNode {
+	return &module.DiscoveryNode{
+		ServerID:    s.runnerConfig.ServerID,
+		WorkspaceID: s.runnerConfig.WorkspaceID,
+	}
+}

@@ -54,9 +54,16 @@ func (s *Server) spinNewInstance(ctx context.Context, runConfigMsg *instance.Msg
 	if err != nil {
 		return err
 	}
-
 	discoveryNode := runner.GetDiscoveryNode(false)
-
+	go func() {
+		// discover all nodes with its stats
+		if err := registry.Discover(runCtx, utils.GetNodeStatsLookupSubject(discoveryNode.FlowID), discoveryNode.ID, func() []byte {
+			data, _ := proto.Marshal(runner.GetDiscoveryNode(false))
+			return data
+		}); err != nil {
+			s.errorCh <- fmt.Errorf("discover error: %v", err)
+		}
+	}()
 	go func() {
 		// discover all nodes within flow including port states
 		if err := registry.Discover(runCtx, utils.GetNodesLookupSubject(discoveryNode.FlowID), discoveryNode.ID, func() []byte {
@@ -66,8 +73,8 @@ func (s *Server) spinNewInstance(ctx context.Context, runConfigMsg *instance.Msg
 			s.errorCh <- fmt.Errorf("discover error: %v", err)
 		}
 	}()
-
 	go func() {
+		// make running flows discoverable
 		if err := registry.Discover(runCtx, utils.GetFlowLookupSubject(discoveryNode.WorkspaceID), discoveryNode.FlowID, func() []byte {
 			data, _ := proto.Marshal(runner.GetDiscoveryNode(false))
 			return data
@@ -75,19 +82,6 @@ func (s *Server) spinNewInstance(ctx context.Context, runConfigMsg *instance.Msg
 			s.errorCh <- fmt.Errorf("discover error: %v", err)
 		}
 	}()
-
-	go func() {
-		if discoveryNode.Module == nil {
-			return
-		}
-		if err := registry.Discover(runCtx, utils.GetModuleLookupSubject(discoveryNode.WorkspaceID), discoveryNode.Module.ID, func() []byte {
-			data, _ := proto.Marshal(runner.GetDiscoveryNode(false))
-			return data
-		}); err != nil {
-			s.errorCh <- fmt.Errorf("discover error: %v", err)
-		}
-	}()
-
 	<-waitCh
 	return nil
 }
