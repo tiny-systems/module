@@ -199,6 +199,16 @@ func (s *Server) Run(ctx context.Context) error {
 		return nil
 	})
 
+	wg.Go(func() error {
+		return s.registry.Discover(ctx, utils.GetServerLookupSubject(s.runnerConfig.WorkspaceID), s.runnerConfig.ServerID, func() []byte {
+			data, err := proto.Marshal(s.getDiscoveryNode())
+			if err != nil {
+				s.errorCh <- fmt.Errorf("discover error: %v", err)
+			}
+			return data
+		})
+	})
+
 	defer func() {
 		// close all control channels
 		close(s.newInstanceCh)

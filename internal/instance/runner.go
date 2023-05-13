@@ -677,7 +677,9 @@ func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 				// add special metric
 				if metric == MetricEdgeMessageReceived && val > prevVal {
 					statsMapSub[MetricEdgeActive.String()] = 1
-				}
+				} //else {
+				//statsMapSub[MetricEdgeActive.String()] = 0
+				//}
 			}
 		}
 	}
@@ -693,6 +695,7 @@ func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 			}
 		}
 	}
+
 	stats, err := structpb.NewStruct(statsMap)
 	if err != nil {
 		c.log.Error().Err(err).Msg("stats struct error")
