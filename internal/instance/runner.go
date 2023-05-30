@@ -82,6 +82,7 @@ func (c *Runner) IsRunning() bool {
 }
 
 func (c *Runner) Run(ctx context.Context, runConfigMsg *Msg, inputCh chan *Msg, outputCh chan *Msg) (chan struct{}, error) {
+	//
 	if err := c.updateConfiguration(runConfigMsg.Data); err != nil {
 		c.sendConfigureResponse(runConfigMsg, err)
 		return nil, err
@@ -94,6 +95,7 @@ func (c *Runner) Run(ctx context.Context, runConfigMsg *Msg, inputCh chan *Msg, 
 	}
 
 	// send success response
+	// override maybe with ports actual values
 	c.sendConfigureResponse(runConfigMsg, nil, &module.GraphChange{
 		Op:       module.GraphChangeOp_UPDATE,
 		Elements: c.renderElements(),
@@ -152,18 +154,17 @@ func (c *Runner) renderNode(configuration *Configuration) *module.Node {
 	// update port configs how node sees it
 	node.ComponentID = configuration.ComponentID
 
-	ports := node.Ports
 	// sort ports from high priority to less
-	sort.Slice(ports, func(i, j int) bool {
-		if ports[i].IsSettings != ports[j].IsSettings {
+	sort.Slice(node.Ports, func(i, j int) bool {
+		if node.Ports[i].IsSettings != node.Ports[j].IsSettings {
 			return true
 		}
-		return ports[i].Source == ports[j].Source
+		return node.Ports[i].Source == node.Ports[j].Source
 	})
 
 	var configurableDefinitions = make(map[string]*ajson.Node)
 
-	for _, np := range ports {
+	for _, np := range node.Ports {
 		// processing settings port first, then source, then target
 		for from, configs := range c.config.PortConfigMap {
 			// for own configs from is empty
@@ -174,16 +175,16 @@ func (c *Runner) renderNode(configuration *Configuration) *module.Node {
 				}
 
 				pc := &module.PortConfig{
-					From:          from,
-					PortName:      portName,
-					Configuration: config.Configuration,
-					Schema:        config.Schema,
+					From:                 from,
+					PortName:             portName,
+					Configuration:        config.Configuration,
+					Schema:               config.Schema,
+					ConfigurationDefault: np.ConfigurationDefault,
+					SchemaDefault:        np.SchemaDefault,
 				}
 
 				// get default port schema and value from runtime
 				// each request use to actualise knowledge of manager about defaults of a node
-				pc.ConfigurationDefault = np.ConfigurationDefault
-				pc.SchemaDefault = np.SchemaDefault
 
 				if len(pc.Schema) > 0 {
 					// our schema is original re-generated schema + updatable (configurable) definitions
@@ -505,6 +506,7 @@ func (c *Runner) applyConfigurationToComponent(ctx context.Context) error {
 		// new instance to avoid data confuse types @todo check this
 		settingsPort = m.GetPortByName(c.component.Ports(), m.SettingsPort)
 		settings     = c.config.GetPortConfig(m.SettingsPort, nil)
+		err          error
 	)
 
 	if settings == nil || settingsPort == nil {
@@ -513,7 +515,6 @@ func (c *Runner) applyConfigurationToComponent(ctx context.Context) error {
 
 	v := reflect.New(reflect.TypeOf(settingsPort.Message)).Elem()
 	// adapt first
-	var err error
 
 	// just get values, does not care about expression cause there should be none for
 	e := evaluator.NewEvaluator(evaluator.DefaultCallback)
