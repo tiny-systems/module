@@ -30,3 +30,9 @@ type StatefulComponent interface {
 	GetState() ([]byte, error)
 	SetState(state []byte) error
 }
+
+type ListenAddressGetter func() (internal string, public string, err error)
+
+type HTTPService interface {
+	HTTPService(getter ListenAddressGetter)
+}

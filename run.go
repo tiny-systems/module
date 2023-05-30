@@ -259,6 +259,7 @@ loop:
 
 			subscription, err := s.nats.QueueSubscribe(subj, installMsg.id, func(msg *nats.Msg) {
 				//decode from nats msg
+				// create new instance on a graph
 				var conf = &module.ConfigureInstanceRequest{}
 				if err := proto.Unmarshal(msg.Data, conf); err != nil {
 					s.errorCh <- err

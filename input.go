@@ -41,7 +41,15 @@ func (s *Server) spinNewInstance(ctx context.Context, runConfigMsg *instance.Msg
 	// make new instance discoverable
 	// deploy instance
 	// create component runner
-	runner := instance.NewRunner(cmp.component.Instance(), cmp.module).
+	i := cmp.component.Instance()
+
+	if httpService, ok := i.(m.HTTPService); ok {
+		httpService.HTTPService(func() (string, string, error) {
+			return "localhost:4444", "https://node12.workspace.tinysystems.dev", nil
+		})
+	}
+
+	runner := instance.NewRunner(i, cmp.module).
 		SetLogger(s.log).
 		SetConfig(s.runnerConfig)
 
