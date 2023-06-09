@@ -6,7 +6,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/tiny-systems/module/internal/instance"
 	"github.com/tiny-systems/module/pkg/api/module-go"
-	m "github.com/tiny-systems/module/pkg/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -64,47 +63,22 @@ func (s *Server) newInstance(ctx context.Context, configMsg *instance.Msg) error
 	outputCh := make(chan *instance.Msg)
 	defer close(outputCh)
 
-	subscription, err := s.nats.Subscribe(subj, func(msg *nats.Msg) {
-		// process incoming messages
-		var payload interface{}
-		port, isCustom := getPort(msg.Subject)
-
+	subInput, err := s.nats.QueueSubscribe(subj, conf.InstanceID, func(msg *nats.Msg) {
 		// because we use different DTO we need this switch
-		if isCustom {
-			var msgIn = &module.MessageRequest{}
-			if err := proto.Unmarshal(msg.Data, msgIn); err != nil {
-				s.errorCh <- err
-				return
-			}
-			payload = msgIn
-		} else {
-			var msgIn = &module.ConfigureInstanceRequest{}
-			if err := proto.Unmarshal(msg.Data, msgIn); err != nil {
-				s.errorCh <- err
-				return
-			}
-			payload = msgIn
+		var msgIn = &module.MessageRequest{}
+		if err := proto.Unmarshal(msg.Data, msgIn); err != nil {
+			s.errorCh <- err
+			return
 		}
 
 		// writing dto into instance's input
-		inputCh <- instance.NewMsgWithSubject(port, payload, func(data interface{}) error {
-			p, isCustomPort := getPort(port)
-			var bytes []byte
-			var err error
-
-			if isCustomPort {
-				resp, ok := data.(*module.MessageResponse)
-				if !ok {
-					return fmt.Errorf("invalid input's custom response, port: %s", p)
-				}
-				bytes, err = proto.Marshal(resp)
-			} else {
-				resp, ok := data.(*module.ConfigureInstanceResponse)
-				if !ok {
-					return fmt.Errorf("invalid input's response, port: %s", p)
-				}
-				bytes, err = proto.Marshal(resp)
+		inputCh <- instance.NewMsgWithSubject(getPort(msg.Subject), msgIn, func(data interface{}) error {
+			resp, ok := data.(*module.MessageResponse)
+			if !ok {
+				return fmt.Errorf("invalid input's custom response, port: %s")
 			}
+			bytes, err := proto.Marshal(resp)
+
 			if err != nil {
 				return err
 			}
@@ -113,7 +87,41 @@ func (s *Server) newInstance(ctx context.Context, configMsg *instance.Msg) error
 	})
 
 	if err != nil {
-		s.errorCh <- fmt.Errorf("failed to subscribe nats subject: %s", subj)
+		s.errorCh <- fmt.Errorf("failed to subscribe nats input subject: %s", subj)
+		// do not return error to avoid failing all server
+		return nil
+	}
+
+	subj = utils.GetInstanceControlSubject(s.runnerConfig.WorkspaceID, conf.FlowID, conf.InstanceID, "*")
+
+	subControl, err := s.nats.Subscribe(subj, func(msg *nats.Msg) {
+		// process incoming messages
+
+		port := getPort(msg.Subject)
+		// because we use different DTO we need this switch
+
+		var msgIn = &module.ConfigureInstanceRequest{}
+		if err := proto.Unmarshal(msg.Data, msgIn); err != nil {
+			s.errorCh <- err
+			return
+		}
+
+		// writing dto into instance's input
+		inputCh <- instance.NewMsgWithSubject(port, msgIn, func(data interface{}) error {
+			resp, ok := data.(*module.ConfigureInstanceResponse)
+			if !ok {
+				return fmt.Errorf("invalid input's response")
+			}
+			bytes, err := proto.Marshal(resp)
+			if err != nil {
+				return err
+			}
+			return msg.Respond(bytes)
+		})
+	})
+
+	if err != nil {
+		s.errorCh <- fmt.Errorf("failed to subscribe nats control subject: %s", subj)
 		// do not return error to avoid failing all server
 		return nil
 	}
@@ -148,7 +156,7 @@ func (s *Server) newInstance(ctx context.Context, configMsg *instance.Msg) error
 				s.communicationChLock.RUnlock()
 
 				if isLocal {
-					output.Subject, _ = getPort(output.Subject)
+					output.Subject = getPort(output.Subject)
 					localInputCh <- output
 				} else {
 					// not local, use nats
@@ -175,10 +183,16 @@ func (s *Server) newInstance(ctx context.Context, configMsg *instance.Msg) error
 		s.errorCh <- err
 	}
 
-	s.log.Info().Str("subj", subscription.Subject).Msg("unsubscribe")
-	if err = subscription.Unsubscribe(); err != nil {
-		s.log.Error().Err(err).Msg("unsubscribe error")
+	s.log.Info().Str("subj", subControl.Subject).Msg("unsubscribe control")
+	if err = subControl.Unsubscribe(); err != nil {
+		s.log.Error().Err(err).Msg("unsubscribe control error")
 	}
+
+	s.log.Info().Str("subj", subInput.Subject).Msg("unsubscribe input")
+	if err = subInput.Unsubscribe(); err != nil {
+		s.log.Error().Err(err).Msg("unsubscribe input error")
+	}
+
 	s.log.Info().Str("cmp", installedComponent.component.GetInfo().Name).
 		Str("serverId", s.runnerConfig.ServerID).
 		Str("workspace", s.runnerConfig.WorkspaceID).Msg("instance destroyed")
@@ -199,6 +213,7 @@ func (s *Server) Run(ctx context.Context) error {
 		return nil
 	})
 
+	// make server discoverable without even running a single node
 	wg.Go(func() error {
 		return s.registry.Discover(ctx, utils.GetServerLookupSubject(s.runnerConfig.WorkspaceID), s.runnerConfig.ServerID, func() []byte {
 			data, err := proto.Marshal(s.getDiscoveryNode())
@@ -226,7 +241,8 @@ loop:
 		case installMsg := <-s.installComponentsCh:
 			// install component
 			s.log.Debug().Str("id", installMsg.id).Msg("installing")
-			// registered in the instaleld components map
+
+			// registered in the installed components map
 			s.installedComponentsMap[installMsg.id] = installMsg
 
 			node, err := installMsg.GetDiscoveryNode()
@@ -238,14 +254,14 @@ loop:
 			node.ServerID = s.runnerConfig.ServerID
 
 			wg.Go(func() error {
-				// make it discoverable
+
+				// make component discoverable
 				return s.registry.Discover(ctx, utils.GetComponentLookupSubject(node.WorkspaceID), installMsg.id, func() []byte {
 					discoveryNode, err := installMsg.GetDiscoveryNode()
 					if err != nil {
 						s.errorCh <- fmt.Errorf("get component discover node error: %v", err)
 						return nil
 					}
-
 					data, err := proto.Marshal(discoveryNode)
 					if err != nil {
 						s.errorCh <- fmt.Errorf("discover error: %v", err)
@@ -257,7 +273,7 @@ loop:
 			subj := utils.CreateComponentSubject(s.runnerConfig.WorkspaceID, installMsg.id)
 			s.log.Info().Str("subject", subj).Msg("subscribe")
 
-			subscription, err := s.nats.QueueSubscribe(subj, installMsg.id, func(msg *nats.Msg) {
+			subscription, err := s.nats.Subscribe(subj, func(msg *nats.Msg) {
 				//decode from nats msg
 				// create new instance on a graph
 				var conf = &module.ConfigureInstanceRequest{}
@@ -285,7 +301,6 @@ loop:
 			break loop
 		}
 	}
-
 	_ = wg.Wait()
 	s.log.Info().Msg("server stopped")
 	return nil
@@ -303,14 +318,10 @@ func (s *Server) unsubscribe(sub *nats.Subscription) {
 	}
 }
 
-func getPort(s string) (string, bool) {
+func getPort(s string) string {
 	//
 	parts := strings.Split(s, ".")
-	port := parts[len(parts)-1]
-	if port == m.RunPort || port == m.ConfigurePort || port == m.DestroyPort || port == m.StopPort {
-		return port, false
-	}
-	return port, true
+	return parts[len(parts)-1]
 }
 
 func getInstanceIDFromSubject(s string) string {

@@ -112,7 +112,7 @@ func (s *Registry) Discover(ctx context.Context, subj string, instanceID string,
 	return nil
 }
 
-// lookup broadcasts message into subject and listens replysubject, first data availabile in minDur, subscription cached for maxDur
+// lookup broadcasts message into subject and listens replysubject, first data available in minDur, subscription cached for maxDur
 // after maxDur you need to lookup once more
 func (s *Registry) lookup(ctx context.Context, replySubject, subject string, dur time.Duration) (result map[string][]byte, err error) {
 

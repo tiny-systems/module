@@ -64,7 +64,8 @@ type Server struct {
 	newInstanceCh          chan *instance.Msg
 	installedComponentsMap map[string]*installComponentMsg
 
-	errorCh             chan error
+	errorCh chan error
+	// to communicate with nodes directly
 	communicationCh     map[string]chan *instance.Msg
 	communicationChLock sync.RWMutex
 }

@@ -5,11 +5,15 @@ import (
 	"github.com/google/uuid"
 )
 
-const StreamName = "tinycloud"
+const StreamName = "tiny"
 
 func GetInstanceInputSubject(workspaceID, flowID string, ID string, port string) string {
-	return fmt.Sprintf("%s.%s.flow.%s.instance.%s.%s", StreamName, workspaceID, flowID, ID, port)
+	return fmt.Sprintf("%s.%s.flow.%s.input.%s.%s", StreamName, workspaceID, flowID, ID, port)
 }
+func GetInstanceControlSubject(workspaceID, flowID string, ID string, port string) string {
+	return fmt.Sprintf("%s.%s.flow.%s.control.%s.%s", StreamName, workspaceID, flowID, ID, port)
+}
+
 func CreateComponentSubject(workspaceID, componentName string) string {
 	return fmt.Sprintf("%s.%s.component.%s", StreamName, workspaceID, componentName)
 }
