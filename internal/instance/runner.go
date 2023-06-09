@@ -13,6 +13,7 @@ import (
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/pkg/api/module-go"
 	"github.com/tiny-systems/module/pkg/evaluator"
+	"github.com/tiny-systems/module/pkg/metrics"
 	m "github.com/tiny-systems/module/pkg/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -258,7 +259,7 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	// find specific config for a port
 
 	var i int64
-	key := GetMetricKey(requestData.EdgeID, MetricEdgeMessageReceived)
+	key := metrics.GetMetricKey(requestData.EdgeID, metrics.MetricEdgeMessageReceived)
 	c.stats.SetIfAbsent(key, &i)
 	counter, _ := c.stats.Get(key)
 	atomic.AddInt64(counter, 1)
@@ -267,7 +268,7 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	defer c.config.RUnlock()
 
 	var y int64
-	key = GetMetricKey(c.config.ID, MetricNodeMessageReceived)
+	key = metrics.GetMetricKey(c.config.ID, metrics.MetricNodeMessageReceived)
 	c.stats.SetIfAbsent(key, &y)
 	counter, _ = c.stats.Get(key)
 	atomic.AddInt64(counter, 1)
@@ -315,7 +316,7 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	configurationMap, err := eval.Eval(portEdgeSettings.Configuration)
 	if err != nil {
 		c.addErr(requestData.EdgeID, err)
-		c.sendMessageResponse(msg, errors.Wrap(err, "evel port edge settings config"), nil)
+		c.sendMessageResponse(msg, errors.Wrap(err, "eval port edge settings config"), nil)
 		return
 	}
 	c.log.Info().Interface("result", configurationMap).Msg("result")
@@ -410,20 +411,19 @@ func (c *Runner) run(ctx context.Context, msg *Msg, outputCh chan *Msg) {
 		return
 	}
 
-	go func() {
-		if c.startStopCancelFunc != nil {
-			c.startStopCancelFunc()
-		}
-		c.startStopCtx, c.startStopCancelFunc = context.WithCancel(ctx)
-		defer func() {
-			c.startStopCancelFunc()
-		}()
-		c.sendConfigureResponse(msg, runnableComponent.Run(c.startStopCtx, func(port string, data interface{}) error {
-			return c.outputHandler(ctx, port, data, outputCh)
-		}))
-	}()
-	// give some time to fail
-	time.Sleep(time.Millisecond * 300)
+	if c.startStopCancelFunc != nil {
+		c.startStopCancelFunc()
+	}
+	c.startStopCtx, c.startStopCancelFunc = context.WithCancel(ctx)
+
+	err := runnableComponent.Run(c.startStopCtx, func(port string, data interface{}) error {
+		return c.outputHandler(ctx, port, data, outputCh)
+	})
+
+	if err != nil {
+		c.sendConfigureResponse(msg, err)
+		return
+	}
 
 	c.sendConfigureResponse(msg, nil, &module.GraphChange{
 		Op:       module.GraphChangeOp_UPDATE,
@@ -471,14 +471,14 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 
 		// track how many messages component send
 		var y int64
-		key := GetMetricKey(c.config.ID, MetricNodeMessageSent)
+		key := metrics.GetMetricKey(c.config.ID, metrics.MetricNodeMessageSent)
 		c.stats.SetIfAbsent(key, &y)
 		counter, _ := c.stats.Get(key)
 		atomic.AddInt64(counter, 1)
 
 		// track how many message sedge passed
 		var i int64
-		key = GetMetricKey(req.EdgeID, MetricEdgeMessageSent)
+		key = metrics.GetMetricKey(req.EdgeID, metrics.MetricEdgeMessageSent)
 		c.stats.SetIfAbsent(key, &i)
 		counter, _ = c.stats.Get(key)
 		atomic.AddInt64(counter, 1)
@@ -639,7 +639,7 @@ func (c *Runner) sendConfigureResponse(msg *Msg, err error, changes ...*module.G
 	}
 }
 
-func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
+func (c *Runner) GetDiscoveryNode(withState bool) *module.DiscoveryNode {
 	// read statistics
 	statsMap := map[string]interface{}{}
 	c.config.RLock()
@@ -651,7 +651,7 @@ func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 			continue
 		}
 		val := *counter
-		entityID, metric, isPrev, err := GetEntityAndMetric(k)
+		entityID, metric, isPrev, err := metrics.GetEntityAndMetric(k)
 		if err != nil {
 			continue
 		}
@@ -660,7 +660,7 @@ func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 		if !isPrev {
 			// current metric is not previous
 			// get prev
-			prevMetricKey := GetPrevMetricKey(entityID, metric)
+			prevMetricKey := metrics.GetPrevMetricKey(entityID, metric)
 			if prevCounter, ok := c.stats.Get(prevMetricKey); ok {
 				prevVal = *prevCounter
 			}
@@ -676,11 +676,9 @@ func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 			if !isPrev {
 				// current metric is not prev
 				// add special metric
-				if metric == MetricEdgeMessageReceived && val > prevVal {
-					statsMapSub[MetricEdgeActive.String()] = 1
-				} //else {
-				//statsMapSub[MetricEdgeActive.String()] = 0
-				//}
+				if metric == metrics.MetricEdgeMessageReceived && val > prevVal {
+					statsMapSub[metrics.MetricEdgeActive.String()] = 1
+				}
 			}
 		}
 	}
@@ -690,9 +688,9 @@ func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 		}
 		if statsMapSub, ok := statsMap[c.config.ID].(map[string]interface{}); ok {
 			if c.IsRunning() {
-				statsMapSub[MetricNodeRunning.String()] = 1
+				statsMapSub[metrics.MetricNodeRunning.String()] = 1
 			} else {
-				statsMapSub[MetricNodeRunning.String()] = 0
+				statsMapSub[metrics.MetricNodeRunning.String()] = 0
 			}
 		}
 	}
@@ -703,7 +701,7 @@ func (c *Runner) GetDiscoveryNode(full bool) *module.DiscoveryNode {
 	}
 
 	var portLastState []*module.PortState
-	if full {
+	if withState {
 		for _, k := range c.portState.Keys() {
 			v, _ := c.portState.Get(k)
 			portLastState = append(portLastState, &module.PortState{

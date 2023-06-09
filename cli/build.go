@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"github.com/nats-io/nats.go"
+	"github.com/rogpeppe/go-internal/semver"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	tinymodule "github.com/tiny-systems/module/pkg/api/module-go"
@@ -12,6 +13,7 @@ import (
 	"github.com/tiny-systems/module/tools/build"
 	"github.com/tiny-systems/module/tools/readme"
 	"os"
+	"strings"
 )
 
 var (
@@ -57,10 +59,14 @@ var buildCmd = &cobra.Command{
 			componentsApi = append(componentsApi, cmpApi)
 		}
 
+		if !semver.IsValid(version) {
+			log.Fatal().Err(err).Msg("version is invalid")
+		}
+
 		resp, err := platformClient.PublishModule(ctx, &tinymodule.PublishModuleRequest{
 			Name:         name,
 			Info:         info,
-			Version:      version,
+			Version:      strings.TrimPrefix(version, "v"),
 			DeveloperKey: devKey,
 			Components:   componentsApi,
 		})
