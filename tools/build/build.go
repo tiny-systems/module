@@ -22,7 +22,7 @@ import (
 const (
 	goModFile  = "go.mod"
 	replaceDir = "__replaces"
-	platform   = "linux/arm64"
+	platform   = "linux/amd64"
 )
 
 var (
