@@ -1,0 +1,8 @@
+syntax = "proto3";
+package module;
+option go_package = "./module-go;module";
+import "module.messages.proto";
+
+service ModuleService {
+  rpc Message(MessageRequest) returns (MessageResponse);
+}

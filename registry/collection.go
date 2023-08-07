@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"github.com/tiny-systems/module/pkg/module"
+	"github.com/tiny-systems/module/module"
 )
 
 var defaultCollection []module.Component

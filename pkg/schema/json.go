@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-type TagDefinition struct {
+type tagDefinition struct {
 	Path       string
 	Definition string
 }
@@ -96,7 +96,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 	)
 
 	// build json path for each definition how it's related to node's root
-	definitionPaths := make(map[string]TagDefinition)
+	definitionPaths := make(map[string]tagDefinition)
 	for defName, schema := range defs {
 		for k, v := range schema.Properties {
 			var typ jsonschema.SimpleType
@@ -117,7 +117,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 				// avoid dead loop
 				continue
 			}
-			t := TagDefinition{
+			t := tagDefinition{
 				Path:       path,
 				Definition: defName,
 			}
@@ -135,8 +135,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			d.WithExtraPropertiesItem("configurable", true)
 		}
 
-		pathParts := append(getPath(k, definitionPaths, []string{}), "$")
-		path := strings.Join(reverse(pathParts), ".")
+		path := strings.Join(reverse(append(getPath(k, definitionPaths, []string{}), "$")), ".")
 		//	add json path to each definition
 		updated := d.WithExtraPropertiesItem("path", path)
 		defs[k] = *updated
@@ -146,7 +145,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 	return sh, nil
 }
 
-func getPath(defName string, all map[string]TagDefinition, path []string) []string {
+func getPath(defName string, all map[string]tagDefinition, path []string) []string {
 	if p, ok := all[defName]; ok {
 		// check parent
 		return getPath(p.Definition, all, append(path, p.Path))

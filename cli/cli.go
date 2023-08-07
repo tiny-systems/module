@@ -1,36 +1,21 @@
 package cli
 
-import "github.com/spf13/cobra"
-
-var (
-	serverKey   string
-	natsConnStr string
+import (
+	"github.com/spf13/cobra"
+	"k8s.io/client-go/util/homedir"
+	"path/filepath"
 )
 
 func RegisterCommands(root *cobra.Command) {
-	runCmd.Flags().StringVarP(&serverKey, "key", "k", "", "Server key")
-	applyCommonBuildFlags(runCmd)
-
-	applyConnFlags(runCmd)
+	applyRunFlags(runCmd)
 	root.AddCommand(runCmd)
-	//
-	root.AddCommand(infoCmd)
-	//
-	buildCmd.Flags().StringVarP(&pathToMain, "path", "p", "./cmd", "path to main package regarding to the root")
-	applyCommonBuildFlags(buildCmd)
-	//
-	buildCmd.Flags().StringVarP(&devKey, "devkey", "d", "", "developer key")
-	buildCmd.MarkFlagRequired("devkey")
-
-	applyConnFlags(buildCmd)
-	root.AddCommand(buildCmd)
 }
 
-func applyConnFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVarP(&natsConnStr, "conn", "c", "nats://localhost:4222", "nats connection string")
-}
-
-func applyCommonBuildFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVarP(&version, "version", "v", "0.0.0", "version")
-	cmd.Flags().StringVarP(&name, "name", "n", "main", "module name")
+func applyRunFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&name, "name", "n", "main", "Name of the module. Container image repo usually.")
+	cmd.Flags().StringVarP(&kubeconfig, "kubeconfig", "k", filepath.Join(homedir.HomeDir(), ".kube", "config"), "(optional) absolute path to the kubeconfig file")
+	cmd.Flags().StringVarP(&metricsAddr, "metrics-bind-address", "m", ":8082", "The address the metric endpoint binds to.")
+	cmd.Flags().StringVarP(&probeAddr, "health-probe-bind-address", "t", ":8081", "The address the probe endpoint binds to.")
+	cmd.Flags().BoolVarP(&enableLeaderElection, "leader-elect", "l", false, "Enable leader election for controller manager. "+
+		"Enabling this will ensure there is only one active controller manager.")
 }
