@@ -1,0 +1,34 @@
+apiVersion: operator.tinysystems.io/v1alpha1
+kind: TinyNode
+metadata:
+  labels:
+    app.kubernetes.io/name: tinynode
+    app.kubernetes.io/instance: tinynode-sample
+    app.kubernetes.io/part-of: operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: operator
+    tinysystems.io/flow-id: test
+    tinysystems.io/project-id: maksym
+  name: tinynode-sample
+spec:
+  module: "tinysystems.com/image:tag"
+  component: "router"
+  id: "instance-uuid"
+  flowID: "flow-id-test"
+  edges:
+    - id: "edge-uuid"
+      fromPort: "out"
+      toNode: "to-node-instance-uuid"
+      toPort: "status"
+  ports:
+    - fromNode: "from-instance-uuid"
+      fromPort: "out"
+      portName: "in"
+      schema: "bWFrc3lt"
+      configuration: "bWFrc3lt"
+    - portName: "settings"
+      schema: "bWFrc3lt"
+      configuration: "bWFrc3lt"
+  webhook:
+    url: "https://example.com"
+    debounceTime: "10s"

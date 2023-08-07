@@ -1,0 +1,17 @@
+syntax = "proto3";
+package module;
+option go_package = "./module-go;module";
+
+message MessageRequest {
+  string ID = 1;
+  string From = 2;
+  map<string, string> Metadata = 4;
+  bytes Payload = 5;
+  string EdgeID = 6;
+}
+
+message MessageResponse {
+  bytes Data = 1;
+  bool HasError = 3;
+  string Error = 4;
+}

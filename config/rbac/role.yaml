@@ -1,0 +1,39 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinynodes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinynodes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinynodes/status
+  verbs:
+  - get
+  - patch
+  - update
