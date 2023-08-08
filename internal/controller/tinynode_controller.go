@@ -36,7 +36,7 @@ type TinyNodeReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
 	Recorder  record.EventRecorder
-	Scheduler scheduler.IScheduler
+	Scheduler scheduler.Scheduler
 }
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinynodes,verbs=get;list;watch;create;update;patch;delete
@@ -74,16 +74,17 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, err
 	}
 
-	status, err := r.Scheduler.Instance(req.NamespacedName.String(), instance.Spec)
+	status, err := r.Scheduler.Instance(*instance)
 	if err != nil {
 		// create event maybe?
 		//r.Recorder.Event(instance, "Error", "test", "Message")
 		l.Error(err, "scheduler instance error")
-
 		return reconcile.Result{}, err
 	}
 
+	// update status
 	instance.Status = status
+
 	err = r.Status().Update(context.Background(), instance)
 	if err != nil {
 		l.Error(err, "status update error")

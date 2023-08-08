@@ -12,12 +12,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type IScheduler interface {
+type Scheduler interface {
 	//Install makes component available for running nodes
 	Install(component module.Component) error
 	//Instance creates a new instance by using unique name, if instance is already running - updates it
 	//as soon as node started callback trigger goes
-	Instance(name string, node v1alpha1.TinyNodeSpec) (v1alpha1.TinyNodeStatus, error)
+	Instance(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error)
 	//Invoke sends data to the port
 	Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error)
 	//Destroy stops goroutine
@@ -26,7 +26,7 @@ type IScheduler interface {
 	Start(ctx context.Context) error
 }
 
-type Scheduler struct {
+type Schedule struct {
 	log               logr.Logger
 	componentsMap     cmap.ConcurrentMap[string, module.Component]
 	instancesMap      cmap.ConcurrentMap[string, *runner.Runner]
@@ -34,8 +34,8 @@ type Scheduler struct {
 	ctx               context.Context
 }
 
-func New(log logr.Logger) *Scheduler {
-	return &Scheduler{
+func New(log logr.Logger) *Schedule {
+	return &Schedule{
 		instanceRequestCh: make(chan *instanceRequest),
 		instancesMap:      cmap.New[*runner.Runner](),
 		componentsMap:     cmap.New[module.Component](),
@@ -43,7 +43,7 @@ func New(log logr.Logger) *Scheduler {
 	}
 }
 
-func (s *Scheduler) Install(component module.Component) error {
+func (s *Schedule) Install(component module.Component) error {
 	if component.GetInfo().Name == "" {
 		return fmt.Errorf("component name is invalid")
 	}
@@ -52,28 +52,28 @@ func (s *Scheduler) Install(component module.Component) error {
 }
 
 // Instance updates or creates instance
-func (s *Scheduler) Instance(name string, node v1alpha1.TinyNodeSpec) (v1alpha1.TinyNodeStatus, error) {
-	cmp, ok := s.componentsMap.Get(node.Component)
+func (s *Schedule) Instance(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error) {
+	cmp, ok := s.componentsMap.Get(node.Spec.Component)
 	if !ok {
-		return v1alpha1.TinyNodeStatus{}, fmt.Errorf("component %s is not presented in the module", node.Component)
+		return v1alpha1.TinyNodeStatus{}, fmt.Errorf("component %s is not presented in the module", node.Spec.Component)
 	}
 	statusCh := make(chan v1alpha1.TinyNodeStatus)
 	defer close(statusCh)
 	s.instanceRequestCh <- &instanceRequest{
-		Name:      name,
+		Name:      node.Name,
 		Component: cmp,
-		Spec:      node,
+		Spec:      node.Spec,
 		StatusCh:  statusCh,
 	}
 	return <-statusCh, nil
 }
 
 // Invoke sends data to the port of given instance name
-func (s *Scheduler) Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
+func (s *Schedule) Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
 	return v1alpha1.TinyNodeStatus{}, nil
 }
 
-func (s *Scheduler) Destroy(name string) error {
+func (s *Schedule) Destroy(name string) error {
 	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
 		//stop
 		s.instancesMap.Remove(name)
@@ -81,42 +81,54 @@ func (s *Scheduler) Destroy(name string) error {
 	return nil
 }
 
-func (s *Scheduler) Start(ctx context.Context) error {
+func (s *Schedule) Start(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
 
-	outputCh := make(chan *runner.Msg)
-	defer close(outputCh)
+	eventBus := make(chan *runner.Msg)
+	defer close(eventBus)
 
+	inputChMap := cmap.New[chan *runner.Msg]()
 	for {
 		select {
 
-		case output := <-outputCh:
-			s.log.Info("output!", "msg", output.Data, "subj", output.Subject)
-
-			node, port := utils.ParseFullPortName(output.Subject)
-			if instance, ok := s.instancesMap.Get(node); ok {
-				instance.Input(ctx, port, output, outputCh)
-			}
+		case msg := <-eventBus:
 			// check subject
+			node, _ := utils.ParseFullPortName(msg.To)
+			if instanceCh, ok := inputChMap.Get(node); ok {
+				// send to nodes' personal channel
+				instanceCh <- msg
+			} else {
+				s.log.Error(fmt.Errorf("unable to find node: %s", node), "unable to find node")
+			}
+			//
 			// send outside or into some instance
-
 			// decide if we make external request or send im
+
 		case instanceReq := <-s.instanceRequestCh:
+			s.log.Info("create/update instance", "name", instanceReq.Name)
+
 			s.instancesMap.Upsert(instanceReq.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
 				if !exist || instance == nil {
 					// new instance
-					inputCh := make(chan *runner.Msg)
-					instance = runner.NewRunner(instanceReq.Name, inputCh, instanceReq.Component.Instance())
-					instance.SetLogger(s.log)
+
+					instance = runner.NewRunner(instanceReq.Name, instanceReq.Component.Instance()).SetLogger(s.log)
+
 					wg.Go(func() error {
+						inputCh := make(chan *runner.Msg)
+						// then close
 						defer close(inputCh)
-						return instance.Process(ctx, outputCh)
+						// delete first
+						inputChMap.Set(instanceReq.Name, inputCh)
+						defer inputChMap.Remove(instanceReq.Name)
+						return instance.Process(ctx, inputCh, eventBus)
 					})
+
 				}
 				//configure || reconfigure
-				if err := instance.Configure(instanceReq.Spec); err != nil {
-					s.log.Error(err, "configure error")
-				} else if err := instance.Run(ctx, wg, outputCh); err != nil {
+				if err := instance.Configure(instanceReq.Spec, eventBus); err != nil {
+					s.log.Error(err, "configure error", "node", instanceReq.Name)
+				}
+				if err := instance.Run(ctx, wg, eventBus); err != nil {
 					s.log.Error(err, "run error")
 				}
 				//as instance for status
