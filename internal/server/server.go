@@ -13,10 +13,10 @@ type IServer interface {
 
 type Server struct {
 	log       logr.Logger
-	scheduler scheduler.IScheduler
+	scheduler scheduler.Scheduler
 }
 
-func New(log logr.Logger, scheduler scheduler.IScheduler) *Server {
+func New(log logr.Logger, scheduler scheduler.Scheduler) *Server {
 	return &Server{log: log, scheduler: scheduler}
 }
 

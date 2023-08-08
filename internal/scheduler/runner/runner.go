@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-logr/logr"
+	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/schema"
+	"github.com/tiny-systems/module/pkg/utils"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"reflect"
@@ -34,16 +36,14 @@ type Runner struct {
 
 	//stats cmap.ConcurrentMap[string, *int64]
 	needRestart bool
-	inputCh     chan *Msg
 }
 
-func NewRunner(name string, inputCh chan *Msg, component m.Component) *Runner {
+func NewRunner(name string, component m.Component) *Runner {
 	return &Runner{
 		name:      name,
 		component: component,
 		//stats:     cmap.New[*int64](),
 		specLock: new(sync.RWMutex),
-		inputCh:  inputCh,
 		runError: atomic.NewError(nil),
 	}
 }
@@ -79,10 +79,7 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 	defer c.specLock.RUnlock()
 
 	for _, np := range ports {
-
 		// processing settings port first, then source, then target
-		// @TODO SHOULD WORK FINE WITH ZERO PORTS SPECIFIED
-
 		var ps []byte //port schema settings
 
 		for _, sp := range c.spec.Ports {
@@ -105,12 +102,12 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 		if np.Message != nil {
 			// define default schema and config using reflection
 			schema, err := schema.CreateSchema(np.Message)
-			if err != nil {
-				c.log.Error(err, "create schema error")
-			} else {
 
+			if err == nil {
 				schemaData, _ := schema.MarshalJSON()
 				pStatus.Schema = schemaData
+			} else {
+				c.log.Error(err, "create schema error")
 			}
 
 			confData, _ := json.Marshal(np.Message)
@@ -142,123 +139,103 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 	return status
 }
 
-func (c *Runner) Process(ctx context.Context, outputCh chan *Msg) error {
-	c.log.Info("run process")
-	for {
-		select {
-		case msg := <-c.inputCh:
-			c.log.Info("incoming request", "port", msg.Subject)
-		case <-ctx.Done():
-			return nil
+func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan *Msg) error {
+	c.log.Info("process input", "port", port, "node", c.name)
+
+	var nodePort *m.NodePort
+	for _, p := range c.component.Ports() {
+		if p.Name == port {
+			nodePort = &p
+			break
 		}
 	}
-}
+	if nodePort == nil {
+		return fmt.Errorf("port %s is unknown", port)
+	}
 
-// @TODO implement INPUT
+	//var i int64
+	//key := metrics.GetMetricKey(requestData.EdgeID, metrics.MetricEdgeMessageReceived)
+	//c.stats.SetIfAbsent(key, &i)
+	//counter, _ := c.stats.Get(key)
+	//atomic.AddInt64(counter, 1)
+	//
 
-func (c *Runner) Input(ctx context.Context, port string, msg *Msg, outputCh chan *Msg) {
-	//		// non a system port, find settings and pass to the node
-	//		// execute config for the given port
-	//		// check if node has such port
-	//		// new instance to avoid data confuse types @todo check this
-	//		nodePort := m.GetPortByName(c.component.Ports(), port)
-	//		if nodePort == nil {
-	//			c.sendMessageResponse(msg, fmt.Errorf("port %s is unknown", port), nil)
-	//			return
-	//		}
-	//		// parse input data
-	//		requestData, ok := msg.Data.(*module.MessageRequest)
-	//		if !ok {
-	//			c.sendMessageResponse(msg, fmt.Errorf("invalid input request"), nil)
-	//			return
-	//		}
-	//		// find specific config for a port
-	//
-	//		//var i int64
-	//		//key := metrics.GetMetricKey(requestData.EdgeID, metrics.MetricEdgeMessageReceived)
-	//		//c.stats.SetIfAbsent(key, &i)
-	//		//counter, _ := c.stats.Get(key)
-	//		//atomic.AddInt64(counter, 1)
-	//		//
-	//		//c.config.RLock()
-	//		//defer c.config.RUnlock()
-	//		//
-	//		//var y int64
-	//		//key = metrics.GetMetricKey(c.config.ID, metrics.MetricNodeMessageReceived)
-	//		//c.stats.SetIfAbsent(key, &y)
-	//		//counter, _ = c.stats.Get(key)
-	//		//atomic.AddInt64(counter, 1)
-	//
-	//		portEdgeSettings := c.config.GetPortConfig(port, &requestData.From)
-	//		if portEdgeSettings == nil {
-	//			err := fmt.Errorf("port settings are missing for %s", requestData.From)
-	//			c.addErr(requestData.EdgeID, err)
-	//			c.sendMessageResponse(msg, err, nil)
-	//			return
-	//		}
-	//
-	//		if len(portEdgeSettings.Configuration) == 0 {
-	//			err := fmt.Errorf("port '%s' (from '%v') config is empty", port, portEdgeSettings.FromNode)
-	//			c.addErr(requestData.EdgeID, err)
-	//			c.sendMessageResponse(msg, err, nil)
-	//			return
-	//		}
+	//c.log.Info("specification locked")
+	//var y int64
+	//key = metrics.GetMetricKey(c.config.ID, metrics.MetricNodeMessageReceived)
+	//c.stats.SetIfAbsent(key, &y)
+	//counter, _ = c.stats.Get(key)
+	//atomic.AddInt64(counter, 1)
+	var portConfig *v1alpha1.TinyNodePortConfig
+
+	c.specLock.RLock()
+
+	for _, pc := range c.spec.Ports {
+		if pc.From == msg.From {
+			portConfig = &pc
+			break
+		}
+	}
+	c.specLock.RUnlock()
+
+	if portConfig == nil {
+		return fmt.Errorf("port configuration is missing for port: %s", port)
+	}
+
+	if len(portConfig.Configuration) == 0 {
+		return fmt.Errorf("port '%s' (from '%v') config is empty", port, portConfig.From)
+	}
+
 	//		// create config
-	//		portInputData := reflect.New(reflect.TypeOf(nodePort.Message)).Elem()
-	//
-	//		requestDataNode, err := ajson.Unmarshal(requestData.Payload)
-	//		if err != nil {
-	//			c.sendMessageResponse(msg, errors.Wrap(err, "ajson parse requestData payload error"), nil)
-	//			return
-	//		}
-	//
-	//		eval := evaluator.NewEvaluator(func(expression string) (interface{}, error) {
-	//			if expression == "" {
-	//				return nil, fmt.Errorf("expression is empty")
-	//			}
-	//			jsonPathResult, err := ajson.Eval(requestDataNode, expression)
-	//			if err != nil {
-	//				return nil, err
-	//			}
-	//			resultUnpack, err := jsonPathResult.Unpack()
-	//			if err != nil {
-	//				return nil, err
-	//			}
-	//			return resultUnpack, nil
-	//		})
-	//
-	//		//c.log.ComponentInfo().RawJSON("conf", portEdgeSettings.Configuration).Msg("eval")
-	//
-	//		configurationMap, err := eval.Eval(portEdgeSettings.Configuration)
-	//		if err != nil {
-	//			c.addErr(requestData.EdgeID, err)
-	//			c.sendMessageResponse(msg, errors.Wrap(err, "eval port edge settings config"), nil)
-	//			return
-	//		}
-	//
-	//		err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
-	//		if err != nil {
-	//			c.addErr(requestData.EdgeID, err)
-	//			c.sendMessageResponse(msg, errors.Wrap(err, "map decode from config map to port input type"), nil)
-	//			return
-	//		}
-	//		// to avoid nats timeout
-	//		c.sendMessageResponse(msg, nil, nil)
-	//
-	//		err = errorpanic.Wrap(func() error {
-	//			return c.component.Handle(ctx, func(port string, data interface{}) error {
-	//				if err = c.outputHandler(ctx, port, data, outputCh); err != nil {
-	//					c.addErr(port, err)
-	//				}
-	//				return nil
-	//			}, port, portInputData.Interface())
-	//		})
-	//		if err != nil {
-	//			c.log.Error(err, "invoke component error", "id", c.config.ID, "port", port)
-	//		}
-}
+	portInputData := reflect.New(reflect.TypeOf(nodePort.Message)).Elem()
 
-//
+	requestDataNode, err := ajson.Unmarshal(msg.Data)
+	if err != nil {
+		return errors.Wrap(err, "ajson parse requestData payload error")
+	}
+	//
+	eval := evaluator.NewEvaluator(func(expression string) (interface{}, error) {
+		if expression == "" {
+			return nil, fmt.Errorf("expression is empty")
+		}
+		jsonPathResult, err := ajson.Eval(requestDataNode, expression)
+		if err != nil {
+			return nil, err
+		}
+		resultUnpack, err := jsonPathResult.Unpack()
+		if err != nil {
+			return nil, err
+		}
+		return resultUnpack, nil
+	})
+
+	configurationMap, err := eval.Eval(portConfig.Configuration)
+	if err != nil {
+		return errors.Wrap(err, "eval port edge settings config")
+	}
+	// adapt
+	err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
+	if err != nil {
+		return errors.Wrap(err, "map decode from config map to port input type")
+	}
+
+	err = errorpanic.Wrap(func() error {
+		// panic safe
+		c.log.Info("make component call", "port", port, "node", c.name)
+
+		return c.component.Handle(ctx, func(port string, data interface{}) error {
+			c.log.Info("component answered", "port", port, "node", c.name)
+			if err = c.outputHandler(ctx, port, data, outputCh); err != nil {
+				c.log.Error(err, "handler error")
+			}
+			return nil
+		}, port, portInputData.Interface())
+	})
+	if err != nil {
+		c.log.Error(err, "invoke component error", "id", c.name, "port", port)
+	}
+	return nil
+}
 
 //
 
@@ -268,23 +245,28 @@ func (c *Runner) Stop() {
 	}
 }
 
-func (c *Runner) Configure(node v1alpha1.TinyNodeSpec) error {
+func (c *Runner) Configure(node v1alpha1.TinyNodeSpec, outputCh chan *Msg) error {
 	c.needRestart = false
-
-	c.specLock.Lock()
-	defer c.specLock.Unlock()
 
 	if reflect.DeepEqual(c.spec, node) {
 		// nothing to configure
 		return nil
 	}
+
+	c.specLock.Lock()
+	c.spec = node
+	c.specLock.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
-
-	if err := c.applyConfigurationToComponent(ctx, node, m.SettingsPort); err != nil {
+	// we do not send anything to settings port outside
+	// we rely on totally internal settings of the settings port
+	if err := c.input(ctx, m.SettingsPort, &Msg{}, outputCh); err != nil {
 		return err
 	}
-	c.spec = node
+	// if component ate it, update runner
+
+	c.log.Info("configuration applied")
 	// @todo
 	// require restart only if setting really changed
 	// what?
@@ -294,11 +276,31 @@ func (c *Runner) Configure(node v1alpha1.TinyNodeSpec) error {
 	return nil
 }
 
+func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *Msg) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case msg := <-inputCh:
+			_, port := utils.ParseFullPortName(msg.To)
+			c.input(ctx, port, msg, outputCh)
+		}
+	}
+}
+
 func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg) error {
+
+	c.log.Info("trying to run", "instance", c.name)
 	emitterComponent, ok := c.component.(m.Emitter)
 	if !ok {
 		// not runnable
-		return fmt.Errorf("component %s is not runnable", c.component.GetInfo().Name)
+		// don't waste our time
+		c.log.Info("not runnable")
+		return nil
+	}
+
+	if c.needRestart {
+		c.log.Info("cancelling as need restart")
 	}
 
 	if c.cancelFunc != nil {
@@ -313,8 +315,7 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 
 	if !c.spec.Run {
 		// no need to run and not need to stop
-		c.log.Info("no need to run")
-		// sleep here to give some time other goroutine update is running atomic
+		// sleep here to give some time other goroutine update `is running` atomic
 		time.Sleep(time.Second)
 		return nil
 	}
@@ -326,7 +327,6 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 		// spawn new goroutine
 		// reset run error
 		c.runError.Store(nil)
-
 		c.log.Info("trying to start emitter", "cmp", c.component.GetInfo().Name, "restart", c.needRestart)
 		//
 		c.runError.Store(errorpanic.Wrap(func() error {
@@ -352,16 +352,19 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	}
 
 	c.specLock.RLock()
-	defer c.specLock.RUnlock()
 
-	for _, e := range c.spec.Edges {
+	edges := c.spec.Edges
+	c.specLock.RUnlock()
+
+	for _, e := range edges {
 		if e.Port == port {
 			// edge configured for this port as source
 			// send to destination
 			outputCh <- &Msg{
-				Subject: e.To,
-				EdgeID:  e.ID,
-				Data:    dataBytes,
+				To:     e.To,
+				From:   utils.GetPortFullName(c.name, port),
+				EdgeID: e.ID,
+				Data:   dataBytes,
 			}
 		}
 	}
@@ -380,51 +383,4 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 		return err
 	}
 	return json.Unmarshal(b, output)
-}
-
-func (c *Runner) applyConfigurationToComponent(ctx context.Context, node v1alpha1.TinyNodeSpec, settingsPortName string) error {
-
-	var componentSettingsPort m.NodePort
-	for _, p := range c.component.Ports() {
-		if p.Name == settingsPortName {
-			componentSettingsPort = p
-			break
-		}
-	}
-
-	var nodePortSettings v1alpha1.TinyNodePortConfig
-	for _, p := range node.Ports {
-		// own port settings
-		if p.Port == settingsPortName && p.From == "" {
-			nodePortSettings = p
-		}
-	}
-
-	if len(nodePortSettings.Configuration) == 0 {
-		return nil
-	}
-
-	v := reflect.New(reflect.TypeOf(componentSettingsPort.Message)).Elem()
-	// adapt first
-	// just get values, does not care about expression cause there should be none for
-	e := evaluator.NewEvaluator(evaluator.DefaultCallback)
-
-	conf, err := e.Eval(nodePortSettings.Configuration)
-	if err != nil {
-		return err
-	}
-
-	err = c.jsonEncodeDecode(conf, v.Addr().Interface())
-	if err != nil {
-		return err
-	}
-
-	err = errorpanic.Wrap(func() error {
-		return c.component.Handle(ctx, func(port string, data interface{}) error {
-			// fake response handler
-			// we don't care how component respond to settings port
-			return nil
-		}, m.SettingsPort, v.Interface())
-	})
-	return err
 }

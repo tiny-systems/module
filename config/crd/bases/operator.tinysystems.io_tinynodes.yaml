@@ -45,10 +45,10 @@ spec:
                       description: Edge id
                       type: string
                     port:
-                      description: Current node's port name
+                      description: Current node's port name Source port
                       type: string
                     to:
-                      description: Other node ID
+                      description: Other node's full port name
                       type: string
                   required:
                   - id
