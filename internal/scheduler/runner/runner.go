@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
@@ -23,7 +24,8 @@ import (
 
 type Runner struct {
 	// unique instance name
-	name string
+	name      string
+	destroyCh chan struct{}
 	//
 	specLock *sync.RWMutex
 	spec     v1alpha1.TinyNodeSpec
@@ -41,6 +43,7 @@ type Runner struct {
 func NewRunner(name string, component m.Component) *Runner {
 	return &Runner{
 		name:      name,
+		destroyCh: make(chan struct{}),
 		component: component,
 		//stats:     cmap.New[*int64](),
 		specLock: new(sync.RWMutex),
@@ -178,6 +181,8 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	}
 	c.specLock.RUnlock()
 
+	spew.Dump(portConfig)
+
 	if portConfig == nil {
 		return fmt.Errorf("port configuration is missing for port: %s", port)
 	}
@@ -257,11 +262,14 @@ func (c *Runner) Configure(node v1alpha1.TinyNodeSpec, outputCh chan *Msg) error
 	c.spec = node
 	c.specLock.Unlock()
 
+	c.log.Info("needs restart")
+	c.needRestart = true
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
 	// we do not send anything to settings port outside
 	// we rely on totally internal settings of the settings port
-	if err := c.input(ctx, m.SettingsPort, &Msg{}, outputCh); err != nil {
+	if err := c.input(ctx, m.SettingsPort, &Msg{Data: []byte("{}")}, outputCh); err != nil {
 		return err
 	}
 	// if component ate it, update runner
@@ -271,8 +279,6 @@ func (c *Runner) Configure(node v1alpha1.TinyNodeSpec, outputCh chan *Msg) error
 	// require restart only if setting really changed
 	// what?
 
-	c.log.Info("needs restart")
-	c.needRestart = true
 	return nil
 }
 
@@ -281,7 +287,10 @@ func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *
 		select {
 		case <-ctx.Done():
 			return nil
-		case msg := <-inputCh:
+		case msg, ok := <-inputCh:
+			if !ok {
+				return nil
+			}
 			_, port := utils.ParseFullPortName(msg.To)
 			c.input(ctx, port, msg, outputCh)
 		}
@@ -290,7 +299,7 @@ func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *
 
 func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg) error {
 
-	c.log.Info("trying to run", "instance", c.name)
+	c.log.Info("trying to run", "instance", c.name, "needed", c.needRestart)
 	emitterComponent, ok := c.component.(m.Emitter)
 	if !ok {
 		// not runnable
@@ -304,6 +313,7 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 	}
 
 	if c.cancelFunc != nil {
+
 		// seems to be running
 		if c.needRestart {
 			c.cancelFunc()

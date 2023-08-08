@@ -59,6 +59,7 @@ func (s *Schedule) Instance(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, er
 	}
 	statusCh := make(chan v1alpha1.TinyNodeStatus)
 	defer close(statusCh)
+
 	s.instanceRequestCh <- &instanceRequest{
 		Name:      node.Name,
 		Component: cmp,
@@ -77,6 +78,7 @@ func (s *Schedule) Destroy(name string) error {
 	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
 		//stop
 		s.instancesMap.Remove(name)
+		instance.Stop()
 	}
 	return nil
 }
@@ -108,26 +110,27 @@ func (s *Schedule) Start(ctx context.Context) error {
 			s.log.Info("create/update instance", "name", instanceReq.Name)
 
 			s.instancesMap.Upsert(instanceReq.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
-				if !exist || instance == nil {
+				if !exist {
 					// new instance
-
 					instance = runner.NewRunner(instanceReq.Name, instanceReq.Component.Instance()).SetLogger(s.log)
 
 					wg.Go(func() error {
+
 						inputCh := make(chan *runner.Msg)
 						// then close
 						defer close(inputCh)
 						// delete first
 						inputChMap.Set(instanceReq.Name, inputCh)
+
 						defer inputChMap.Remove(instanceReq.Name)
 						return instance.Process(ctx, inputCh, eventBus)
 					})
-
 				}
 				//configure || reconfigure
 				if err := instance.Configure(instanceReq.Spec, eventBus); err != nil {
 					s.log.Error(err, "configure error", "node", instanceReq.Name)
 				}
+
 				if err := instance.Run(ctx, wg, eventBus); err != nil {
 					s.log.Error(err, "run error")
 				}
@@ -137,6 +140,7 @@ func (s *Schedule) Start(ctx context.Context) error {
 			})
 
 		case <-ctx.Done():
+			// what for others
 			return wg.Wait()
 		}
 	}
