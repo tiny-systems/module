@@ -19,11 +19,11 @@ const (
 )
 
 type NodePort struct {
-	Source   bool
-	Status   bool
-	Settings bool
-	Position Position
-	Name     string
-	Label    string
-	Message  interface{}
+	Source        bool
+	Status        bool
+	Settings      bool
+	Position      Position
+	Name          string
+	Label         string
+	Configuration interface{}
 }
