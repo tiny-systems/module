@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
@@ -14,7 +13,6 @@ import (
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"reflect"
 	"sort"
@@ -24,30 +22,37 @@ import (
 
 type Runner struct {
 	// unique instance name
-	name      string
-	destroyCh chan struct{}
+	name   string
+	ctx    context.Context
+	runCtx context.Context
+
 	//
 	specLock *sync.RWMutex
 	spec     v1alpha1.TinyNodeSpec
 	//
 	component m.Component
 	//
-	log        logr.Logger
-	runError   *atomic.Error
+	log logr.Logger
+	//runError   *atomic.Error
+	stopFunc   context.CancelCauseFunc
 	cancelFunc context.CancelFunc
 
 	//stats cmap.ConcurrentMap[string, *int64]
+
 	needRestart bool
 }
 
-func NewRunner(name string, component m.Component) *Runner {
+func NewRunner(ctx context.Context, name string, component m.Component) *Runner {
+	ctx, cancelFunc := context.WithCancel(ctx)
+
 	return &Runner{
-		name:      name,
-		destroyCh: make(chan struct{}),
-		component: component,
+		name:       name,
+		ctx:        ctx,
+		cancelFunc: cancelFunc,
+		component:  component,
 		//stats:     cmap.New[*int64](),
 		specLock: new(sync.RWMutex),
-		runError: atomic.NewError(nil),
+		//runError: atomic.NewError(nil),
 	}
 }
 
@@ -59,11 +64,11 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 	status := v1alpha1.TinyNodeStatus{
 		Status:  "OK",
-		Running: c.runError.Load() == nil && c.spec.Run,
+		Running: c.isRunning(),
 	}
-	if err := c.runError.Load(); err != nil {
-		status.Error = err.Error()
-	}
+	//if err := c.runError.Load(); err != nil {
+	//  status.Error = err.Error()
+	//}
 
 	ports := c.component.Ports()
 	status.Ports = make([]v1alpha1.TinyNodePortStatus, 0)
@@ -102,9 +107,9 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 			Source:   np.Source,
 		}
 
-		if np.Message != nil {
+		if np.Configuration != nil {
 			// define default schema and config using reflection
-			schema, err := schema.CreateSchema(np.Message)
+			schema, err := schema.CreateSchema(np.Configuration)
 
 			if err == nil {
 				schemaData, _ := schema.MarshalJSON()
@@ -113,7 +118,7 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 				c.log.Error(err, "create schema error")
 			}
 
-			confData, _ := json.Marshal(np.Message)
+			confData, _ := json.Marshal(np.Configuration)
 			pStatus.Configuration = confData
 		}
 
@@ -137,13 +142,13 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 	}
 
 	if status.Error != "" {
-		status.Status = "ERROR"
+		status.Status = fmt.Sprintf("ERROR: %s", status.Error)
 	}
 	return status
 }
 
 func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan *Msg) error {
-	c.log.Info("process input", "port", port, "node", c.name)
+	c.log.Info("process input", "port", port, "data", msg.Data, "node", c.name)
 
 	var nodePort *m.NodePort
 	for _, p := range c.component.Ports() {
@@ -181,8 +186,6 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	}
 	c.specLock.RUnlock()
 
-	spew.Dump(portConfig)
-
 	if portConfig == nil {
 		return fmt.Errorf("port configuration is missing for port: %s", port)
 	}
@@ -192,7 +195,7 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	}
 
 	//		// create config
-	portInputData := reflect.New(reflect.TypeOf(nodePort.Message)).Elem()
+	portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
 
 	requestDataNode, err := ajson.Unmarshal(msg.Data)
 	if err != nil {
@@ -226,10 +229,9 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 
 	err = errorpanic.Wrap(func() error {
 		// panic safe
-		c.log.Info("make component call", "port", port, "node", c.name)
-
+		c.log.Info("component call", "port", port, "node", c.name)
 		return c.component.Handle(ctx, func(port string, data interface{}) error {
-			c.log.Info("component answered", "port", port, "node", c.name)
+			c.log.Info("component callback handler", "port", port, "node", c.name)
 			if err = c.outputHandler(ctx, port, data, outputCh); err != nil {
 				c.log.Error(err, "handler error")
 			}
@@ -242,116 +244,101 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	return nil
 }
 
-//
-
-func (c *Runner) Stop() {
-	if c.cancelFunc != nil {
-		c.cancelFunc()
-	}
-}
-
+// Configure updates specs and decides do we need to restart which handles by Run method
 func (c *Runner) Configure(node v1alpha1.TinyNodeSpec, outputCh chan *Msg) error {
 	c.needRestart = false
 
-	if reflect.DeepEqual(c.spec, node) {
-		// nothing to configure
-		return nil
+	if (c.isRunning() && !node.Run || !c.isRunning() && node.Run) || !reflect.DeepEqual(c.spec.Ports, node.Ports) {
+		c.needRestart = true
 	}
 
+	// apply spec anyway
 	c.specLock.Lock()
 	c.spec = node
 	c.specLock.Unlock()
 
-	c.log.Info("needs restart")
-	c.needRestart = true
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	ctx, cancel := context.WithTimeout(c.ctx, time.Second*3)
 	defer cancel()
 	// we do not send anything to settings port outside
 	// we rely on totally internal settings of the settings port
+	// todo consider flow envs here
 	if err := c.input(ctx, m.SettingsPort, &Msg{Data: []byte("{}")}, outputCh); err != nil {
 		return err
 	}
-	// if component ate it, update runner
-
-	c.log.Info("configuration applied")
 	// @todo
 	// require restart only if setting really changed
 	// what?
-
 	return nil
 }
 
-func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *Msg) error {
+func (c *Runner) Process(inputCh chan *Msg, outputCh chan *Msg) error {
 	for {
 		select {
-		case <-ctx.Done():
+		case <-c.ctx.Done():
+
 			return nil
 		case msg, ok := <-inputCh:
 			if !ok {
+				c.log.Info("channel closed, exiting", c.name)
 				return nil
 			}
 			_, port := utils.ParseFullPortName(msg.To)
-			c.input(ctx, port, msg, outputCh)
+			c.input(c.ctx, port, msg, outputCh)
 		}
 	}
 }
 
-func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg) error {
+func (c *Runner) Destroy() error {
+	if c.cancelFunc == nil {
+		return nil
+	}
+	c.cancelFunc()
+	c.cancelFunc = nil
+	return nil
+}
 
-	c.log.Info("trying to run", "instance", c.name, "needed", c.needRestart)
+func (c *Runner) Run(wg *errgroup.Group, outputCh chan *Msg) error {
 	emitterComponent, ok := c.component.(m.Emitter)
 	if !ok {
 		// not runnable
 		// don't waste our time
-		c.log.Info("not runnable")
 		return nil
 	}
 
-	if c.needRestart {
-		c.log.Info("cancelling as need restart")
-	}
-
-	if c.cancelFunc != nil {
-
+	if c.stopFunc != nil {
 		// seems to be running
 		if c.needRestart {
-			c.cancelFunc()
-			c.cancelFunc = nil
+			c.stopFunc(nil)
 		} else {
 			return nil
 		}
 	}
 
+	time.Sleep(time.Second)
 	if !c.spec.Run {
 		// no need to run and not need to stop
 		// sleep here to give some time other goroutine update `is running` atomic
-		time.Sleep(time.Second)
 		return nil
 	}
 
-	var runCtx context.Context
-	runCtx, c.cancelFunc = context.WithCancel(ctx)
-
+	// looks like we about to run
+	// spawn new goroutine
+	c.runCtx, c.stopFunc = context.WithCancelCause(c.ctx)
 	wg.Go(func() error {
-		// spawn new goroutine
 		// reset run error
-		c.runError.Store(nil)
 		c.log.Info("trying to start emitter", "cmp", c.component.GetInfo().Name, "restart", c.needRestart)
 		//
-		c.runError.Store(errorpanic.Wrap(func() error {
-			// catch panic here
-			return emitterComponent.Emit(runCtx, func(port string, data interface{}) error {
-				return c.outputHandler(ctx, port, data, outputCh)
-			})
-		}))
+		err := emitterComponent.Emit(c.runCtx, func(port string, data interface{}) error {
+			return c.outputHandler(c.ctx, port, data, outputCh)
+		})
+		if c.stopFunc != nil {
+			c.stopFunc(err)
+		}
 		return nil
 	})
 	// give some time to fail
 	time.Sleep(time.Second * 2)
-	// return run error
-	c.log.Error(c.runError.Load(), "run error")
-	return c.runError.Load()
+	return c.runCtx.Err()
 }
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, outputCh chan *Msg) error {
@@ -393,4 +380,11 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 		return err
 	}
 	return json.Unmarshal(b, output)
+}
+
+func (c *Runner) isRunning() bool {
+	if c.runCtx == nil {
+		return false
+	}
+	return c.runCtx.Err() == nil
 }

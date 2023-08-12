@@ -30,13 +30,13 @@ type Schedule struct {
 	log               logr.Logger
 	componentsMap     cmap.ConcurrentMap[string, module.Component]
 	instancesMap      cmap.ConcurrentMap[string, *runner.Runner]
-	instanceRequestCh chan *instanceRequest
+	instanceRequestCh chan instanceRequest
 	ctx               context.Context
 }
 
 func New(log logr.Logger) *Schedule {
 	return &Schedule{
-		instanceRequestCh: make(chan *instanceRequest),
+		instanceRequestCh: make(chan instanceRequest),
 		instancesMap:      cmap.New[*runner.Runner](),
 		componentsMap:     cmap.New[module.Component](),
 		log:               log,
@@ -53,18 +53,12 @@ func (s *Schedule) Install(component module.Component) error {
 
 // Instance updates or creates instance
 func (s *Schedule) Instance(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error) {
-	cmp, ok := s.componentsMap.Get(node.Spec.Component)
-	if !ok {
-		return v1alpha1.TinyNodeStatus{}, fmt.Errorf("component %s is not presented in the module", node.Spec.Component)
-	}
 	statusCh := make(chan v1alpha1.TinyNodeStatus)
 	defer close(statusCh)
 
-	s.instanceRequestCh <- &instanceRequest{
-		Name:      node.Name,
-		Component: cmp,
-		Spec:      node.Spec,
-		StatusCh:  statusCh,
+	s.instanceRequestCh <- instanceRequest{
+		Node:     node,
+		StatusCh: statusCh,
 	}
 	return <-statusCh, nil
 }
@@ -76,9 +70,9 @@ func (s *Schedule) Invoke(name string, port string, data []byte) (v1alpha1.TinyN
 
 func (s *Schedule) Destroy(name string) error {
 	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
-		//stop
+		// remove from map
 		s.instancesMap.Remove(name)
-		instance.Stop()
+		return instance.Destroy()
 	}
 	return nil
 }
@@ -96,6 +90,7 @@ func (s *Schedule) Start(ctx context.Context) error {
 		case msg := <-eventBus:
 			// check subject
 			node, _ := utils.ParseFullPortName(msg.To)
+
 			if instanceCh, ok := inputChMap.Get(node); ok {
 				// send to nodes' personal channel
 				instanceCh <- msg
@@ -106,36 +101,45 @@ func (s *Schedule) Start(ctx context.Context) error {
 			// send outside or into some instance
 			// decide if we make external request or send im
 
-		case instanceReq := <-s.instanceRequestCh:
-			s.log.Info("create/update instance", "name", instanceReq.Name)
+		case req := <-s.instanceRequestCh:
 
-			s.instancesMap.Upsert(instanceReq.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
+			s.log.Info("create/update instance", "name", req.Node.Name)
+			cmp, ok := s.componentsMap.Get(req.Node.Spec.Component)
+			if !ok {
+				req.StatusCh <- v1alpha1.TinyNodeStatus{Error: fmt.Sprintf("component %s is not presented in the module", req.Node.Spec.Component)}
+			}
+
+			s.instancesMap.Upsert(req.Node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
 				if !exist {
+
 					// new instance
-					instance = runner.NewRunner(instanceReq.Name, instanceReq.Component.Instance()).SetLogger(s.log)
+					instance = runner.NewRunner(ctx, req.Node.Name, cmp.Instance()).SetLogger(s.log)
 
 					wg.Go(func() error {
-
+						// main lifetime goroutine
+						// exit unregisters instance
+						//
 						inputCh := make(chan *runner.Msg)
 						// then close
 						defer close(inputCh)
 						// delete first
-						inputChMap.Set(instanceReq.Name, inputCh)
-
-						defer inputChMap.Remove(instanceReq.Name)
-						return instance.Process(ctx, inputCh, eventBus)
+						inputChMap.Set(req.Node.Name, inputCh)
+						//
+						defer inputChMap.Remove(req.Node.Name)
+						// process input ports
+						return instance.Process(inputCh, eventBus)
 					})
 				}
 				//configure || reconfigure
-				if err := instance.Configure(instanceReq.Spec, eventBus); err != nil {
-					s.log.Error(err, "configure error", "node", instanceReq.Name)
+				if err := instance.Configure(req.Node.Spec, eventBus); err != nil {
+					s.log.Error(err, "configure error", "node", req.Node.Name)
 				}
 
-				if err := instance.Run(ctx, wg, eventBus); err != nil {
+				if err := instance.Run(wg, eventBus); err != nil {
 					s.log.Error(err, "run error")
 				}
 				//as instance for status
-				instanceReq.StatusCh <- instance.GetStatus()
+				req.StatusCh <- instance.GetStatus()
 				return instance
 			})
 

@@ -147,6 +147,9 @@ var runCmd = &cobra.Command{
 		go func() {
 			l.Info("Starting resource manager")
 			defer wg.Done()
+			defer func() {
+				l.Info("Resource manager stopped")
+			}()
 			if err := crManager.Start(ctx); err != nil {
 				l.Error(err, "Problem running resource manager")
 			}
@@ -156,8 +159,11 @@ var runCmd = &cobra.Command{
 		go func() {
 			l.Info("Starting kubebuilder manager")
 			defer wg.Done()
+			defer func() {
+				l.Info("Kubebuilder manager stopped")
+			}()
 			if err := mgr.Start(ctx); err != nil {
-				l.Error(err, "Problem running scheduler")
+				l.Error(err, "Problem running kubebuilder")
 			}
 		}()
 
@@ -165,6 +171,9 @@ var runCmd = &cobra.Command{
 		go func() {
 			l.Info("Starting gRPC server")
 			defer wg.Done()
+			defer func() {
+				l.Info("gRPC server stopped")
+			}()
 			if err := serv.Start(ctx); err != nil {
 				l.Error(err, "Problem starting gRPC server")
 			}
@@ -174,14 +183,17 @@ var runCmd = &cobra.Command{
 		go func() {
 			l.Info("Starting scheduler")
 			defer wg.Done()
+			defer func() {
+				l.Info("Scheduler stopped")
+			}()
 			if err := sch.Start(ctx); err != nil {
 				l.Error(err, "Unable to start scheduler")
 			}
 		}()
 
-		l.Info("waiting")
+		l.Info("Waiting...")
 		wg.Wait()
 
-		l.Info("all done")
+		l.Info("All done")
 	},
 }

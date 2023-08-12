@@ -64,7 +64,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if errors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
 			// For additional cleanup logic use finalizers.
-			if err = r.Scheduler.Destroy(req.NamespacedName.String()); err != nil {
+			if err = r.Scheduler.Destroy(req.Name); err != nil {
 				l.Error(err, "destroy error")
 				return reconcile.Result{}, err
 			}
@@ -77,7 +77,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	status, err := r.Scheduler.Instance(*instance)
 	if err != nil {
 		// create event maybe?
-		//r.Recorder.Event(instance, "Error", "test", "Message")
+		//r.Recorder.Event(instance, "Error", "test", "Configuration")
 		l.Error(err, "scheduler instance error")
 		return reconcile.Result{}, err
 	}
