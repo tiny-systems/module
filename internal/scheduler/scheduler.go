@@ -78,6 +78,10 @@ func (s *Schedule) Destroy(name string) error {
 }
 
 func (s *Schedule) Start(ctx context.Context) error {
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	wg, ctx := errgroup.WithContext(ctx)
 
 	eventBus := make(chan *runner.Msg)
@@ -111,10 +115,8 @@ func (s *Schedule) Start(ctx context.Context) error {
 
 			s.instancesMap.Upsert(req.Node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
 				if !exist {
-
 					// new instance
-					instance = runner.NewRunner(ctx, req.Node.Name, cmp.Instance()).SetLogger(s.log)
-
+					instance = runner.NewRunner(req.Node.Name, cmp.Instance()).SetLogger(s.log)
 					wg.Go(func() error {
 						// main lifetime goroutine
 						// exit unregisters instance
@@ -127,15 +129,16 @@ func (s *Schedule) Start(ctx context.Context) error {
 						//
 						defer inputChMap.Remove(req.Node.Name)
 						// process input ports
-						return instance.Process(inputCh, eventBus)
+						return instance.Process(ctx, inputCh, eventBus)
 					})
 				}
+				s.log.Info("configuring")
 				//configure || reconfigure
-				if err := instance.Configure(req.Node.Spec, eventBus); err != nil {
+				if err := instance.Configure(ctx, req.Node.Spec, eventBus); err != nil {
 					s.log.Error(err, "configure error", "node", req.Node.Name)
 				}
-
-				if err := instance.Run(wg, eventBus); err != nil {
+				s.log.Info("running")
+				if err := instance.Run(ctx, wg, eventBus); err != nil {
 					s.log.Error(err, "run error")
 				}
 				//as instance for status
