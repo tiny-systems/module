@@ -6,5 +6,4 @@ type Msg struct {
 	From   string
 	To     string
 	Data   []byte
-	//Err    error
 }

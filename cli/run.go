@@ -4,33 +4,39 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-logr/zerologr"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/internal/client"
 	"github.com/tiny-systems/module/internal/controller"
 	"github.com/tiny-systems/module/internal/manager"
 	"github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
+	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"net"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	"sync"
+	"strings"
 )
 
 // override by ldflags
 var (
 	namespace            = "tinysystems"
 	kubeconfig           string
-	version              = "0.1.1"
+	version              = "0.1.7"
 	name                 string
 	versionID            string // ldflags
 	metricsAddr          string
+	grpcAddr             string
 	enableLeaderElection bool
 	probeAddr            string
 )
@@ -43,6 +49,12 @@ var runCmd = &cobra.Command{
 
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
+
+		moduleInfo := m.Info{
+			Version:   version,
+			Name:      name,
+			VersionID: versionID,
+		}
 
 		scheme := runtime.NewScheme()
 
@@ -67,10 +79,8 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		sch := scheduler.New(l)
-
-		// create gRPC server
-		serv := server.New(l, sch)
+		// module name (sanitised) to its grpc server address
+		moduleAddrLookup := cmap.New[string]()
 
 		// create kubebuilder manager
 		mgr, err := ctrl.NewManager(config, ctrl.Options{
@@ -82,22 +92,77 @@ var runCmd = &cobra.Command{
 			}),
 			HealthProbeBindAddress: probeAddr,
 			LeaderElection:         enableLeaderElection,
-			LeaderElectionID:       "41928e89.tinysystems.io",
+			LeaderElectionID:       fmt.Sprintf("%s.tinysystems.io", name),
 		})
 		if err != nil {
 			l.Error(err, "unable to create manager")
 			return
 		}
 
-		controller := &controller.TinyNodeReconciler{
+		// run all modules
+		ctx, cancel := context.WithCancelCause(cmd.Context())
+		defer cancel(nil)
+
+		wg, ctx := errgroup.WithContext(ctx)
+
+		listenAddr := make(chan string)
+		defer close(listenAddr)
+
+		// create gRPC server
+
+		serv := server.New().SetLogger(l)
+		inputCh := make(chan *runner.Msg)
+		defer close(inputCh)
+
+		wg.Go(func() error {
+			l.Info("Starting gRPC server")
+
+			defer func() {
+				l.Info("gRPC server stopped")
+			}()
+			if err := serv.Start(ctx, inputCh, grpcAddr, func(addr net.Addr) {
+				// @todo check if inside of container
+				parts := strings.Split(addr.String(), ":")
+				if len(parts) > 0 {
+					listenAddr <- fmt.Sprintf("127.0.0.1:%s", parts[len(parts)-1])
+					return
+				}
+				listenAddr <- addr.String()
+			}); err != nil {
+				l.Error(err, "Problem starting gRPC server")
+				return err
+			}
+			return nil
+		})
+
+		// add listening address to the module info
+		moduleInfo.Addr = <-listenAddr
+
+		//
+		sch := scheduler.New().SetLogger(l)
+
+		nodeController := &controller.TinyNodeReconciler{
 			Client:    mgr.GetClient(),
 			Scheme:    mgr.GetScheme(),
 			Scheduler: sch,
 			Recorder:  mgr.GetEventRecorderFor("tiny-controller"),
+			Module:    moduleInfo,
 		}
 
-		if err = controller.SetupWithManager(mgr); err != nil {
-			l.Error(err, "unable to create controller")
+		if err = nodeController.SetupWithManager(mgr); err != nil {
+			l.Error(err, "unable to create node controller")
+			return
+		}
+
+		moduleController := &controller.TinyModuleReconciler{
+			Client:       mgr.GetClient(),
+			Scheme:       mgr.GetScheme(),
+			Module:       moduleInfo,
+			AddressTable: moduleAddrLookup,
+		}
+
+		if err = moduleController.SetupWithManager(mgr); err != nil {
+			l.Error(err, "unable to create module controller")
 			return
 		}
 
@@ -112,30 +177,30 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		l.Info("Starting...", "versionID", versionID)
-
-		// run all modules
-		ctx, cancel := context.WithCancel(cmd.Context())
-		defer cancel()
-
-		moduleInfo := m.Info{
-			Version:   version,
-			Name:      name,
-			VersionID: versionID,
-		}
+		l.Info("Installing components", "versionID", versionID)
 
 		crManager := manager.NewManager(mgr.GetClient(), namespace, moduleInfo)
 
-		if err = crManager.UninstallPrevious(ctx, moduleInfo); err != nil {
-			l.Error(err, "unable to cleanup previous resources")
+		// uninstall palette resources from previous versions
+
+		if err = crManager.Cleanup(ctx); err != nil {
+			l.Error(err, "unable to cleanup previous versions components")
 			return
 		}
 
-		wg := &sync.WaitGroup{}
+		l.Info("Registering", "module", moduleInfo.GetMajorName())
 
-		l.Info("Installing components")
+		if err = crManager.RegisterModule(ctx); err != nil {
+			l.Error(err, "unable to register a module")
+			return
+		}
+		///
+
 		for _, cmp := range registry.Get() {
-			if err = crManager.Register(ctx, cmp); err != nil {
+
+			l.Info("Registering", "component", cmp.GetInfo().Name)
+
+			if err = crManager.RegisterComponent(ctx, cmp); err != nil {
 				l.Error(err, "unable to register", "component", cmp.GetInfo().Name)
 			}
 			if err := sch.Install(cmp); err != nil {
@@ -143,53 +208,61 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		wg.Add(1)
-		go func() {
-			l.Info("Starting resource manager")
-			defer wg.Done()
-			defer func() {
-				l.Info("Resource manager stopped")
-			}()
+		wg.Go(func() error {
 			if err := crManager.Start(ctx); err != nil {
-				l.Error(err, "Problem running resource manager")
+				l.Error(err, "Problem starting manager lookup")
+				return err
 			}
-		}()
+			return nil
+		})
 
-		wg.Add(1)
-		go func() {
+		// kubebuilder start
+
+		wg.Go(func() error {
 			l.Info("Starting kubebuilder manager")
-			defer wg.Done()
 			defer func() {
 				l.Info("Kubebuilder manager stopped")
 			}()
 			if err := mgr.Start(ctx); err != nil {
 				l.Error(err, "Problem running kubebuilder")
+				return err
 			}
-		}()
+			return nil
+		})
 
-		wg.Add(1)
-		go func() {
-			l.Info("Starting gRPC server")
-			defer wg.Done()
+		pool := client.NewPool(moduleAddrLookup).SetLogger(l)
+		outputCh := make(chan *runner.Msg)
+		defer close(outputCh)
+
+		// grpc client start
+
+		wg.Go(func() error {
+			l.Info("Starting client pool")
 			defer func() {
-				l.Info("gRPC server stopped")
+				l.Info("Client pool stopped")
 			}()
-			if err := serv.Start(ctx); err != nil {
-				l.Error(err, "Problem starting gRPC server")
+			if err := pool.Start(ctx, outputCh); err != nil {
+				l.Error(err, "Client pool error")
+				return err
 			}
-		}()
+			return nil
+		})
 
-		wg.Add(1)
-		go func() {
+		/// Instance scheduler loop
+
+		wg.Go(func() error {
 			l.Info("Starting scheduler")
-			defer wg.Done()
 			defer func() {
 				l.Info("Scheduler stopped")
 			}()
-			if err := sch.Start(ctx); err != nil {
+			if err := sch.Start(ctx, inputCh, outputCh); err != nil {
 				l.Error(err, "Unable to start scheduler")
+				return err
 			}
-		}()
+			return nil
+		})
+
+		////
 
 		l.Info("Waiting...")
 		wg.Wait()
