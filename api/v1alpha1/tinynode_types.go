@@ -24,7 +24,6 @@ const (
 	FlowIDLabel                    = "tinysystems.io/flow-id"
 	ModuleNameLabel                = "tinysystems.io/module-name"
 	ModuleVersionLabel             = "tinysystems.io/module-version"
-	ComponentNameAnnotation        = "tinysystems.io/component-name"
 	ComponentDescriptionAnnotation = "tinysystems.io/component-description"
 	ComponentInfoAnnotation        = "tinysystems.io/component-info"
 	ComponentTagsAnnotation        = "tinysystems.io/component-tags"

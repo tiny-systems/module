@@ -20,6 +20,7 @@ import (
 	"context"
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/module"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -37,6 +38,7 @@ type TinyNodeReconciler struct {
 	Scheme    *runtime.Scheme
 	Recorder  record.EventRecorder
 	Scheduler scheduler.Scheduler
+	Module    module.Info
 }
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinynodes,verbs=get;list;watch;create;update;patch;delete
@@ -55,12 +57,23 @@ type TinyNodeReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
-	l.Info("reconcile", "name", req.NamespacedName)
+
+	m, _, err := module.ParseFullName(req.Name)
+	if err != nil {
+		l.Error(err, "node has invalid name", "name", req.Name)
+		return reconcile.Result{}, err
+	}
+
+	if m != r.Module.GetMajorNameSanitised() {
+		// not us
+		return reconcile.Result{}, nil
+	}
 
 	instance := &operatorv1alpha1.TinyNode{}
-	err := r.Get(context.Background(), req.NamespacedName, instance)
+
+	err = r.Get(context.Background(), req.NamespacedName, instance)
 	if err != nil {
-		l.Error(err, "get item error")
+		l.Error(err, "get tinynode error")
 		if errors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
 			// For additional cleanup logic use finalizers.
@@ -90,7 +103,6 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		l.Error(err, "status update error")
 		return reconcile.Result{}, err
 	}
-	l.Info("status updated")
 	return ctrl.Result{}, nil
 }
 

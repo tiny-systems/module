@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"github.com/tiny-systems/module/pkg/utils"
 )
 
 type ComponentInfo struct {
@@ -12,7 +13,7 @@ type ComponentInfo struct {
 }
 
 func (c ComponentInfo) GetResourceName() string {
-	return sanitiseResource(c.Name)
+	return utils.SanitizeResourceName(c.Name)
 }
 
 type Emitter interface {
