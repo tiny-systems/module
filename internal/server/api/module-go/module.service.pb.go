@@ -39,8 +39,8 @@ var file_module_service_proto_goTypes = []interface{}{
 	(*MessageResponse)(nil), // 1: module.MessageResponse
 }
 var file_module_service_proto_depIdxs = []int32{
-	0, // 0: module.ModuleService.Configuration:input_type -> module.MessageRequest
-	1, // 1: module.ModuleService.Configuration:output_type -> module.MessageResponse
+	0, // 0: module.ModuleService.Message:input_type -> module.MessageRequest
+	1, // 1: module.ModuleService.Message:output_type -> module.MessageResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

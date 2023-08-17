@@ -39,7 +39,16 @@ func (s *Server) Start(ctx context.Context, output chan *runner.Msg, listenAddr 
 
 	server := grpc.NewServer()
 	grpc_health_v1.RegisterHealthServer(server, health.NewChecker())
-	modulepb.RegisterModuleServiceServer(server, module.NewService())
+	//
+	modulepb.RegisterModuleServiceServer(server, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
+		output <- &runner.Msg{
+			EdgeID: req.EdgeID,
+			To:     req.To,
+			Data:   req.Payload,
+			From:   req.From,
+		}
+		return &modulepb.MessageResponse{}, nil
+	}))
 	reflection.Register(server)
 
 	lis, err := net.Listen("tcp", listenAddr)
@@ -49,19 +58,18 @@ func (s *Server) Start(ctx context.Context, output chan *runner.Msg, listenAddr 
 
 	defer lis.Close()
 	clb(lis.Addr())
-	<-ctx.Done()
 
 	wg.Go(func() error {
 		// run grpc server
 		err = server.Serve(lis)
 		if err != nil {
+			//
 			return err
 		}
 		return nil
 	})
 
 	<-ctx.Done()
-
 	log.Info().Msg("graceful shutdown")
 	server.Stop()
 

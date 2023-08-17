@@ -127,6 +127,7 @@ var runCmd = &cobra.Command{
 					listenAddr <- fmt.Sprintf("127.0.0.1:%s", parts[len(parts)-1])
 					return
 				}
+				l.Info("gRPC listen address", "addr", addr.String())
 				listenAddr <- addr.String()
 			}); err != nil {
 				l.Error(err, "Problem starting gRPC server")

@@ -5,9 +5,10 @@ option go_package = "./module-go;module";
 message MessageRequest {
   string ID = 1;
   string From = 2;
-  map<string, string> Metadata = 4;
-  bytes Payload = 5;
-  string EdgeID = 6;
+  string To = 3;
+  bytes Payload = 4;
+  string EdgeID = 5;
+  map<string, string> Metadata = 6;
 }
 
 message MessageResponse {
