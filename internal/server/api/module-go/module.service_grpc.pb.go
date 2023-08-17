@@ -31,7 +31,7 @@ func NewModuleServiceClient(cc grpc.ClientConnInterface) ModuleServiceClient {
 
 func (c *moduleServiceClient) Message(ctx context.Context, in *MessageRequest, opts ...grpc.CallOption) (*MessageResponse, error) {
 	out := new(MessageResponse)
-	err := c.cc.Invoke(ctx, "/module.ModuleService/Configuration", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/module.ModuleService/Message", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ type UnimplementedModuleServiceServer struct {
 }
 
 func (UnimplementedModuleServiceServer) Message(context.Context, *MessageRequest) (*MessageResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Configuration not implemented")
+	return nil, status.Errorf(codes.Unimplemented, "method Message not implemented")
 }
 func (UnimplementedModuleServiceServer) mustEmbedUnimplementedModuleServiceServer() {}
 
@@ -76,7 +76,7 @@ func _ModuleService_Message_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/module.ModuleService/Configuration",
+		FullMethod: "/module.ModuleService/Message",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ModuleServiceServer).Message(ctx, req.(*MessageRequest))
@@ -92,7 +92,7 @@ var ModuleService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*ModuleServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Configuration",
+			MethodName: "Message",
 			Handler:    _ModuleService_Message_Handler,
 		},
 	},
