@@ -18,73 +18,72 @@ package controller
 
 import (
 	"context"
-	clientpool "github.com/tiny-systems/module/internal/client"
-	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/internal/tracker"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
 
-// TinyModuleReconciler reconciles a TinyModule object
-type TinyModuleReconciler struct {
+// TinyTrackerReconciler reconciles a TinyTracker object
+type TinyTrackerReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	Module     module.Info
-	ClientPool clientpool.Pool
+	Scheme  *runtime.Scheme
+	Manager tracker.Manager
 }
 
-//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules/finalizers,verbs=update
+//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
-// the TinyModule object against the actual cluster state, and then
+// the TinyTracker object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
-func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
 	l := log.FromContext(ctx)
 
-	instance := &operatorv1alpha1.TinyModule{}
-	err := r.Get(context.Background(), req.NamespacedName, instance)
+	tracker := &operatorv1alpha1.TinyTracker{}
+
+	err := r.Get(context.Background(), req.NamespacedName, tracker)
 	if err != nil {
-		l.Error(err, "get tinymodule error")
 		if errors.IsNotFound(err) {
-			r.ClientPool.Deregister(req.Name)
+			// Object not found, return.  Created objects are automatically garbage collected.
+			// For additional cleanup logic use finalizers.
+			if err = r.Manager.Deregister(req.Name); err != nil {
+				l.Error(err, "destroy tracker error")
+				return reconcile.Result{}, err
+			}
 			return reconcile.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
 
-	if req.Name != r.Module.GetMajorNameSanitised() {
-		// not us, put into table
-		r.ClientPool.Register(req.Name, instance.Status.Addr)
-	} else {
-
-		instance.Status.Addr = r.Module.Addr
-		err = r.Status().Update(context.Background(), instance)
-		if err != nil {
-			l.Error(err, "status update error")
-			return reconcile.Result{}, err
-		}
+	err = r.Manager.Register(*tracker)
+	if err != nil {
+		// create event maybe?
+		//r.Recorder.Event(instance, "Error", "test", "Configuration")
+		l.Error(err, "register tracker error")
+		return reconcile.Result{}, err
 	}
+
 	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *TinyModuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *TinyTrackerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.TinyModule{}).
+		For(&operatorv1alpha1.TinyTracker{}).
 		Complete(r)
 }

@@ -62,9 +62,6 @@ type TinyNodeSpec struct {
 	//Run if emitter component should run
 	// +kubebuilder:validation:Optional
 	Run bool `json:"run"`
-
-	// +kubebuilder:validation:Optional
-	Webhook *TinyNodePortWebhook `json:"webhook"`
 }
 
 type TinyNodeEdge struct {
@@ -89,31 +86,6 @@ type TinyNodePortStatus struct {
 	Source        bool     `json:"source"`
 	Schema        []byte   `json:"schema"`
 	Configuration []byte   `json:"configuration"`
-}
-
-type TinyNodePortWebhook struct {
-	//Enabled
-	Enabled bool `json:"enabled"`
-
-	// URL of the POST request
-	URL string `json:"url"`
-
-	//DebounceTime Limit amount of requests
-	DebounceTime metav1.Duration `json:"debounceTime"`
-
-	//LastUpdateTime last time when webhook was set
-	LastUpdateTime metav1.Time `json:"lastUpdateTime"`
-
-	//ExpireIn time when this webhook should stop working
-	ExpireIn metav1.Duration `json:"expireIn"`
-
-	//SkipData do not send date in a webhook
-	// +kubebuilder:default=true
-	SendData bool `json:"sendData"`
-
-	//Do not send data bigger than below
-	// +kubebuilder:default=1048576
-	MaxDataSize int `json:"maxDataSize"`
 }
 
 type TinyNodePortConfig struct {
