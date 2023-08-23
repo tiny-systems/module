@@ -2,4 +2,5 @@
 resources:
 - operator_v1alpha1_tinynode.yaml
 - operator_v1alpha1_tinymodule.yaml
+- operator_v1alpha1_tinytracker.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

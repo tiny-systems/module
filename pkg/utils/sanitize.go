@@ -2,6 +2,7 @@ package utils
 
 import (
 	"regexp"
+	"strings"
 )
 
 func SanitizeResourceName(in string) string {
@@ -9,5 +10,9 @@ func SanitizeResourceName(in string) string {
 	if err != nil {
 		return ""
 	}
-	return reg.ReplaceAllString(in, "-")
+	name := reg.ReplaceAllString(strings.ToLower(in), "-")
+	if len(name) > 100 {
+		name = name[:99]
+	}
+	return name
 }

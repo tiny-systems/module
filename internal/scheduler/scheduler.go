@@ -16,7 +16,7 @@ type Scheduler interface {
 	//Install makes component available for running nodes
 	Install(component module.Component) error
 	//Instance creates a new instance by using unique name, if instance is already running - updates it
-	Instance(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error)
+	Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error)
 	//Invoke sends data to the port of the given instance
 	Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error)
 	//Destroy stops the instance
@@ -25,12 +25,15 @@ type Scheduler interface {
 	Start(ctx context.Context, inputCh chan *runner.Msg, outputCh chan *runner.Msg) error
 }
 
+type Callback func(msg *runner.Msg, err error)
+
 type Schedule struct {
 	log           logr.Logger
 	componentsMap cmap.ConcurrentMap[string, module.Component]
 	instancesMap  cmap.ConcurrentMap[string, *runner.Runner]
 	instanceCh    chan instanceRequest
 	ctx           context.Context
+	callbacks     []Callback
 }
 
 func New() *Schedule {
@@ -38,7 +41,12 @@ func New() *Schedule {
 		instanceCh:    make(chan instanceRequest),
 		instancesMap:  cmap.New[*runner.Runner](),
 		componentsMap: cmap.New[module.Component](),
+		callbacks:     make([]Callback, 0),
 	}
+}
+
+func (s *Schedule) AddCallback(c Callback) {
+	s.callbacks = append(s.callbacks, c)
 }
 
 func (s *Schedule) SetLogger(l logr.Logger) *Schedule {
@@ -54,8 +62,8 @@ func (s *Schedule) Install(component module.Component) error {
 	return nil
 }
 
-// Instance updates or creates instance
-func (s *Schedule) Instance(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error) {
+// Upsert updates or creates instance
+func (s *Schedule) Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error) {
 	statusCh := make(chan v1alpha1.TinyNodeStatus)
 	defer close(statusCh)
 
@@ -87,36 +95,55 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 	defer cancel()
 
 	wg, ctx := errgroup.WithContext(ctx)
-
 	inputChMap := cmap.New[chan *runner.Msg]()
+
 	for {
 		select {
-
 		case msg := <-inputCh:
+
 			// check subject
 			node, _ := utils.ParseFullPortName(msg.To)
 
+			var outside bool
+
 			if instanceCh, ok := inputChMap.Get(node); ok {
 				// send to nodes' personal channel
+				// register callbacks
 				instanceCh <- msg
 			} else {
 				outsideCh <- msg
+				outside = true
+			}
+
+			msg.Callback = func(err error) {
+				if err == nil && outside {
+					// not interested it successful submit outside being tracked
+					return
+				}
+				for _, callback := range s.callbacks {
+					callback(msg, err)
+				}
 			}
 			//
 			// send outside or into some instance
 			// decide if we make external request or send im
 		case req := <-s.instanceCh:
+
 			cmp, ok := s.componentsMap.Get(req.Node.Spec.Component)
 			if !ok {
-				req.StatusCh <- v1alpha1.TinyNodeStatus{Error: fmt.Sprintf("component %s is not presented in the module", req.Node.Spec.Component)}
+				req.StatusCh <- v1alpha1.TinyNodeStatus{
+					Error: fmt.Sprintf("component %s is not presented in the module", req.Node.Spec.Component),
+				}
 			}
 
 			s.instancesMap.Upsert(req.Node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
+				//
 				if !exist {
 					// new instance
 					instance = runner.NewRunner(req.Node.Name, cmp.Instance()).SetLogger(s.log)
+
 					wg.Go(func() error {
-						// main lifetime goroutine
+						// main instance lifetime goroutine
 						// exit unregisters instance
 						//
 						instanceCh := make(chan *runner.Msg)
@@ -131,7 +158,7 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 					})
 				}
 				//configure || reconfigure
-				if err := instance.Configure(ctx, req.Node.Spec, inputCh); err != nil {
+				if err := instance.Configure(ctx, req.Node, inputCh); err != nil {
 					s.log.Error(err, "configure error", "node", req.Node.Name)
 				}
 				if err := instance.Run(ctx, wg, inputCh); err != nil {

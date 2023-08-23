@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-logr/zerologr"
-	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -14,6 +13,7 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server"
+	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 	"golang.org/x/sync/errgroup"
@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"net"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"strings"
@@ -79,9 +80,6 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		// module name (sanitised) to its grpc server address
-		moduleAddrLookup := cmap.New[string]()
-
 		// create kubebuilder manager
 		mgr, err := ctrl.NewManager(config, ctrl.Options{
 			Scheme:             scheme,
@@ -90,12 +88,20 @@ var runCmd = &cobra.Command{
 			WebhookServer: webhook.NewServer(webhook.Options{
 				Port: 9443,
 			}),
+			Cache: cache.Options{
+				Namespaces: []string{namespace},
+			},
 			HealthProbeBindAddress: probeAddr,
 			LeaderElection:         enableLeaderElection,
 			LeaderElectionID:       fmt.Sprintf("%s.tinysystems.io", name),
 		})
 		if err != nil {
 			l.Error(err, "unable to create manager")
+			return
+		}
+
+		if err != nil {
+			l.Error(err, "unable to create coordinator client")
 			return
 		}
 
@@ -155,15 +161,29 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		pool := client.NewPool().SetLogger(l)
+
 		moduleController := &controller.TinyModuleReconciler{
-			Client:       mgr.GetClient(),
-			Scheme:       mgr.GetScheme(),
-			Module:       moduleInfo,
-			AddressTable: moduleAddrLookup,
+			Client:     mgr.GetClient(),
+			Scheme:     mgr.GetScheme(),
+			Module:     moduleInfo,
+			ClientPool: pool,
 		}
 
 		if err = moduleController.SetupWithManager(mgr); err != nil {
 			l.Error(err, "unable to create module controller")
+			return
+		}
+
+		trackManager := tracker.NewManager().SetLogger(l)
+
+		if err = (&controller.TinyTrackerReconciler{
+			Client:  mgr.GetClient(),
+			Scheme:  mgr.GetScheme(),
+			Manager: trackManager,
+			//
+		}).SetupWithManager(mgr); err != nil {
+			l.Error(err, "unable to create tiny tracker controller")
 			return
 		}
 
@@ -198,7 +218,6 @@ var runCmd = &cobra.Command{
 		///
 
 		for _, cmp := range registry.Get() {
-
 			l.Info("Registering", "component", cmp.GetInfo().Name)
 
 			if err = crManager.RegisterComponent(ctx, cmp); err != nil {
@@ -231,7 +250,6 @@ var runCmd = &cobra.Command{
 			return nil
 		})
 
-		pool := client.NewPool(moduleAddrLookup).SetLogger(l)
 		outputCh := make(chan *runner.Msg)
 		defer close(outputCh)
 
@@ -249,8 +267,13 @@ var runCmd = &cobra.Command{
 			return nil
 		})
 
-		/// Instance scheduler loop
+		// tracker
 
+		sch.AddCallback(func(msg *runner.Msg, err error) {
+			trackManager.Track(msg, err)
+		})
+
+		/// Instance scheduler
 		wg.Go(func() error {
 			l.Info("Starting scheduler")
 			defer func() {
@@ -262,8 +285,20 @@ var runCmd = &cobra.Command{
 			}
 			return nil
 		})
-
 		////
+		// run tracker
+
+		wg.Go(func() error {
+			l.Info("Starting tracker")
+			defer func() {
+				l.Info("Tracker stopped")
+			}()
+			if err := trackManager.Run(ctx); err != nil {
+				l.Error(err, "Unable to start tracker")
+				return err
+			}
+			return nil
+		})
 
 		l.Info("Waiting...")
 		wg.Wait()

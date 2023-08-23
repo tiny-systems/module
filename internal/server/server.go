@@ -15,25 +15,25 @@ import (
 	"net"
 )
 
-// IServer receive api requests from other modules and sends it to scheduler
-type IServer interface {
+// Server receive api requests from other modules and sends it to scheduler
+type Server interface {
 	Start(ctx context.Context) error
 }
 
-type Server struct {
+type server struct {
 	log logr.Logger
 }
 
-func New() *Server {
-	return &Server{}
+func New() *server {
+	return &server{}
 }
 
-func (s *Server) SetLogger(l logr.Logger) *Server {
+func (s *server) SetLogger(l logr.Logger) *server {
 	s.log = l
 	return s
 }
 
-func (s *Server) Start(ctx context.Context, output chan *runner.Msg, listenAddr string, clb func(net.Addr)) error {
+func (s *server) Start(ctx context.Context, output chan *runner.Msg, listenAddr string, clb func(net.Addr)) error {
 
 	wg, ctx := errgroup.WithContext(ctx)
 
@@ -41,11 +41,13 @@ func (s *Server) Start(ctx context.Context, output chan *runner.Msg, listenAddr 
 	grpc_health_v1.RegisterHealthServer(server, health.NewChecker())
 	//
 	modulepb.RegisterModuleServiceServer(server, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
+		// incoming request from gRPC
 		output <- &runner.Msg{
 			EdgeID: req.EdgeID,
 			To:     req.To,
 			Data:   req.Payload,
 			From:   req.From,
+			Meta:   req.GetMetadata(),
 		}
 		return &modulepb.MessageResponse{}, nil
 	}))

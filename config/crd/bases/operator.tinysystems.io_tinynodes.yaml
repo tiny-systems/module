@@ -83,41 +83,6 @@ spec:
               run:
                 description: Run if emitter component should run
                 type: boolean
-              webhook:
-                properties:
-                  debounceTime:
-                    description: DebounceTime Limit amount of requests
-                    type: string
-                  enabled:
-                    description: Enabled
-                    type: boolean
-                  expireIn:
-                    description: ExpireIn time when this webhook should stop working
-                    type: string
-                  lastUpdateTime:
-                    description: LastUpdateTime last time when webhook was set
-                    format: date-time
-                    type: string
-                  maxDataSize:
-                    default: 1048576
-                    description: Do not send data bigger than below
-                    type: integer
-                  sendData:
-                    default: true
-                    description: SkipData do not send date in a webhook
-                    type: boolean
-                  url:
-                    description: URL of the POST request
-                    type: string
-                required:
-                - debounceTime
-                - enabled
-                - expireIn
-                - lastUpdateTime
-                - maxDataSize
-                - sendData
-                - url
-                type: object
             required:
             - component
             - module

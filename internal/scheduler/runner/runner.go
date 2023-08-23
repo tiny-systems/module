@@ -26,8 +26,9 @@ type Runner struct {
 	name string
 
 	//
-	specLock *sync.RWMutex
-	spec     v1alpha1.TinyNodeSpec
+	nodeLock *sync.RWMutex
+
+	node v1alpha1.TinyNode
 	//
 	component m.Component
 	//
@@ -57,7 +58,7 @@ func NewRunner(name string, component m.Component) *Runner {
 		name:      name,
 		component: component,
 		//stats:     cmap.New[*int64](),
-		specLock:        new(sync.RWMutex),
+		nodeLock:        new(sync.RWMutex),
 		cancelFuncsLock: new(sync.Mutex),
 		emitErr:         atomic.NewError(nil),
 	}
@@ -90,14 +91,14 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 
 	var configurableDefinitions = make(map[string]*ajson.Node)
 
-	c.specLock.RLock()
-	defer c.specLock.RUnlock()
+	c.nodeLock.RLock()
+	defer c.nodeLock.RUnlock()
 
 	for _, np := range ports {
 		// processing settings port first, then source, then target
 		var ps []byte //port schema settings
 
-		for _, sp := range c.spec.Ports {
+		for _, sp := range c.node.Spec.Ports {
 			// for own configs, from is empty
 			if np.Name == sp.Port || sp.From == "" {
 				ps = sp.Schema
@@ -154,6 +155,7 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 	return status
 }
 
+// input processes input to the inherited component
 func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error {
 
 	_, port := utils.ParseFullPortName(msg.To)
@@ -167,7 +169,8 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 		}
 	}
 	if nodePort == nil {
-		return fmt.Errorf("port %s is unknown", port)
+		// ignore if we have no such port
+		return nil
 	}
 
 	//var i int64
@@ -183,17 +186,17 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 	//c.stats.SetIfAbsent(key, &y)
 	//counter, _ = c.stats.Get(key)
 	//atomic.AddInt64(counter, 1)
+
 	var portConfig *v1alpha1.TinyNodePortConfig
 
-	c.specLock.RLock()
-
-	for _, pc := range c.spec.Ports {
+	c.nodeLock.RLock()
+	for _, pc := range c.node.Spec.Ports {
 		if pc.From == msg.From {
 			portConfig = &pc
 			break
 		}
 	}
-	c.specLock.RUnlock()
+	c.nodeLock.RUnlock()
 
 	if portConfig == nil {
 		return fmt.Errorf("port configuration is missing for port: %s", port)
@@ -236,48 +239,43 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 		return errors.Wrap(err, "map decode from config map to port input type")
 	}
 
-	err = errorpanic.Wrap(func() error {
+	return errorpanic.Wrap(func() error {
 		// panic safe
 		//c.log.Info("component call", "port", port, "node", c.name)
-
 		return c.component.Handle(ctx, func(port string, data interface{}) error {
 			//c.log.Info("component callback handler", "port", port, "node", c.name)
 			if err = c.outputHandler(port, data, outputCh); err != nil {
-				c.log.Error(err, "handler error")
+				c.log.Error(err, "handler output error")
 			}
 			return nil
 		}, port, portInputData.Interface())
 	})
-	if err != nil {
-		c.log.Error(err, "invoke component error", "id", c.name, "port", port)
-	}
-	return nil
 }
 
 // Configure updates specs and decides do we need to restart which handles by Run method
-func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNodeSpec, outputCh chan *Msg) error {
+func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh chan *Msg) error {
 	c.needRestart = false
 
-	if (c.isEmitting() && !node.Run || !c.isEmitting() && node.Run) || !reflect.DeepEqual(c.spec.Ports, node.Ports) {
+	// apply spec anyway
+	c.nodeLock.Lock()
+
+	if (c.isEmitting() && !node.Spec.Run || !c.isEmitting() && node.Spec.Run) || !reflect.DeepEqual(c.node.Spec.Ports, node.Spec.Ports) {
 		c.needRestart = true
 	}
-
-	// apply spec anyway
-	c.specLock.Lock()
-	c.spec = node
-	c.specLock.Unlock()
+	//
+	c.node = node
+	c.nodeLock.Unlock()
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
 	// we do not send anything to settings port outside
 	// we rely on totally internal settings of the settings port
 	// todo consider flow envs here
-	// ignore errors cause port may be simply missing (we have nodes which don't require configurations)
-	_ = c.input(ctx, &Msg{Data: []byte("{}"), To: utils.GetPortFullName("", m.SettingsPort)}, outputCh)
-	// @todo
-	// require restart only if setting really changed
-	// what?
-	return nil
+
+	return c.input(ctx, &Msg{
+		To:   utils.GetPortFullName("", m.SettingsPort),
+		Data: []byte("{}"),
+	}, outputCh)
 }
 
 // Process main instance loop
@@ -299,11 +297,14 @@ func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *
 				c.log.Info("channel closed, exiting", c.name)
 				return nil
 			}
-			c.input(ctx, msg, outputCh)
+			if err := c.input(ctx, msg, outputCh); msg.Callback != nil {
+				msg.Callback(err)
+			}
 		}
 	}
 }
 
+// Destroy stops the instance inclusing emit
 func (c *Runner) Destroy() error {
 
 	c.cancelFuncsLock.Lock()
@@ -342,7 +343,7 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 		}
 	}
 
-	if !c.spec.Run {
+	if !c.node.Spec.Run {
 		// no need to run and not need to stop
 		// sleep here to give some time other goroutine update `emitErr` atomic
 		time.Sleep(time.Second)
@@ -381,10 +382,10 @@ func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg
 	if err != nil {
 		return err
 	}
-	c.specLock.RLock()
+	c.nodeLock.RLock()
 
-	edges := c.spec.Edges
-	c.specLock.RUnlock()
+	edges := c.node.Spec.Edges[:]
+	c.nodeLock.RUnlock()
 
 	for _, e := range edges {
 		if e.Port == port {
@@ -395,6 +396,9 @@ func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg
 				From:   utils.GetPortFullName(c.name, port),
 				EdgeID: e.ID,
 				Data:   dataBytes,
+				Meta: map[string]string{
+					MetaFlowID: c.node.Labels[v1alpha1.FlowIDLabel],
+				},
 			}
 		}
 	}

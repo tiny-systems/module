@@ -12,34 +12,49 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+type Pool interface {
+	Register(moduleName, addr string)
+	Deregister(moduleName string)
+}
+
 // DefaultStoreTTL for how long we keep grpc client in a pool, default 1h
 const DefaultStoreTTL = 60 * 60
 
-type Pool struct {
+type pool struct {
 	log          logr.Logger
 	addressTable cmap.ConcurrentMap[string, string]
 	clients      cmap.ConcurrentMap[string, module.ModuleServiceClient]
 }
 
-func NewPool(addressTable cmap.ConcurrentMap[string, string]) *Pool {
-	return &Pool{
-		addressTable: addressTable, clients: cmap.New[module.ModuleServiceClient](),
+func (p *pool) Register(moduleName, addr string) {
+	p.addressTable.Set(moduleName, addr)
+}
+
+func (p *pool) Deregister(moduleName string) {
+	p.addressTable.Remove(moduleName)
+}
+
+func NewPool() *pool {
+	return &pool{
+		addressTable: cmap.New[string](), clients: cmap.New[module.ModuleServiceClient](),
 	}
 }
 
-func (p *Pool) SetLogger(l logr.Logger) *Pool {
+func (p *pool) SetLogger(l logr.Logger) *pool {
 	p.log = l
 	return p
 }
 
-func (p *Pool) Start(ctx context.Context, inputCh chan *runner.Msg) error {
+func (p *pool) Start(ctx context.Context, inputCh chan *runner.Msg) error {
 
 	wg, ctx := errgroup.WithContext(ctx)
 
 	for {
 		select {
+
 		case <-ctx.Done():
 			return wg.Wait()
+
 		case msg := <-inputCh:
 			moduleName, _, err := module2.ParseFullName(msg.To)
 			if err != nil {
@@ -57,12 +72,18 @@ func (p *Pool) Start(ctx context.Context, inputCh chan *runner.Msg) error {
 				p.log.Error(err, "unable to get client", "addr", addr)
 			}
 
+			// sending request using gRPC
 			_, err = client.Message(ctx, &module.MessageRequest{
-				From:    msg.From,
-				Payload: msg.Data,
-				EdgeID:  msg.EdgeID,
-				To:      msg.To,
+				From:     msg.From,
+				Payload:  msg.Data,
+				EdgeID:   msg.EdgeID,
+				To:       msg.To,
+				Metadata: msg.Meta,
 			})
+
+			if msg.Callback != nil {
+				msg.Callback(err)
+			}
 			if err != nil {
 				p.log.Error(err, "error sending request", "to", addr)
 			}
@@ -70,7 +91,7 @@ func (p *Pool) Start(ctx context.Context, inputCh chan *runner.Msg) error {
 	}
 }
 
-func (p *Pool) getClient(ctx context.Context, wg *errgroup.Group, addr string) (module.ModuleServiceClient, error) {
+func (p *pool) getClient(ctx context.Context, wg *errgroup.Group, addr string) (module.ModuleServiceClient, error) {
 
 	client, ok := p.clients.Get(addr)
 	if ok {
