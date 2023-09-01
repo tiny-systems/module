@@ -2,21 +2,18 @@ package tracker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/go-logr/logr"
-	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/tiny-systems/module/api/v1alpha1"
-	"github.com/tiny-systems/module/internal/scheduler/runner"
+	"github.com/tiny-systems/module/pkg/client"
 	"github.com/tiny-systems/module/pkg/utils"
 	"time"
 )
 
-const (
-	cleanupDuration = time.Second
-)
-
 type Manager interface {
-	Track(msg *runner.Msg, err error)
+	Track(msg PortMsg)
 	Register(tracker v1alpha1.TinyTracker) error
 	Deregister(name string) error
 }
@@ -24,7 +21,7 @@ type Manager interface {
 type manager struct {
 	log      logr.Logger
 	trackers []v1alpha1.TinyTracker
-	cache    cmap.ConcurrentMap[string, time.Time]
+	cache    *ttlcache.Cache[string, struct{}]
 }
 
 func (t *manager) SetLogger(l logr.Logger) *manager {
@@ -50,55 +47,94 @@ func (t *manager) Deregister(name string) error {
 func NewManager() *manager {
 	return &manager{
 		trackers: make([]v1alpha1.TinyTracker, 0),
-		cache:    cmap.New[time.Time](),
+		cache: ttlcache.New[string, struct{}](
+			ttlcache.WithTTL[string, struct{}](time.Second),
+		),
 	}
 }
 
-func (t *manager) Track(msg *runner.Msg, err error) {
-	if msg == nil {
-		return
-	}
+func (t *manager) Track(msg PortMsg) {
+
 	for _, tt := range t.trackers {
-		if tt.Spec.Webhook == nil {
-			continue
+		if err := t.sendPortData(msg, tt); err != nil {
+			t.log.Error(err, "port webhook error")
 		}
-		if tt.Spec.FlowSubject == nil {
-			continue
+		if err := t.sendNodeStatistics(msg, tt); err != nil {
+			t.log.Error(err, "stats webhook error")
 		}
-		if tt.Spec.FlowSubject.FlowID != msg.Meta[runner.MetaFlowID] {
-			t.log.Info("skipping cause is not subscribed for flow", "tracker", tt.Name)
-			continue
-		}
-
-		cacheKey := buildTrackerPortCacheKey(tt, msg.To)
-		if t.cache.Has(cacheKey) {
-			t.log.Info("already sent", "tracker", tt.Name, "port", msg.To)
-			continue
-		}
-
-		t.log.Info("send request to", "url", tt.Spec.Webhook.URL, "port", msg.To, "data", msg.Data)
-		t.cache.Set(cacheKey, time.Now().Add(tt.Spec.Webhook.Interval.Duration))
 	}
+}
+
+func (t *manager) sendPortData(msg PortMsg, tracker v1alpha1.TinyTracker) error {
+
+	if tracker.Spec.PortDataWebhook == nil {
+		return nil
+	}
+
+	if tracker.Spec.PortDataWebhook.FlowID != msg.FlowID {
+		return nil
+	}
+	if len(msg.Data) > tracker.Spec.PortDataWebhook.MaxDataSize {
+		return nil
+	}
+
+	cacheKey := buildTrackerPortCacheKey(tracker, msg.PortName)
+	t.cache.DeleteExpired()
+	_, created := t.cache.GetOrSet(cacheKey, struct{}{}, ttlcache.WithTTL[string, struct{}](tracker.Spec.PortDataWebhook.Interval.Duration))
+
+	if created {
+		t.log.Info("skip port data")
+		return nil
+	}
+
+	headers := map[string]string{
+		client.HeaderFlowID:       msg.FlowID,
+		client.HeaderPortFullName: msg.PortName,
+		client.HeaderEdgeID:       msg.EdgeID,
+	}
+	if msg.Err != nil {
+		headers[client.HeaderError] = msg.Err.Error()
+	}
+	t.log.Info("send webhook port data", "headers", headers)
+	return client.SendWebhookData(tracker.Spec.PortDataWebhook.URL, headers, msg.Data)
+}
+
+func (t *manager) sendNodeStatistics(msg PortMsg, tracker v1alpha1.TinyTracker) error {
+
+	if tracker.Spec.NodeStatisticsWebhook == nil {
+		return nil
+	}
+
+	if tracker.Spec.NodeStatisticsWebhook.FlowID != msg.FlowID {
+		return nil
+	}
+
+	t.cache.DeleteExpired()
+	_, created := t.cache.GetOrSet(buildTrackerPortCacheKey(tracker, msg.NodeName), struct{}{}, ttlcache.WithTTL[string, struct{}](tracker.Spec.NodeStatisticsWebhook.Interval.Duration))
+
+	if created {
+		t.log.Info("skip stats")
+		return nil
+	}
+
+	data, err := json.Marshal(msg.NodeStats)
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		client.HeaderFlowID:       msg.FlowID,
+		client.HeaderPortFullName: msg.PortName,
+		client.HeaderEdgeID:       msg.EdgeID,
+		client.HeaderNodeName:     msg.NodeName,
+	}
+	t.log.Info("send webhook statistics data", "headers", headers)
+	return client.SendWebhookData(tracker.Spec.NodeStatisticsWebhook.URL, headers, data)
 }
 
 func (t *manager) Run(ctx context.Context) error {
-	ticker := time.NewTicker(cleanupDuration)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			now := time.Now()
-			for k, v := range t.cache.Items() {
-				if now.After(v) {
-					t.log.Info("cleanup", "key", k)
-					t.cache.Remove(k)
-				}
-			}
-		case <-ctx.Done():
-			return nil
-		}
-	}
+	<-ctx.Done()
+	return nil
 }
 
 func buildTrackerPortCacheKey(t v1alpha1.TinyTracker, to string) string {

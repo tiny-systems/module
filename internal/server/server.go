@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"net"
+	"sync"
 )
 
 // Server receive api requests from other modules and sends it to scheduler
@@ -42,14 +43,23 @@ func (s *server) Start(ctx context.Context, output chan *runner.Msg, listenAddr 
 	//
 	modulepb.RegisterModuleServiceServer(server, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
+		var (
+			err error
+			w   = new(sync.WaitGroup)
+		)
+		w.Add(1)
 		output <- &runner.Msg{
 			EdgeID: req.EdgeID,
 			To:     req.To,
 			Data:   req.Payload,
 			From:   req.From,
-			Meta:   req.GetMetadata(),
+			Callback: func(e error) {
+				defer w.Done()
+				err = e
+			},
 		}
-		return &modulepb.MessageResponse{}, nil
+		w.Wait()
+		return &modulepb.MessageResponse{}, err
 	}))
 	reflection.Register(server)
 

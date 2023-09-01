@@ -7,6 +7,7 @@ import (
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
+	"github.com/tiny-systems/module/internal/tracker"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"golang.org/x/sync/errgroup"
@@ -22,10 +23,8 @@ type Scheduler interface {
 	//Destroy stops the instance
 	Destroy(name string) error
 	//Start starts scheduler
-	Start(ctx context.Context, inputCh chan *runner.Msg, outputCh chan *runner.Msg) error
+	Start(ctx context.Context, inputCh chan *runner.Msg, outputCh chan *runner.Msg, callbacks ...tracker.Callback) error
 }
-
-type Callback func(msg *runner.Msg, err error)
 
 type Schedule struct {
 	log           logr.Logger
@@ -33,7 +32,6 @@ type Schedule struct {
 	instancesMap  cmap.ConcurrentMap[string, *runner.Runner]
 	instanceCh    chan instanceRequest
 	ctx           context.Context
-	callbacks     []Callback
 }
 
 func New() *Schedule {
@@ -41,12 +39,7 @@ func New() *Schedule {
 		instanceCh:    make(chan instanceRequest),
 		instancesMap:  cmap.New[*runner.Runner](),
 		componentsMap: cmap.New[module.Component](),
-		callbacks:     make([]Callback, 0),
 	}
-}
-
-func (s *Schedule) AddCallback(c Callback) {
-	s.callbacks = append(s.callbacks, c)
 }
 
 func (s *Schedule) SetLogger(l logr.Logger) *Schedule {
@@ -89,7 +82,7 @@ func (s *Schedule) Destroy(name string) error {
 	return nil
 }
 
-func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideCh chan *runner.Msg) error {
+func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideCh chan *runner.Msg, callbacks ...tracker.Callback) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -104,26 +97,13 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 			// check subject
 			node, _ := utils.ParseFullPortName(msg.To)
 
-			var outside bool
-
 			if instanceCh, ok := inputChMap.Get(node); ok {
 				// send to nodes' personal channel
-				// register callbacks
 				instanceCh <- msg
 			} else {
 				outsideCh <- msg
-				outside = true
 			}
 
-			msg.Callback = func(err error) {
-				if err == nil && outside {
-					// not interested it successful submit outside being tracked
-					return
-				}
-				for _, callback := range s.callbacks {
-					callback(msg, err)
-				}
-			}
 			//
 			// send outside or into some instance
 			// decide if we make external request or send im
@@ -135,13 +115,11 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 					Error: fmt.Sprintf("component %s is not presented in the module", req.Node.Spec.Component),
 				}
 			}
-
 			s.instancesMap.Upsert(req.Node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
 				//
 				if !exist {
 					// new instance
-					instance = runner.NewRunner(req.Node.Name, cmp.Instance()).SetLogger(s.log)
-
+					instance = runner.NewRunner(req.Node, cmp.Instance(), callbacks...).SetLogger(s.log)
 					wg.Go(func() error {
 						// main instance lifetime goroutine
 						// exit unregisters instance

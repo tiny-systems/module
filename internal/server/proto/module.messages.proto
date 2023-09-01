@@ -8,7 +8,6 @@ message MessageRequest {
   string To = 3;
   bytes Payload = 4;
   string EdgeID = 5;
-  map<string, string> Metadata = 6;
 }
 
 message MessageResponse {

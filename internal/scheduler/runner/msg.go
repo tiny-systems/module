@@ -1,8 +1,6 @@
 package runner
 
-const (
-	MetaFlowID = "flowID"
-)
+var EmptyCallback = func(err error) {}
 
 // Msg being sent via instances edges
 type Msg struct {
@@ -15,7 +13,7 @@ type Msg struct {
 
 	Data []byte `json:"data"`
 	// meta data like flowID and etc, optional
-	Meta map[string]string `json:"meta"`
+	//Meta map[string]string `json:"meta"`
 
 	Callback func(error) `json:"-"` // to track if msg was rejected
 }
