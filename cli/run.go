@@ -269,17 +269,15 @@ var runCmd = &cobra.Command{
 
 		// tracker
 
-		sch.AddCallback(func(msg *runner.Msg, err error) {
-			trackManager.Track(msg, err)
-		})
-
 		/// Instance scheduler
 		wg.Go(func() error {
 			l.Info("Starting scheduler")
 			defer func() {
 				l.Info("Scheduler stopped")
 			}()
-			if err := sch.Start(ctx, inputCh, outputCh); err != nil {
+			if err := sch.Start(ctx, inputCh, outputCh, func(msg tracker.PortMsg) {
+				trackManager.Track(msg)
+			}); err != nil {
 				l.Error(err, "Unable to start scheduler")
 				return err
 			}

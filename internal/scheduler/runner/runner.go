@@ -5,19 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-logr/logr"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/evaluator"
+	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
-	"go.uber.org/atomic"
+	uatomic "go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +29,7 @@ type Runner struct {
 	// unique instance name
 	name string
 
+	flowID string
 	//
 	nodeLock *sync.RWMutex
 
@@ -33,8 +38,6 @@ type Runner struct {
 	component m.Component
 	//
 	log logr.Logger
-
-	//runError   *atomic.Error
 
 	// stopFunc stops instance emit
 	stopFunc context.CancelFunc
@@ -45,22 +48,27 @@ type Runner struct {
 	cancelFuncsLock *sync.Mutex
 
 	emitCh  chan struct{}
-	emitErr *atomic.Error
+	emitErr *uatomic.Error
 
-	//stats cmap.ConcurrentMap[string, *int64]
+	stats cmap.ConcurrentMap[string, *int64]
 
 	needRestart bool
+
+	callbacks []tracker.Callback
 }
 
-func NewRunner(name string, component m.Component) *Runner {
+func NewRunner(node v1alpha1.TinyNode, component m.Component, callbacks ...tracker.Callback) *Runner {
 
 	return &Runner{
-		name:      name,
-		component: component,
-		//stats:     cmap.New[*int64](),
+		name:            node.Name,
+		flowID:          node.Labels[v1alpha1.FlowIDLabel],
+		node:            node,
+		component:       component,
+		stats:           cmap.New[*int64](),
 		nodeLock:        new(sync.RWMutex),
 		cancelFuncsLock: new(sync.Mutex),
-		emitErr:         atomic.NewError(nil),
+		emitErr:         uatomic.NewError(nil),
+		callbacks:       callbacks,
 	}
 }
 
@@ -117,10 +125,10 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 
 		if np.Configuration != nil {
 			// define default schema and config using reflection
-			schema, err := schema.CreateSchema(np.Configuration)
+			schemaConf, err := schema.CreateSchema(np.Configuration)
 
 			if err == nil {
-				schemaData, _ := schema.MarshalJSON()
+				schemaData, _ := schemaConf.MarshalJSON()
 				pStatus.Schema = schemaData
 			} else {
 				c.log.Error(err, "create schema error")
@@ -159,7 +167,7 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error {
 
 	_, port := utils.ParseFullPortName(msg.To)
-	c.log.Info("process input", "port", port, "data", msg.Data, "node", c.name)
+	//c.log.Info("process input", "port", port, "data", msg.Data, "node", c.name)
 
 	var nodePort *m.NodePort
 	for _, p := range c.component.Ports() {
@@ -172,20 +180,6 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 		// ignore if we have no such port
 		return nil
 	}
-
-	//var i int64
-	//key := metrics.GetMetricKey(requestData.EdgeID, metrics.MetricEdgeMessageReceived)
-	//c.stats.SetIfAbsent(key, &i)
-	//counter, _ := c.stats.Get(key)
-	//atomic.AddInt64(counter, 1)
-	//
-
-	//c.log.Info("specification locked")
-	//var y int64
-	//key = metrics.GetMetricKey(c.config.ID, metrics.MetricNodeMessageReceived)
-	//c.stats.SetIfAbsent(key, &y)
-	//counter, _ = c.stats.Get(key)
-	//atomic.AddInt64(counter, 1)
 
 	var portConfig *v1alpha1.TinyNodePortConfig
 
@@ -233,23 +227,60 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 	if err != nil {
 		return errors.Wrap(err, "eval port edge settings config")
 	}
+
+	// all good, we can say that's the data for incoming port
 	// adapt
-	err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
+	portData, err := c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
 	if err != nil {
 		return errors.Wrap(err, "map decode from config map to port input type")
 	}
 
-	return errorpanic.Wrap(func() error {
+	// stats
+	if msg.EdgeID != "" {
+		var i int64
+		key := metrics.GetMetricKey(msg.EdgeID, metrics.MetricEdgeMessageReceived)
+		c.stats.SetIfAbsent(key, &i)
+		counter, _ := c.stats.Get(key)
+		atomic.AddInt64(counter, 1)
+	}
+
+	var i int64
+	key := metrics.GetMetricKey(c.name, metrics.MetricNodeMessageReceived)
+	c.stats.SetIfAbsent(key, &i)
+	counter, _ := c.stats.Get(key)
+	atomic.AddInt64(counter, 1)
+
+	err = errorpanic.Wrap(func() error {
 		// panic safe
 		//c.log.Info("component call", "port", port, "node", c.name)
 		return c.component.Handle(ctx, func(port string, data interface{}) error {
 			//c.log.Info("component callback handler", "port", port, "node", c.name)
-			if err = c.outputHandler(port, data, outputCh); err != nil {
-				c.log.Error(err, "handler output error")
+			if e := c.outputHandler(port, data, outputCh); e != nil {
+				c.log.Error(e, "handler output error")
 			}
 			return nil
 		}, port, portInputData.Interface())
+
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// we can say now that data successfully applied to input port
+	// input ports always have no errors
+	for _, callback := range c.callbacks {
+		callback(tracker.PortMsg{
+			NodeName:  c.name,
+			EdgeID:    msg.EdgeID,
+			PortName:  msg.To, // INPUT PORT OF THE NODE
+			Data:      portData,
+			FlowID:    c.flowID,
+			NodeStats: c.GetStats(),
+		})
+	}
+
+	return err
 }
 
 // Configure updates specs and decides do we need to restart which handles by Run method
@@ -273,9 +304,11 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh
 	// todo consider flow envs here
 
 	return c.input(ctx, &Msg{
-		To:   utils.GetPortFullName("", m.SettingsPort),
-		Data: []byte("{}"),
+		To:       utils.GetPortFullName(c.name, m.SettingsPort),
+		Data:     []byte("{}"),
+		Callback: EmptyCallback,
 	}, outputCh)
+
 }
 
 // Process main instance loop
@@ -297,9 +330,8 @@ func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *
 				c.log.Info("channel closed, exiting", c.name)
 				return nil
 			}
-			if err := c.input(ctx, msg, outputCh); msg.Callback != nil {
-				msg.Callback(err)
-			}
+			// configuration error
+			msg.Callback(c.input(ctx, msg, outputCh))
 		}
 	}
 }
@@ -388,35 +420,59 @@ func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg
 	c.nodeLock.RUnlock()
 
 	for _, e := range edges {
-		if e.Port == port {
-			// edge configured for this port as source
-			// send to destination
-			outputCh <- &Msg{
-				To:     e.To,
-				From:   utils.GetPortFullName(c.name, port),
-				EdgeID: e.ID,
-				Data:   dataBytes,
-				Meta: map[string]string{
-					MetaFlowID: c.node.Labels[v1alpha1.FlowIDLabel],
-				},
-			}
+		if e.Port != port {
+			// edge is not configured for this port as source
+			continue
+		}
+		// send to destination
+		// track how many messages component send
+		var y int64
+		key := metrics.GetMetricKey(c.name, metrics.MetricNodeMessageSent)
+		c.stats.SetIfAbsent(key, &y)
+		counter, _ := c.stats.Get(key)
+		atomic.AddInt64(counter, 1)
+
+		// track how many message sedge passed
+		var i int64
+		key = metrics.GetMetricKey(e.ID, metrics.MetricEdgeMessageSent)
+		c.stats.SetIfAbsent(key, &i)
+		counter, _ = c.stats.Get(key)
+		atomic.AddInt64(counter, 1)
+
+		fromPort := utils.GetPortFullName(c.name, port)
+		outputCh <- &Msg{
+			To:     e.To,
+			From:   fromPort,
+			EdgeID: e.ID,
+			Data:   dataBytes,
+			Callback: func(err error) {
+				// output port
+				// call to say port FROM is successfully send data
+				// only output ports may have errors
+				for _, callback := range c.callbacks {
+					callback(tracker.PortMsg{
+						NodeName:  c.name,
+						EdgeID:    e.ID,
+						PortName:  fromPort, // OUTPUT PORT OF THE NODE
+						Data:      dataBytes,
+						FlowID:    c.flowID,
+						NodeStats: c.GetStats(),
+						Err:       err,
+					})
+				}
+
+			},
 		}
 	}
-	// @todo metrics
-	//var y int64
-	//key :=fmt.Sprintf("node-%s-%s", c.name, "sent")
-	//c.stats.SetIfAbsent(key, &y)
-	//counter, _ := c.stats.Get(key)
-	//atomic.AddInt64(counter, 1)
 	return nil
 }
 
-func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
+func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) ([]byte, error) {
 	b, err := json.Marshal(input)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return json.Unmarshal(b, output)
+	return b, json.Unmarshal(b, output)
 }
 
 func (c *Runner) isEmitting() bool {
@@ -429,4 +485,29 @@ func (c *Runner) isEmitting() bool {
 	default:
 		return true
 	}
+}
+
+func (c *Runner) GetStats() map[string]interface{} {
+
+	statsMap := map[string]interface{}{}
+
+	for _, k := range c.stats.Keys() {
+		counter, _ := c.stats.Get(k)
+		if counter == nil {
+			continue
+		}
+		val := *counter
+		entityID, metric, err := metrics.GetEntityAndMetric(k)
+		if err != nil {
+			continue
+		}
+
+		if statsMap[entityID] == nil {
+			statsMap[entityID] = map[string]interface{}{}
+		}
+		if statsMapSub, ok := statsMap[entityID].(map[string]interface{}); ok {
+			statsMapSub[metric.String()] = val
+		}
+	}
+	return statsMap
 }

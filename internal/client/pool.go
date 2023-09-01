@@ -74,19 +74,14 @@ func (p *pool) Start(ctx context.Context, inputCh chan *runner.Msg) error {
 
 			// sending request using gRPC
 			_, err = client.Message(ctx, &module.MessageRequest{
-				From:     msg.From,
-				Payload:  msg.Data,
-				EdgeID:   msg.EdgeID,
-				To:       msg.To,
-				Metadata: msg.Meta,
+				From:    msg.From,
+				Payload: msg.Data,
+				EdgeID:  msg.EdgeID,
+				To:      msg.To,
 			})
 
-			if msg.Callback != nil {
-				msg.Callback(err)
-			}
-			if err != nil {
-				p.log.Error(err, "error sending request", "to", addr)
-			}
+			// error if we could not manage to send it
+			msg.Callback(err)
 		}
 	}
 }

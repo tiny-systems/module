@@ -23,33 +23,36 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-type TinyTrackerWebhook struct {
+type TinyTrackerPortDataWebhook struct {
+	FlowID string `json:"flowID"`
+
 	// URL of the POST request
 	URL string `json:"url,omitempty"`
 
 	//Interval send requests not often than interval
 	Interval metav1.Duration `json:"interval"`
 
-	//SendData send data
-	SendData bool `json:"sendData"`
-
-	//SendErrors send errors
-	SendErrors bool `json:"sendErrors"`
-
 	//Do not send data bigger than below
 	MaxDataSize int `json:"maxDataSize"`
 }
 
-type TinyTrackerFlowSubject struct {
+type TinyTrackerStatisticsWebhook struct {
 	FlowID string `json:"flowID"`
+
+	// URL of the POST request
+	URL string `json:"url,omitempty"`
+
+	//Interval send requests not often than interval
+	Interval metav1.Duration `json:"interval"`
 }
 
 // TinyTrackerSpec defines the desired state of Tracker
 type TinyTrackerSpec struct {
 	// +kubebuilder:validation:Optional
-	FlowSubject *TinyTrackerFlowSubject `json:"flowSubject"`
+	PortDataWebhook *TinyTrackerPortDataWebhook `json:"portDataWebhook"`
+
 	// +kubebuilder:validation:Optional
-	Webhook *TinyTrackerWebhook `json:"webhook"`
+	NodeStatisticsWebhook *TinyTrackerStatisticsWebhook `json:"nodeStatisticsWebhook"`
 }
 
 // TinyTrackerStatus defines the observed state of TinyTracker

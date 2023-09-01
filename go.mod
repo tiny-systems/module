@@ -69,6 +69,7 @@ require (
 
 require (
 	github.com/go-logr/zerologr v1.2.3
+	github.com/jellydator/ttlcache/v3 v3.1.0
 	github.com/onsi/ginkgo/v2 v2.9.5
 	github.com/onsi/gomega v1.27.7
 	github.com/orcaman/concurrent-map/v2 v2.0.1
