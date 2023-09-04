@@ -1,0 +1,12 @@
+apiVersion: operator.tinysystems.io/v1alpha1
+kind: TinyModule
+metadata:
+  labels:
+    app.kubernetes.io/name: tinymodule
+    app.kubernetes.io/instance: tinymodule-sample
+    app.kubernetes.io/part-of: operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: operator
+  name: tinymodule-sample
+spec:
+  # TODO(user): Add fields here
