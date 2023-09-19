@@ -22,7 +22,9 @@ var arrayCustomProps = []string{
 }
 
 func CreateSchema(m interface{}) (jsonschema.Schema, error) {
-	r := jsonschema.Reflector{DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0)}
+	r := jsonschema.Reflector{
+		DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
+	}
 
 	var (
 		defs     = make(map[string]jsonschema.Schema)

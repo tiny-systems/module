@@ -1,0 +1,110 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "tinysystems-operator.fullname" . }}-manager-role
+  labels:
+  {{- include "tinysystems-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinymodules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinymodules/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinymodules/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinynodes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinynodes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinynodes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinytrackers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinytrackers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinytrackers/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "tinysystems-operator.fullname" . }}-manager-rolebinding
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: operator
+    app.kubernetes.io/part-of: operator
+  {{- include "tinysystems-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: '{{ include "tinysystems-operator.fullname" . }}-manager-role'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "tinysystems-operator.fullname" . }}-controller-manager'
+  namespace: '{{ .Release.Namespace }}'
