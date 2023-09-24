@@ -2,7 +2,7 @@
 Helm chart helps to deploy your own Tiny Systems modules
 
 ## Description
-// tbd
+Single Helm chart for run any Tiny System module
 
 ## Getting Started
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
@@ -34,12 +34,6 @@ make docker-build docker-push IMG=<some-registry>/operator:tag
 make deploy IMG=<some-registry>/operator:tag
 ```
 
-### Uninstall CRDs
-To delete the CRDs from the cluster:
-
-```sh
-make uninstall
-```
 
 ### Undeploy controller
 UnDeploy the controller from the cluster:
