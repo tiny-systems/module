@@ -32,11 +32,16 @@ jobs:
         uses: helm/chart-releaser-action@v1.5.0
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Prepare docs
+        run: mkdir -p dist
+
       - name: Converts Markdown to HTML
         uses: jaywcjlove/markdown-to-html-cli@main
         with:
           source: README.md
           output: dist/index.html
+
       - name: Deploy 🚀
         uses: peaceiris/actions-gh-pages@v3
         with:
