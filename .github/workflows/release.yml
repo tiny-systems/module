@@ -21,11 +21,20 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
+      - name: Prepare docs
+        run: mkdir -p dist
+
       - name: Converts Markdown to HTML
         uses: jaywcjlove/markdown-to-html-cli@main
         with:
           source: README.md
-          output: index.html
+          output: dist/index.html
+
+      - name: Deploy 🚀
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
 
       - name: Install Helm
         uses: azure/setup-helm@v3
@@ -37,6 +46,5 @@ jobs:
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.5.0
-        continue-on-error: true
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
