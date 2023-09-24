@@ -25,11 +25,13 @@ jobs:
         uses: azure/setup-helm@v3
 
       - name: Add helm dependencies
+        continue-on-error: true
         run: |
           helm repo add tinysystems https://tiny-systems.github.io/module
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.5.0
+        continue-on-error: true
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
@@ -47,3 +49,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
+          keep_files: true
