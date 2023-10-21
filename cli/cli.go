@@ -6,9 +6,39 @@ import (
 	"path/filepath"
 )
 
-func RegisterCommands(root *cobra.Command) {
+var (
+	platformApiURL string
+)
+
+func RegisterCommands(rootCmd *cobra.Command) {
+
+	applyCommonFlags(rootCmd)
+
 	applyRunFlags(runCmd)
-	root.AddCommand(runCmd)
+	rootCmd.AddCommand(runCmd)
+
+	applyToolsFlags(toolsCmd)
+	rootCmd.AddCommand(toolsCmd)
+
+	applyBuildFlags(buildCmd)
+	toolsCmd.AddCommand(buildCmd)
+	toolsCmd.AddCommand(infoCmd)
+}
+
+func applyCommonFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVarP(&platformApiURL, "platform-api-url", "", "https://api.tinysystems.io", "Platform API URL")
+}
+
+func applyToolsFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVarP(&devKey, "devkey", "d", "", "developer key")
+}
+
+func applyBuildFlags(cmd *cobra.Command) {
+
+	cmd.Flags().StringVarP(&pathToMain, "path", "p", "./cmd", "path to main package regarding to the root")
+	cmd.Flags().StringVarP(&version, "version", "v", "", "module version")
+	cmd.MarkFlagRequired("devkey")
+	cmd.MarkFlagRequired("version")
 }
 
 func applyRunFlags(cmd *cobra.Command) {

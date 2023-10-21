@@ -16,7 +16,7 @@ import (
 type Scheduler interface {
 	//Install makes component available for running nodes
 	Install(component module.Component) error
-	//Instance creates a new instance by using unique name, if instance is already running - updates it
+	//Upsert creates a new instance by using unique name, if instance is already running - updates it
 	Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error)
 	//Invoke sends data to the port of the given instance
 	Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error)

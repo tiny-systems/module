@@ -1,4 +1,4 @@
 # gRPC Server
 
-* gRPC server helps to communicate different module instances across cluster.
+* gRPC server helps to communicate different modules instances across cluster.
 * Services module.service
