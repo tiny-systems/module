@@ -37,8 +37,11 @@ func applyBuildFlags(cmd *cobra.Command) {
 
 	cmd.Flags().StringVarP(&pathToMain, "path", "p", "./cmd", "path to main package regarding to the root")
 	cmd.Flags().StringVarP(&version, "version", "v", "", "module version")
+	cmd.Flags().StringVarP(&name, "name", "n", "main", "Name of the module. Container image repo usually.")
+
 	cmd.MarkFlagRequired("devkey")
 	cmd.MarkFlagRequired("version")
+	cmd.MarkFlagRequired("name")
 }
 
 func applyRunFlags(cmd *cobra.Command) {
