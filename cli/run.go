@@ -32,7 +32,7 @@ import (
 var (
 	namespace            = "tinysystems"
 	kubeconfig           string
-	version              = "0.1.7"
+	version              = ""
 	name                 string
 	versionID            string // ldflags
 	metricsAddr          string
@@ -43,7 +43,7 @@ var (
 
 var runCmd = &cobra.Command{
 	Use:   "run",
-	Short: "run module",
+	Short: "Run module",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 
