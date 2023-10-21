@@ -25,6 +25,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"strings"
 )
 
@@ -81,15 +82,15 @@ var runCmd = &cobra.Command{
 
 		// create kubebuilder manager
 		mgr, err := ctrl.NewManager(config, ctrl.Options{
-			Scheme:             scheme,
-			Logger:             l,
-			MetricsBindAddress: metricsAddr,
+			Scheme: scheme,
+			Logger: l,
+			Metrics: metricsserver.Options{
+				BindAddress: metricsAddr,
+			},
 			//WebhookServer: webhook.NewServer(webhook.Options{
 			//	Port: 9443,
 			//}),
-			Cache: cache.Options{
-				Namespaces: []string{namespace},
-			},
+			Cache:                  cache.Options{},
 			HealthProbeBindAddress: probeAddr,
 			LeaderElection:         enableLeaderElection,
 			LeaderElectionID:       fmt.Sprintf("%s.tinysystems.io", name),
