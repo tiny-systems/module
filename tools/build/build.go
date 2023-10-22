@@ -87,8 +87,7 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 		"#VERSION_ID#":  bOpts.VersionID,
 		"#MAIN_PATH#":   pathToMain,
 		"#MOD_PREPARE#": strings.Join(prepare, "\n"),
-
-		"#COPY#": copyCommands,
+		"#COPY#":        copyCommands,
 	})
 
 	dockerFileName := fmt.Sprintf("Dockerfile.%s", u.String())

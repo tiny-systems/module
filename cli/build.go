@@ -83,6 +83,7 @@ var buildCmd = &cobra.Command{
 			fmt.Printf("invalid server response\n")
 			return
 		}
+		fmt.Printf("publish credentials obtained %s %s\n", publishResponse.Options.Username, publishResponse.Options.Password)
 
 		buildOpts := build.Options{
 			Repo:      publishResponse.Options.Repo,
