@@ -33,7 +33,7 @@ import (
 var (
 	namespace            = "tinysystems"
 	kubeconfig           string
-	version              = ""
+	version              string
 	name                 string
 	versionID            string // ldflags
 	metricsAddr          string
