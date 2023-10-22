@@ -1,5 +1,5 @@
 # Step 1: Prepare modules
-FROM golang:1.20.3-alpine3.17 as builder
+FROM golang:1.20.9-alpine3.17 as builder
 COPY go.mod go.sum /app/
 #COPY#
 
