@@ -45,6 +45,7 @@ func applyBuildFlags(cmd *cobra.Command) {
 }
 
 func applyRunFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&version, "version", "v", "", "module version")
 	cmd.Flags().StringVarP(&name, "name", "n", "main", "Name of the module. Container image repo usually.")
 	cmd.Flags().StringVarP(&kubeconfig, "kubeconfig", "k", filepath.Join(homedir.HomeDir(), ".kube", "config"), "(optional) absolute path to the kubeconfig file")
 	cmd.Flags().StringVarP(&metricsAddr, "metrics-bind-address", "m", ":0", "The address the metric endpoint binds to.")
@@ -52,4 +53,7 @@ func applyRunFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&grpcAddr, "grpc-server", "g", ":0", "gRPC server listen address")
 	cmd.Flags().BoolVarP(&enableLeaderElection, "leader-elect", "l", false, "Enable leader election for controller manager. "+
 		"Enabling this will ensure there is only one active controller manager.")
+	cmd.MarkFlagRequired("version")
+	cmd.MarkFlagRequired("name")
+
 }
