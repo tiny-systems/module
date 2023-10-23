@@ -84,7 +84,6 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 	}
 
 	dockerfile = replaceStringMap(dockerfile, map[string]string{
-		"#VERSION_ID#":  bOpts.VersionID,
 		"#MAIN_PATH#":   pathToMain,
 		"#MOD_PREPARE#": strings.Join(prepare, "\n"),
 		"#COPY#":        copyCommands,
@@ -103,8 +102,19 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 		Dockerfile: dockerFileName,
 		Remove:     true,
 		Tags:       []string{fmt.Sprintf("%s:%s", bOpts.Repo, bOpts.Tag)},
+		BuildArgs: map[string]*string{
+			"VERSION_ID": &bOpts.VersionID,
+		},
 	}
-
+	if bOpts.TargetArch != "" {
+		imgOpts.BuildArgs["TARGETARCH"] = &bOpts.TargetArch
+	}
+	if bOpts.TargetOs != "" {
+		imgOpts.BuildArgs["TARGETOS"] = &bOpts.TargetOs
+	}
+	if bOpts.TargetOs != "" && bOpts.TargetArch != "" {
+		imgOpts.Platform = fmt.Sprintf("%s/%s", bOpts.TargetOs, bOpts.TargetArch)
+	}
 	res, err := dockerClient.ImageBuild(ctx, bytes.NewReader(buf.Bytes()), imgOpts)
 	if err != nil {
 		return err
@@ -176,9 +186,11 @@ func addTar(src string, dst string, tw *tar.Writer) error {
 }
 
 type Options struct {
-	Repo      string
-	Tag       string
-	VersionID string
+	TargetOs   string
+	TargetArch string
+	Repo       string
+	Tag        string
+	VersionID  string
 }
 
 func getClient() (*client.Client, error) {
