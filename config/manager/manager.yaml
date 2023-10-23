@@ -69,7 +69,7 @@ spec:
         #   type: RuntimeDefault
       containers:
       - command:
-        - /manager
+        - /manager run
         args:
         - --leader-elect
         image: controller:latest

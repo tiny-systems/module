@@ -7,7 +7,7 @@ ARG VERSION_ID
 COPY go.mod go.sum /app/
 #COPY#
 
-WORKDIR /app
+WORKDIR /manager
 COPY . .
 #MOD_PREPARE#
 RUN go mod download
@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags
 
 # Step 3: Final
 FROM gcr.io/distroless/static:nonroot
-COPY --from=builder /bin/app /app
+COPY --from=builder /bin/manager /manager
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 USER 65532:65532
-CMD ["/app", "run"]
+CMD ["/manager", "run"]
