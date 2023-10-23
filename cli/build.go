@@ -16,6 +16,8 @@ import (
 
 var (
 	pathToMain string
+	targetOs   string
+	targetArch string
 )
 
 var buildCmd = &cobra.Command{
@@ -83,20 +85,28 @@ var buildCmd = &cobra.Command{
 			fmt.Printf("invalid server response\n")
 			return
 		}
-		fmt.Printf("publish credentials obtained %s %s\n", publishResponse.Options.Username, publishResponse.Options.Password)
 
 		buildOpts := build.Options{
-			Repo:      publishResponse.Options.Repo,
-			Tag:       publishResponse.Options.Tag,
-			VersionID: publishResponse.Module.Id,
+			TargetOs:   targetOs,
+			TargetArch: targetArch,
+			Repo:       publishResponse.Options.Repo,
+			Tag:        publishResponse.Options.Tag,
+			VersionID:  publishResponse.Module.Id,
 		}
+
 		if err := build.Build(ctx, cwd, pathToMain, buildOpts); err != nil {
 			fmt.Printf("unable to build: %v\n", err)
 			return
 		}
 		image := fmt.Sprintf("%s:%s", publishResponse.Options.Repo, publishResponse.Options.Tag)
 
-		if err = build.Push(ctx, image, publishResponse.Options.Username, publishResponse.Options.Password); err != nil {
+		if err = build.Push(ctx, build.PushOpts{
+			Image:      image,
+			TargetOs:   targetOs,
+			TargetArch: targetArch,
+			Username:   publishResponse.Options.Username,
+			Password:   publishResponse.Options.Password,
+		}); err != nil {
 			fmt.Printf("unable to push: image %s; error: %v\n", image, err)
 			return
 		}
