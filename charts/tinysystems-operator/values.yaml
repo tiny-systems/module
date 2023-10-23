@@ -31,7 +31,7 @@ controllerManager:
         drop:
         - ALL
     image:
-      repository: registry.gitlab.com/tiny-systems/public-containers/controller
+      repository: europe-west2-docker.pkg.dev/tinyplatform/tinysystems/all-in-one-module
       tag: latest
     imagePullPolicy: Always
     resources:

@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= registry.gitlab.com/tiny-systems/public-containers/controller:latest
+IMG ?= europe-west2-docker.pkg.dev/tinyplatform/tinysystems/all-in-one-module:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.27.1
 
