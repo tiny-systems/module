@@ -66,6 +66,8 @@ spec:
           | nindent 10 }}
       imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
       securityContext:
+        fsGroup: 65532
         runAsNonRoot: true
+        runAsUser: 65532
       serviceAccountName: {{ include "tinysystems-operator.fullname" . }}-controller-manager
       terminationGracePeriodSeconds: 10
