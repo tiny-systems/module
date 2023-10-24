@@ -4,14 +4,14 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION_ID
 
-COPY go.mod go.sum /app/
+COPY go.mod go.sum /manager/
 #COPY#
 
 WORKDIR /manager
 COPY . .
 #MOD_PREPARE#
 RUN go mod download
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-X github.com/tiny-systems/module/cli.versionID=${VERSION_ID}" -o /bin/app #MAIN_PATH#
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-X github.com/tiny-systems/module/cli.versionID=${VERSION_ID}" -o /bin/manager #MAIN_PATH#
 
 # Step 3: Final
 FROM gcr.io/distroless/static:nonroot
