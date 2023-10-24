@@ -50,6 +50,7 @@ func applyBuildFlags(cmd *cobra.Command) {
 func applyRunFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&version, "version", "v", "", "module version")
 	cmd.Flags().StringVarP(&name, "name", "n", "main", "Name of the module. Container image repo usually.")
+	cmd.Flags().StringVarP(&namespace, "namespace", "", "tinysystems", "Namespace where the module installed in.")
 	cmd.Flags().StringVarP(&kubeconfig, "kubeconfig", "k", filepath.Join(homedir.HomeDir(), ".kube", "config"), "(optional) absolute path to the kubeconfig file")
 	cmd.Flags().StringVarP(&metricsAddr, "metrics-bind-address", "m", ":0", "The address the metric endpoint binds to.")
 	cmd.Flags().StringVarP(&probeAddr, "health-probe-bind-address", "t", ":0", "The address the probe endpoint binds to.")

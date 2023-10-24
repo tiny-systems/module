@@ -31,7 +31,7 @@ import (
 
 // override by ldflags
 var (
-	namespace            = "tinysystems"
+	namespace            string
 	kubeconfig           string
 	version              string
 	name                 string
