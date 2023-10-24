@@ -80,7 +80,7 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 			return err
 		}
 		prepare = append(prepare, fmt.Sprintf("RUN go mod edit -replace %s=%s", r.Old.Path, fmt.Sprintf("./%s", replaceTarPath)))
-		copyCommands = "#COPY# = COPY __replaces /app/__replaces"
+		copyCommands = "#COPY# = COPY __replaces /manager/__replaces"
 	}
 
 	dockerfile = replaceStringMap(dockerfile, map[string]string{
