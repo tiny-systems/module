@@ -95,7 +95,6 @@ func (t *manager) sendPortData(msg PortMsg, tracker v1alpha1.TinyTracker) error 
 	if msg.Err != nil {
 		headers[client.HeaderError] = msg.Err.Error()
 	}
-	t.log.Info("send webhook port data", "headers", headers)
 	return client.SendWebhookData(tracker.Spec.PortDataWebhook.URL, headers, msg.Data)
 }
 
@@ -128,7 +127,6 @@ func (t *manager) sendNodeStatistics(msg PortMsg, tracker v1alpha1.TinyTracker) 
 		client.HeaderNodeName:     msg.NodeName,
 		"Content-Type":            "application/json",
 	}
-	t.log.Info("send webhook statistics data", "headers", headers, "data", data)
 	return client.SendWebhookData(tracker.Spec.NodeStatisticsWebhook.URL, headers, data)
 }
 
