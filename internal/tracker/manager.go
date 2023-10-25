@@ -83,7 +83,6 @@ func (t *manager) sendPortData(msg PortMsg, tracker v1alpha1.TinyTracker) error 
 	_, created := t.cache.GetOrSet(cacheKey, struct{}{}, ttlcache.WithTTL[string, struct{}](tracker.Spec.PortDataWebhook.Interval.Duration))
 
 	if created {
-		t.log.Info("skip port data")
 		return nil
 	}
 
@@ -114,7 +113,6 @@ func (t *manager) sendNodeStatistics(msg PortMsg, tracker v1alpha1.TinyTracker) 
 	_, created := t.cache.GetOrSet(buildTrackerPortCacheKey(tracker, msg.NodeName), struct{}{}, ttlcache.WithTTL[string, struct{}](tracker.Spec.NodeStatisticsWebhook.Interval.Duration))
 
 	if created {
-		t.log.Info("skip stats")
 		return nil
 	}
 
