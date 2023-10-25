@@ -27,7 +27,6 @@ func SendWebhookData(urlPath string, headers map[string]string, data []byte) err
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -39,6 +38,5 @@ func SendWebhookData(urlPath string, headers map[string]string, data []byte) err
 	if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("request failed with response code: %d", rsp.StatusCode)
 	}
-
 	return nil
 }
