@@ -36,7 +36,7 @@ type TinyTrackerReconciler struct {
 	Manager tracker.Manager
 }
 
-//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers,verbs=get;list;watch;create;update;patch;delete;deletecollection
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers/finalizers,verbs=update
 
