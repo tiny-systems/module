@@ -39,7 +39,7 @@ type TinyModuleReconciler struct {
 	ClientPool clientpool.Pool
 }
 
-//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules,verbs=get;list;watch;create;update;patch;delete;deletecollection
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules/finalizers,verbs=update
 
