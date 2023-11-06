@@ -4,4 +4,9 @@ metadata:
   name: manager-ingress
 spec:
   ingressClassName: nginx
+  defaultBackend:
+    service:
+      name: manager-service
+      port:
+        number: 80
   rules: []
