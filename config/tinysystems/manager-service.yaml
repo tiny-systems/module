@@ -11,4 +11,8 @@ spec:
     app.kubernetes.io/created-by: operator
     app.kubernetes.io/part-of: operator
     app.kubernetes.io/managed-by: kustomize
-  ports: []
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
