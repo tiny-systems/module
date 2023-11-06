@@ -12,6 +12,24 @@ rules:
   - create
   - patch
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - patch
+  - update
+  - watch
+- apiGroups:
   - operator.tinysystems.io
   resources:
   - tinymodules

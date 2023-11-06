@@ -23,6 +23,9 @@ func NewManager(c client.Client, ns string, mod module.Info) *Resource {
 	return &Resource{client: c, namespace: ns, mod: mod}
 }
 
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;watch;update;patch
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;watch;update;patch
+
 func (m Resource) Cleanup(ctx context.Context) error {
 	sel := labels.NewSelector()
 
