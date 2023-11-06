@@ -72,6 +72,10 @@ func (m Resource) RegisterModule(ctx context.Context) error {
 	return err
 }
 
+func (m Resource) ExposePort(port int) error {
+	return nil
+}
+
 func (m Resource) RegisterComponent(ctx context.Context, c module.Component) error {
 
 	componentInfo := c.GetInfo()

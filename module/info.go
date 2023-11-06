@@ -1,6 +1,7 @@
 package module
 
 import (
+	"crypto/md5"
 	"fmt"
 	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/util/version"
@@ -31,6 +32,13 @@ func (i Info) GetMajorName() string {
 
 func (i Info) GetMajorNameSanitised() string {
 	return utils.SanitizeResourceName(i.GetMajorName())
+}
+
+func (i Info) GetMajorNameHashed() string {
+
+	h := md5.New()
+	h.Write([]byte(i.GetMajorName()))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func GetNodeFullName(module string, component string) string {

@@ -136,7 +136,7 @@ var runCmd = &cobra.Command{
 				l.Info("gRPC listen address", "addr", addr.String())
 				listenAddr <- addr.String()
 			}); err != nil {
-				l.Error(err, "Problem starting gRPC server")
+				l.Error(err, "problem starting gRPC server")
 				return err
 			}
 			return nil
