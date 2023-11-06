@@ -24,6 +24,20 @@ entries:
   tinysystems-operator:
   - apiVersion: v2
     appVersion: 0.1.1
+    created: "2023-11-06T21:27:20.340810303Z"
+    dependencies:
+    - name: tinysystems-crd
+      repository: https://tiny-systems.github.io/module
+      version: 0.1.6
+    description: Tiny Systems Operator Helm chart for Kubernetes
+    digest: 7d66f132364308d958220f7362ffc8e72fbe9502e5368335017d5c923a6bf55e
+    name: tinysystems-operator
+    type: application
+    urls:
+    - https://github.com/tiny-systems/module/releases/download/tinysystems-operator-0.1.17/tinysystems-operator-0.1.17.tgz
+    version: 0.1.17
+  - apiVersion: v2
+    appVersion: 0.1.1
     created: "2023-11-06T20:15:52.705385774Z"
     dependencies:
     - name: tinysystems-crd
@@ -158,4 +172,4 @@ entries:
     urls:
     - https://github.com/tiny-systems/module/releases/download/tinysystems-operator-0.1.5/tinysystems-operator-0.1.5.tgz
     version: 0.1.5
-generated: "2023-11-06T20:15:52.705624376Z"
+generated: "2023-11-06T21:27:20.340865703Z"
