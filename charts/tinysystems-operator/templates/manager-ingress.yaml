@@ -1,0 +1,8 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "tinysystems-operator.fullname" . }}-manager-ingress
+  labels:
+  {{- include "tinysystems-operator.labels" . | nindent 4 }}
+spec:
+  ingressClassName: nginx

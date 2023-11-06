@@ -46,6 +46,9 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+managerService:
+  ports: []
+  type: ClusterIP
 metricsService:
   ports:
   - name: https
