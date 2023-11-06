@@ -5,4 +5,9 @@ metadata:
   labels:
   {{- include "tinysystems-operator.labels" . | nindent 4 }}
 spec:
+  defaultBackend:
+    service:
+      name: '{{ include "tinysystems-operator.fullname" . }}-manager-service'
+      port:
+        number: 80
   ingressClassName: nginx

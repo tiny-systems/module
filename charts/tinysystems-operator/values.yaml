@@ -47,11 +47,7 @@ controllerManager:
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
 managerService:
-  ports:
-    - name: http
-      port: 80
-      protocol: TCP
-      targetPort: http
+  ports: []
   type: ClusterIP
 metricsService:
   ports:
