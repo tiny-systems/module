@@ -391,6 +391,12 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 	// emitCh easy way to tell if emitting is in progress
 	c.emitCh = make(chan struct{})
 
+	if httpEmitter, ok := c.component.(m.HTTPService); ok {
+		httpEmitter.HTTPService(func(port int) (public string, err error) {
+			fmt.Println("port exchange", c.name)
+			return "", fmt.Errorf("no ingress")
+		})
+	}
 	wg.Go(func() error {
 		// reset run error
 		c.log.Info("trying to start emitter", "cmp", c.component.GetInfo().Name, "restart", c.needRestart)
