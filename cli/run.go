@@ -100,11 +100,6 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		if err != nil {
-			l.Error(err, "unable to create coordinator client")
-			return
-		}
-
 		// run all modules
 		ctx, cancel := context.WithCancelCause(cmd.Context())
 		defer cancel(nil)
@@ -145,8 +140,12 @@ var runCmd = &cobra.Command{
 		// add listening address to the module info
 		moduleInfo.Addr = <-listenAddr
 
+		crManager := manager.NewManager(mgr.GetClient(), namespace)
+
 		//
-		sch := scheduler.New().SetLogger(l)
+		sch := scheduler.New().
+			SetLogger(l).
+			SetManager(crManager)
 
 		nodeController := &controller.TinyNodeReconciler{
 			Client:    mgr.GetClient(),
@@ -175,7 +174,8 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		trackManager := tracker.NewManager().SetLogger(l)
+		trackManager := tracker.NewManager().
+			SetLogger(l)
 
 		if err = (&controller.TinyTrackerReconciler{
 			Client:  mgr.GetClient(),
@@ -200,18 +200,16 @@ var runCmd = &cobra.Command{
 
 		l.Info("Installing components", "versionID", versionID)
 
-		crManager := manager.NewManager(mgr.GetClient(), namespace, moduleInfo)
-
 		// uninstall palette resources from previous versions
 
-		if err = crManager.Cleanup(ctx); err != nil {
+		if err = crManager.CleanupExampleNodes(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to cleanup previous versions components")
 			return
 		}
 
 		l.Info("Registering", "module", moduleInfo.GetMajorName())
 
-		if err = crManager.RegisterModule(ctx); err != nil {
+		if err = crManager.RegisterModule(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to register a module")
 			return
 		}
@@ -220,7 +218,7 @@ var runCmd = &cobra.Command{
 		for _, cmp := range registry.Get() {
 			l.Info("Registering", "component", cmp.GetInfo().Name)
 
-			if err = crManager.RegisterComponent(ctx, cmp); err != nil {
+			if err = crManager.RegisterExampleNode(ctx, cmp, moduleInfo); err != nil {
 				l.Error(err, "unable to register", "component", cmp.GetInfo().Name)
 			}
 			if err := sch.Install(cmp); err != nil {

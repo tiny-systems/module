@@ -36,7 +36,10 @@ type StatefulComponent interface {
 	SetState(state []byte) error
 }
 
-type ListenAddressGetter func(port int) (public string, err error)
+type AddressUpgrade func(port int) (string, error)
+
+// ListenAddressGetter gets listen port address
+type ListenAddressGetter func() (port int, upgrade AddressUpgrade)
 
 type HTTPService interface {
 	HTTPService(getter ListenAddressGetter)

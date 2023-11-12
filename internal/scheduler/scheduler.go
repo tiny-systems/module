@@ -6,6 +6,7 @@ import (
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/internal/manager"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/tracker"
 	"github.com/tiny-systems/module/module"
@@ -27,11 +28,18 @@ type Scheduler interface {
 }
 
 type Schedule struct {
-	log           logr.Logger
+	log logr.Logger
+	// registered components map
 	componentsMap cmap.ConcurrentMap[string, module.Component]
-	instancesMap  cmap.ConcurrentMap[string, *runner.Runner]
-	instanceCh    chan instanceRequest
-	ctx           context.Context
+
+	// instances map
+	instancesMap cmap.ConcurrentMap[string, *runner.Runner]
+
+	// instance commands channel
+	instanceCh chan instanceRequest
+
+	// resource manager pass over to runners
+	manager manager.ResourceInterface
 }
 
 func New() *Schedule {
@@ -44,6 +52,11 @@ func New() *Schedule {
 
 func (s *Schedule) SetLogger(l logr.Logger) *Schedule {
 	s.log = l
+	return s
+}
+
+func (s *Schedule) SetManager(m manager.ResourceInterface) *Schedule {
+	s.manager = m
 	return s
 }
 
@@ -67,7 +80,7 @@ func (s *Schedule) Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, erro
 	return <-statusCh, nil
 }
 
-// Invoke sends data to the port of given instance name
+// Invoke sends data to the port of given instance name @todo
 func (s *Schedule) Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
 	return v1alpha1.TinyNodeStatus{}, nil
 }
@@ -103,7 +116,6 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 			} else {
 				outsideCh <- msg
 			}
-
 			//
 			// send outside or into some instance
 			// decide if we make external request or send im
@@ -119,7 +131,11 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 				//
 				if !exist {
 					// new instance
-					instance = runner.NewRunner(req.Node, cmp.Instance(), callbacks...).SetLogger(s.log)
+					instance = runner.NewRunner(req.Node, cmp.Instance(), callbacks...).
+						// add K8s resource manager
+						SetManager(s.manager).
+						SetLogger(s.log)
+
 					wg.Go(func() error {
 						// main instance lifetime goroutine
 						// exit unregisters instance

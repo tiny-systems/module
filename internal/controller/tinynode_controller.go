@@ -70,8 +70,8 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	instance := &operatorv1alpha1.TinyNode{}
-
 	err = r.Get(context.Background(), req.NamespacedName, instance)
+
 	if err != nil {
 		l.Error(err, "get tinynode error")
 		if errors.IsNotFound(err) {
