@@ -1,2 +1,2 @@
 # Manager
-Kubernetes resources manager
+Kubernetes resources manager.

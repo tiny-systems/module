@@ -92,8 +92,19 @@ spec:
             properties:
               emitter:
                 type: boolean
+              emitting:
+                type: boolean
               error:
                 type: string
+              http:
+                properties:
+                  available:
+                    type: boolean
+                  listenPort:
+                    type: integer
+                  publicURL:
+                    type: string
+                type: object
               ports:
                 items:
                   properties:
@@ -126,8 +137,6 @@ spec:
                   - status
                   type: object
                 type: array
-              running:
-                type: boolean
               status:
                 type: string
             type: object

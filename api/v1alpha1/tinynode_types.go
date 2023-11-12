@@ -112,10 +112,24 @@ type TinyNodeStatus struct {
 	Status string `json:"status,omitempty"`
 
 	// +kubebuilder:validation:Optional
-	Emitter bool `json:"emitter,omitempty"`
+	Emitter bool `json:"emitter"`
 
 	// +kubebuilder:validation:Optional
-	Running bool `json:"running,omitempty"`
+	Emitting bool `json:"emitting"`
+
+	// +kubebuilder:validation:Optional
+	Http TinyNodeHttpStatus `json:"http"`
+}
+
+type TinyNodeHttpStatus struct {
+	// +kubebuilder:validation:Optional
+	Available bool `json:"available,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	ListenPort int `json:"listenPort"`
+
+	// +kubebuilder:validation:Optional
+	PublicURL string `json:"publicURL"`
 }
 
 //+kubebuilder:object:root=true
