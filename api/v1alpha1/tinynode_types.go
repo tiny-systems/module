@@ -27,6 +27,11 @@ const (
 	ComponentDescriptionAnnotation = "tinysystems.io/component-description"
 	ComponentInfoAnnotation        = "tinysystems.io/component-info"
 	ComponentTagsAnnotation        = "tinysystems.io/component-tags"
+
+	// visual annotations
+	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
+	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
+	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
