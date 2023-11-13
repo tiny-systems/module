@@ -3,6 +3,7 @@ kind: Service
 metadata:
   name: {{ include "tinysystems-operator.fullname" . }}-manager-service
   labels:
+    app.kubernetes.io/component: manager
   {{- include "tinysystems-operator.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.managerService.type }}

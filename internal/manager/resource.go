@@ -99,7 +99,38 @@ func (m Resource) ExposePort(ctx context.Context, port int) (string, error) {
 		return "", fmt.Errorf("unable to find current pod: %v")
 	}
 
-	spew.Dump(pod)
+	var releaseName string
+	for k, v := range pod.ObjectMeta.Labels {
+		if k == "app.kubernetes.io/instance" {
+			releaseName = v
+		}
+	}
+	if releaseName == "" {
+		return "", fmt.Errorf("release name label not found")
+	}
+
+	servicesList := &v1.ServiceList{}
+
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			"app.kubernetes.io/instance":  releaseName,
+			"app.kubernetes.io/name":      "tinysystems-operator",
+			"app.kubernetes.io/component": "manager",
+		},
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("build serviec selector error: %s", err)
+	}
+
+	if err = m.client.List(ctx, servicesList, client.MatchingLabelsSelector{
+		Selector: selector,
+	}, client.InNamespace(m.namespace)); err != nil {
+		return "", fmt.Errorf("service list error: %v", err)
+	}
+
+	spew.Dump("releaseName", releaseName)
+
 	fmt.Printf("expose pod %d for pod %s \n", port, currentPod)
 	return fmt.Sprintf("https://pub-url-%d", port), nil
 }
