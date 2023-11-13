@@ -3,9 +3,11 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -32,8 +34,6 @@ func NewManager(c client.Client, ns string) *Resource {
 	return &Resource{client: c, namespace: ns}
 }
 
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;update;patch
 func (m Resource) CleanupExampleNodes(ctx context.Context, mod module.Info) error {
 	sel := labels.NewSelector()
 
@@ -88,8 +88,20 @@ func (m Resource) ExposePort(ctx context.Context, port int) (string, error) {
 	if currentPod == "" {
 		return "", fmt.Errorf("unable to determine current pod")
 	}
+
+	pod := &v1.Pod{}
+	err := m.client.Get(context.Background(), client.ObjectKey{
+		Namespace: m.namespace,
+		Name:      currentPod,
+	}, pod)
+
+	if err != nil {
+		return "", fmt.Errorf("unable to find current pod: %v")
+	}
+
+	spew.Dump(pod)
 	fmt.Printf("expose pod %d for pod %s \n", port, currentPod)
-	return fmt.Sprintf("https://puburl%d", port), nil
+	return fmt.Sprintf("https://pub-url-%d", port), nil
 }
 
 func (m Resource) DisclosePort(ctx context.Context, port int) error {
