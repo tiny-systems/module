@@ -63,7 +63,7 @@ type Runner struct {
 
 	listenPortLock *sync.Mutex
 
-	// if underlying compontent is HTTPServicer
+	// if underlying component is HTTPServicer
 	listenPort int
 
 	publicURL string
@@ -479,9 +479,9 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 	// looks like we about to run
 	// spawn new goroutine
 	// create new context
-	var runCtx context.Context
+	var emitCtx context.Context
 
-	runCtx, c.stopFunc = context.WithCancel(ctx)
+	emitCtx, c.stopFunc = context.WithCancel(ctx)
 
 	// emitCh easy way to tell if emitting is in progress
 	c.emitCh = make(chan struct{})
@@ -493,7 +493,7 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 
 		// store emitErr atomic
 		c.emitErr.Store(
-			emitterComponent.Emit(runCtx, func(port string, data interface{}) error {
+			emitterComponent.Emit(emitCtx, func(port string, data interface{}) error {
 				// output of the emitter
 				return c.outputHandler(port, data, outputCh)
 			}))
