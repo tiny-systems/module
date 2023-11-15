@@ -46,6 +46,11 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+managerIngress:
+  ingress:
+    annotations: {}
+    className: nginx
+    enabled: true
 managerService:
   ports:
   - name: http
