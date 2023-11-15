@@ -1,13 +1,17 @@
+{{- if .Values.managerIngress.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "tinysystems-operator.fullname" . }}-manager-ingress
   labels:
   {{- include "tinysystems-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml .Values.managerIngress.ingress.annotations | nindent 4 }}
 spec:
   defaultBackend:
     service:
       name: '{{ include "tinysystems-operator.fullname" . }}-manager-service'
       port:
         number: 80
-  ingressClassName: nginx
+  ingressClassName: '{{.Values.managerIngress.ingress.className}}'
+{{- end }}

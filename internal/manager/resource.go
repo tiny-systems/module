@@ -7,7 +7,8 @@ import (
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
-	v1 "k8s.io/api/core/v1"
+	v1core "k8s.io/api/core/v1"
+	v1ingress "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -89,7 +90,7 @@ func (m Resource) ExposePort(ctx context.Context, port int) (string, error) {
 		return "", fmt.Errorf("unable to determine current pod")
 	}
 
-	pod := &v1.Pod{}
+	pod := &v1core.Pod{}
 	err := m.client.Get(context.Background(), client.ObjectKey{
 		Namespace: m.namespace,
 		Name:      currentPod,
@@ -109,8 +110,21 @@ func (m Resource) ExposePort(ctx context.Context, port int) (string, error) {
 		return "", fmt.Errorf("release name label not found")
 	}
 
-	servicesList := &v1.ServiceList{}
+	svc, err := m.getReleaseService(ctx, releaseName)
+	if err != nil {
+		return "", fmt.Errorf("unable to get service: %v", err)
+	}
 
+	spew.Dump("service", svc)
+	ingress, _ := m.getReleaseIngress(ctx, releaseName)
+	spew.Dump("ingress", ingress)
+
+	fmt.Printf("expose pod %d for pod %s \n", port, currentPod)
+	return fmt.Sprintf("https://pub-url-%d", port), nil
+}
+
+func (m Resource) getReleaseService(ctx context.Context, releaseName string) (*v1core.Service, error) {
+	servicesList := &v1core.ServiceList{}
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{
 			"app.kubernetes.io/instance":  releaseName,
@@ -120,19 +134,52 @@ func (m Resource) ExposePort(ctx context.Context, port int) (string, error) {
 	})
 
 	if err != nil {
-		return "", fmt.Errorf("build serviec selector error: %s", err)
+		return nil, fmt.Errorf("build service selector error: %s", err)
 	}
 
 	if err = m.client.List(ctx, servicesList, client.MatchingLabelsSelector{
 		Selector: selector,
 	}, client.InNamespace(m.namespace)); err != nil {
-		return "", fmt.Errorf("service list error: %v", err)
+		return nil, fmt.Errorf("service list error: %v", err)
 	}
 
-	spew.Dump("releaseName", releaseName)
+	if len(servicesList.Items) == 0 {
+		return nil, fmt.Errorf("unable to find manager service")
+	}
 
-	fmt.Printf("expose pod %d for pod %s \n", port, currentPod)
-	return fmt.Sprintf("https://pub-url-%d", port), nil
+	if len(servicesList.Items) > 1 {
+		return nil, fmt.Errorf("service is ambigous")
+	}
+
+	return &servicesList.Items[0], nil
+}
+
+func (m Resource) getReleaseIngress(ctx context.Context, releaseName string) (*v1ingress.Ingress, error) {
+	ingressList := &v1ingress.IngressList{}
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			"app.kubernetes.io/instance": releaseName,
+			"app.kubernetes.io/name":     "tinysystems-operator",
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build ingress selector error: %s", err)
+	}
+
+	if err = m.client.List(ctx, ingressList, client.MatchingLabelsSelector{
+		Selector: selector,
+	}, client.InNamespace(m.namespace)); err != nil {
+		return nil, fmt.Errorf("service list error: %v", err)
+	}
+
+	if len(ingressList.Items) == 0 {
+		return nil, fmt.Errorf("unable to find manager ingress")
+	}
+
+	if len(ingressList.Items) > 1 {
+		return nil, fmt.Errorf("ingress is ambigous")
+	}
+	return &ingressList.Items[0], nil
 }
 
 func (m Resource) DisclosePort(ctx context.Context, port int) error {
