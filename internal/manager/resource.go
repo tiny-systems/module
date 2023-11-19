@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -13,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strings"
@@ -26,7 +27,7 @@ type Resource struct {
 type ResourceInterface interface {
 	CleanupExampleNodes(ctx context.Context, mod module.Info) error
 	RegisterModule(ctx context.Context, mod module.Info) error
-	ExposePort(ctx context.Context, port int) (string, error)
+	ExposePort(ctx context.Context, name string, port int) (string, error)
 	DisclosePort(ctx context.Context, port int) error
 	RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error
 }
@@ -84,7 +85,7 @@ func (m Resource) RegisterModule(ctx context.Context, mod module.Info) error {
 	return err
 }
 
-func (m Resource) ExposePort(ctx context.Context, port int) (string, error) {
+func (m Resource) ExposePort(ctx context.Context, name string, port int) (string, error) {
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
 		return "", fmt.Errorf("unable to determine current pod")
@@ -115,12 +116,87 @@ func (m Resource) ExposePort(ctx context.Context, port int) (string, error) {
 		return "", fmt.Errorf("unable to get service: %v", err)
 	}
 
-	spew.Dump("service", svc)
+	if err = m.exposeServicePod(ctx, svc, port); err != nil {
+		return "", err
+	}
 	ingress, _ := m.getReleaseIngress(ctx, releaseName)
-	spew.Dump("ingress", ingress)
 
-	fmt.Printf("expose pod %d for pod %s \n", port, currentPod)
-	return fmt.Sprintf("https://pub-url-%d", port), nil
+	if ingress == nil {
+		return "", fmt.Errorf("no ingress")
+	}
+
+	return m.updateIngress(ctx, ingress, svc, name, port)
+}
+
+func (m Resource) updateIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, name string, port int) (string, error) {
+	var hostNamePrefix string
+
+	for k, v := range ingress.Annotations {
+		if k == v1alpha1.IngressHostNameSuffixAnnotation {
+			hostNamePrefix = v
+		}
+	}
+	if hostNamePrefix == "" {
+		return "", fmt.Errorf("ingress hostname prefix annotations is invalid")
+	}
+
+	var (
+		hostname = fmt.Sprintf("%s%s", name, hostNamePrefix)
+	)
+
+	for _, rule := range ingress.Spec.Rules {
+		if rule.Host == hostname && rule.IngressRuleValue.HTTP != nil {
+			for _, p := range rule.IngressRuleValue.HTTP.Paths {
+				p.Backend.Service.Name = service.Name
+				p.Backend.Service.Port.Number = int32(port)
+				break
+			}
+			// update rule for the given host
+		}
+	}
+	pathType := v1ingress.PathTypePrefix
+
+	ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
+		Host: hostname,
+		IngressRuleValue: v1ingress.IngressRuleValue{
+			HTTP: &v1ingress.HTTPIngressRuleValue{
+				Paths: []v1ingress.HTTPIngressPath{
+					{
+						Path:     "/",
+						PathType: &pathType,
+						Backend: v1ingress.IngressBackend{
+							Service: &v1ingress.IngressServiceBackend{
+								Name: service.Name,
+								Port: v1ingress.ServiceBackendPort{
+									Number: int32(port),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if err := m.client.Update(ctx, ingress); err != nil {
+		return "", err
+	}
+	return hostname, nil
+}
+
+func (m Resource) exposeServicePod(ctx context.Context, svc *v1core.Service, port int) error {
+	for _, p := range svc.Spec.Ports {
+		if p.Port == int32(port) {
+			// service has port already exposed
+			return nil
+		}
+	}
+	svc.Spec.Ports = append(svc.Spec.Ports, v1core.ServicePort{
+		Name:       fmt.Sprintf("port%d", port),
+		Port:       int32(port),
+		TargetPort: intstr.FromInt32(int32(port)),
+	})
+	return m.client.Update(ctx, svc)
 }
 
 func (m Resource) getReleaseService(ctx context.Context, releaseName string) (*v1core.Service, error) {

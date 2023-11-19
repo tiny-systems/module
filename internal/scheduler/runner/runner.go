@@ -108,7 +108,7 @@ func NewRunner(node v1alpha1.TinyNode, component m.Component, callbacks ...track
 
 				var err error
 				// upgrade
-				r.publicURL, err = r.manager.ExposePort(ctx, finalPort)
+				r.publicURL, err = r.manager.ExposePort(ctx, r.node.Name, finalPort)
 				if err != nil {
 					return "", err
 				}

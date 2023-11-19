@@ -28,10 +28,14 @@ const (
 	ComponentInfoAnnotation        = "tinysystems.io/component-info"
 	ComponentTagsAnnotation        = "tinysystems.io/component-tags"
 
-	// visual annotations
+	// visual annotations used by platform
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
+
+	// ingress annotations
+	IngressHostNameSuffixAnnotation      = "tinysystems.io/ingress-hostname-suffix"
+	IngressWildcardCertificateAnnotation = "tinysystems.io/ingress-wildcard-certificate"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
