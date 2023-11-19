@@ -144,39 +144,44 @@ func (m Resource) updateIngress(ctx context.Context, ingress *v1ingress.Ingress,
 		hostname = fmt.Sprintf("%s%s", name, hostNamePrefix)
 	)
 
+	var (
+		found bool
+	)
 	for _, rule := range ingress.Spec.Rules {
 		if rule.Host == hostname && rule.IngressRuleValue.HTTP != nil {
 			for _, p := range rule.IngressRuleValue.HTTP.Paths {
-				p.Backend.Service.Name = service.Name
-				p.Backend.Service.Port.Number = int32(port)
-				break
+				if p.Backend.Service.Port.Number == int32(port) {
+					p.Backend.Service.Name = service.Name
+					found = true
+				}
 			}
 			// update rule for the given host
 		}
 	}
-	pathType := v1ingress.PathTypePrefix
-
-	ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
-		Host: hostname,
-		IngressRuleValue: v1ingress.IngressRuleValue{
-			HTTP: &v1ingress.HTTPIngressRuleValue{
-				Paths: []v1ingress.HTTPIngressPath{
-					{
-						Path:     "/",
-						PathType: &pathType,
-						Backend: v1ingress.IngressBackend{
-							Service: &v1ingress.IngressServiceBackend{
-								Name: service.Name,
-								Port: v1ingress.ServiceBackendPort{
-									Number: int32(port),
+	if !found {
+		pathType := v1ingress.PathTypePrefix
+		ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
+			Host: hostname,
+			IngressRuleValue: v1ingress.IngressRuleValue{
+				HTTP: &v1ingress.HTTPIngressRuleValue{
+					Paths: []v1ingress.HTTPIngressPath{
+						{
+							Path:     "/",
+							PathType: &pathType,
+							Backend: v1ingress.IngressBackend{
+								Service: &v1ingress.IngressServiceBackend{
+									Name: service.Name,
+									Port: v1ingress.ServiceBackendPort{
+										Number: int32(port),
+									},
 								},
 							},
 						},
 					},
 				},
 			},
-		},
-	})
+		})
+	}
 
 	if err := m.client.Update(ctx, ingress); err != nil {
 		return "", err
