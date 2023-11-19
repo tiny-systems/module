@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,7 +29,6 @@ import (
 
 type Runner struct {
 	// unique instance name
-	name string
 
 	flowID string
 	//
@@ -72,7 +72,6 @@ type Runner struct {
 func NewRunner(node v1alpha1.TinyNode, component m.Component, callbacks ...tracker.Callback) *Runner {
 
 	r := &Runner{
-		name:                node.Name,
 		flowID:              node.Labels[v1alpha1.FlowIDLabel],
 		node:                node,
 		component:           component,
@@ -108,7 +107,10 @@ func NewRunner(node v1alpha1.TinyNode, component m.Component, callbacks ...track
 
 				var err error
 				// upgrade
-				r.publicURL, err = r.manager.ExposePort(ctx, r.node.Name, finalPort)
+				// hostname it's a last part of the node name
+				hostname := strings.Split(r.node.Name, ".")
+
+				r.publicURL, err = r.manager.ExposePort(ctx, hostname[len(hostname)-1], finalPort)
 				if err != nil {
 					return "", err
 				}
@@ -321,7 +323,7 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 	}
 
 	var i int64
-	key := metrics.GetMetricKey(c.name, metrics.MetricNodeMessageReceived)
+	key := metrics.GetMetricKey(c.node.Name, metrics.MetricNodeMessageReceived)
 	c.stats.SetIfAbsent(key, &i)
 	counter, _ := c.stats.Get(key)
 	atomic.AddInt64(counter, 1)
@@ -347,7 +349,7 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 	// input ports always have no errors
 	for _, callback := range c.callbacks {
 		callback(tracker.PortMsg{
-			NodeName:  c.name,
+			NodeName:  c.node.Name,
 			EdgeID:    msg.EdgeID,
 			PortName:  msg.To, // INPUT PORT OF THE NODE
 			Data:      portData,
@@ -380,7 +382,7 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh
 	// todo consider flow envs here
 
 	return c.input(ctx, &Msg{
-		To:       utils.GetPortFullName(c.name, m.SettingsPort),
+		To:       utils.GetPortFullName(c.node.Name, m.SettingsPort),
 		Data:     []byte("{}"),
 		Callback: EmptyCallback,
 	}, outputCh)
@@ -402,7 +404,7 @@ func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *
 		case msg, ok := <-inputCh:
 			if !ok {
 				fmt.Println("channel close")
-				c.log.Info("channel closed, exiting", c.name)
+				c.log.Info("channel closed, exiting", c.node.Name)
 				return c.cleanup()
 			}
 			// configuration error
@@ -522,7 +524,7 @@ func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg
 		// send to destination
 		// track how many messages component send
 		var y int64
-		key := metrics.GetMetricKey(c.name, metrics.MetricNodeMessageSent)
+		key := metrics.GetMetricKey(c.node.Name, metrics.MetricNodeMessageSent)
 		c.stats.SetIfAbsent(key, &y)
 		counter, _ := c.stats.Get(key)
 		atomic.AddInt64(counter, 1)
@@ -534,7 +536,7 @@ func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg
 		counter, _ = c.stats.Get(key)
 		atomic.AddInt64(counter, 1)
 
-		fromPort := utils.GetPortFullName(c.name, port)
+		fromPort := utils.GetPortFullName(c.node.Name, port)
 
 		// send message
 		outputCh <- &Msg{
@@ -548,7 +550,7 @@ func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg
 				// only output ports may have errors
 				for _, callback := range c.callbacks {
 					callback(tracker.PortMsg{
-						NodeName:  c.name,
+						NodeName:  c.node.Name,
 						EdgeID:    e.ID,
 						PortName:  fromPort, // OUTPUT PORT OF THE NODE
 						Data:      dataBytes,
