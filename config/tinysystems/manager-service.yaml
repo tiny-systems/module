@@ -9,10 +9,6 @@ spec:
     control-plane: controller-manager
     app.kubernetes.io/name: deployment
     app.kubernetes.io/instance: controller-manager
-    app.kubernetes.io/component: manager
-    app.kubernetes.io/created-by: operator
-    app.kubernetes.io/part-of: operator
-    app.kubernetes.io/managed-by: kustomize
   ports:
     - name: http
       port: 80

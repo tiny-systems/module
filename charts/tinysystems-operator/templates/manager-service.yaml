@@ -8,12 +8,8 @@ metadata:
 spec:
   type: {{ .Values.managerService.type }}
   selector:
-    app.kubernetes.io/component: manager
-    app.kubernetes.io/created-by: operator
     app.kubernetes.io/instance: controller-manager
-    app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: deployment
-    app.kubernetes.io/part-of: operator
     control-plane: controller-manager
   {{- include "tinysystems-operator.selectorLabels" . | nindent 4 }}
   ports:
