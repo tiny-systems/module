@@ -89,7 +89,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	status, err := r.Scheduler.Upsert(*instance)
 	if err != nil {
-		// create event maybe?
+		// create event?
 		//r.Recorder.Event(instance, "Error", "test", "Configuration")
 		l.Error(err, "scheduler instance error")
 		return reconcile.Result{}, err

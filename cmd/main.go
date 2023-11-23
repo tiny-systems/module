@@ -26,8 +26,6 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
-	"github.com/tiny-systems/module/internal/controller"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -35,6 +33,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -115,6 +116,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TinyTracker")
+		os.Exit(1)
+	}
+	if err = (&controller.TinySignalReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TinySignal")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

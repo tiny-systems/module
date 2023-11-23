@@ -198,16 +198,15 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		l.Info("Installing components", "versionID", versionID)
+		l.Info("installing components", "versionID", versionID)
 
 		// uninstall palette resources from previous versions
-
 		if err = crManager.CleanupExampleNodes(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to cleanup previous versions components")
 			return
 		}
 
-		l.Info("Registering", "module", moduleInfo.GetMajorName())
+		l.Info("registering", "module", moduleInfo.GetMajorName())
 
 		if err = crManager.RegisterModule(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to register a module")
@@ -216,7 +215,7 @@ var runCmd = &cobra.Command{
 		///
 
 		for _, cmp := range registry.Get() {
-			l.Info("Registering", "component", cmp.GetInfo().Name)
+			l.Info("registering", "component", cmp.GetInfo().Name)
 
 			if err = crManager.RegisterExampleNode(ctx, cmp, moduleInfo); err != nil {
 				l.Error(err, "unable to register", "component", cmp.GetInfo().Name)
@@ -228,7 +227,7 @@ var runCmd = &cobra.Command{
 
 		wg.Go(func() error {
 			if err := crManager.Start(ctx); err != nil {
-				l.Error(err, "Problem starting manager lookup")
+				l.Error(err, "problem during resource manager start")
 				return err
 			}
 			return nil
@@ -237,12 +236,12 @@ var runCmd = &cobra.Command{
 		// kubebuilder start
 
 		wg.Go(func() error {
-			l.Info("Starting kubebuilder manager")
+			l.Info("starting kubebuilder operator")
 			defer func() {
-				l.Info("Kubebuilder manager stopped")
+				l.Info("kubebuilder operator stopped")
 			}()
 			if err := mgr.Start(ctx); err != nil {
-				l.Error(err, "Problem running kubebuilder")
+				l.Error(err, "problem during kubebuilder operator start")
 				return err
 			}
 			return nil
@@ -254,12 +253,12 @@ var runCmd = &cobra.Command{
 		// grpc client start
 
 		wg.Go(func() error {
-			l.Info("Starting client pool")
+			l.Info("starting gRPC client pool")
 			defer func() {
-				l.Info("Client pool stopped")
+				l.Info("gRPC client pool stopped")
 			}()
 			if err := pool.Start(ctx, outputCh); err != nil {
-				l.Error(err, "Client pool error")
+				l.Error(err, "client pool error")
 				return err
 			}
 			return nil
@@ -269,14 +268,14 @@ var runCmd = &cobra.Command{
 
 		/// Instance scheduler
 		wg.Go(func() error {
-			l.Info("Starting scheduler")
+			l.Info("starting scheduler")
 			defer func() {
-				l.Info("Scheduler stopped")
+				l.Info("scheduler stopped")
 			}()
 			if err := sch.Start(ctx, inputCh, outputCh, func(msg tracker.PortMsg) {
 				trackManager.Track(msg)
 			}); err != nil {
-				l.Error(err, "Unable to start scheduler")
+				l.Error(err, "unable to start scheduler")
 				return err
 			}
 			return nil
@@ -285,20 +284,20 @@ var runCmd = &cobra.Command{
 		// run tracker
 
 		wg.Go(func() error {
-			l.Info("Starting tracker")
+			l.Info("starting tracker manager")
 			defer func() {
-				l.Info("Tracker stopped")
+				l.Info("tracker manager stopped")
 			}()
 			if err := trackManager.Run(ctx); err != nil {
-				l.Error(err, "Unable to start tracker")
+				l.Error(err, "unable to start tracker manager")
 				return err
 			}
 			return nil
 		})
 
-		l.Info("Waiting...")
+		l.Info("waiting...")
 		wg.Wait()
 
-		l.Info("All done")
+		l.Info("all done")
 	},
 }
