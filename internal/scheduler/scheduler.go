@@ -95,7 +95,7 @@ func (s *Schedule) Destroy(name string) error {
 	return nil
 }
 
-func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideCh chan *runner.Msg, callbacks ...tracker.Callback) error {
+func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outsideCh chan *runner.Msg, callbacks ...tracker.Callback) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -105,7 +105,7 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 
 	for {
 		select {
-		case msg := <-inputCh:
+		case msg := <-eventBus:
 
 			// check subject
 			node, _ := utils.ParseFullPortName(msg.To)
@@ -114,6 +114,7 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 				// send to nodes' personal channel
 				instanceCh <- msg
 			} else {
+				s.log.Info("instance not found in a local map of channels", "node", node)
 				outsideCh <- msg
 			}
 			//
@@ -126,6 +127,7 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 				req.StatusCh <- v1alpha1.TinyNodeStatus{
 					Error: fmt.Sprintf("component %s is not presented in the module", req.Node.Spec.Component),
 				}
+				continue
 			}
 			s.instancesMap.Upsert(req.Node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
 				//
@@ -140,26 +142,32 @@ func (s *Schedule) Start(ctx context.Context, inputCh chan *runner.Msg, outsideC
 						// main instance lifetime goroutine
 						// exit unregisters instance
 						//
-						instanceCh := make(chan *runner.Msg)
+						inputCh := make(chan *runner.Msg)
 						// then close
-						defer close(instanceCh)
-						// delete first
-						inputChMap.Set(req.Node.Name, instanceCh)
-						//
+						defer close(inputCh)
+
+						inputChMap.Set(req.Node.Name, inputCh)
+						// delete first to avoid writing into closed channel
 						defer inputChMap.Remove(req.Node.Name)
+
+						defer func() {
+							s.log.Info("instance stopped", "name", req.Node.Name)
+						}()
+
 						// process input ports
-						return instance.Process(ctx, instanceCh, inputCh)
+						return instance.Process(ctx, inputCh, eventBus)
 					})
 				}
 				//configure || reconfigure
-				if err := instance.Configure(ctx, req.Node, inputCh); err != nil {
+				if err := instance.Configure(ctx, req.Node, eventBus); err != nil {
 					s.log.Error(err, "configure error", "node", req.Node.Name)
 				}
-				if err := instance.Run(ctx, wg, inputCh); err != nil {
-					if err != context.Canceled {
-						s.log.Error(err, "run error")
-					}
-				}
+
+				//if err := instance.Run(ctx, wg, eventBus); err != nil {
+				//	if err != context.Canceled {
+				//		s.log.Error(err, "run error")
+				//	}
+				//}
 				//as instance for status
 				req.StatusCh <- instance.GetStatus()
 				return instance

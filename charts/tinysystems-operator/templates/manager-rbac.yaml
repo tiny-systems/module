@@ -109,6 +109,32 @@ rules:
 - apiGroups:
   - operator.tinysystems.io
   resources:
+  - tinysignals
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinysignals/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinysignals/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
   - tinytrackers
   verbs:
   - create

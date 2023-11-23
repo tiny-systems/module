@@ -57,10 +57,10 @@ func (t *manager) Track(msg PortMsg) {
 
 	for _, tt := range t.trackers {
 		if err := t.sendPortData(msg, tt); err != nil {
-			t.log.Error(err, "port webhook error")
+			t.log.Error(err, "port webhook error", "data", msg)
 		}
 		if err := t.sendNodeStatistics(msg, tt); err != nil {
-			t.log.Error(err, "stats webhook error")
+			t.log.Error(err, "stats webhook error", "data", msg)
 		}
 	}
 }

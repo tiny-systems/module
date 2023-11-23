@@ -275,7 +275,7 @@ func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error 
 	}
 
 	if len(portConfig.Configuration) == 0 {
-		return fmt.Errorf("port '%s' (from '%v') config is empty", port, portConfig.From)
+		return nil
 	}
 
 	//		// create config
@@ -400,10 +400,10 @@ func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *
 	for {
 		select {
 		case <-ctx.Done():
+			c.log.Info("runner process context is done", "runner", c.node.Name)
 			return c.cleanup()
 		case msg, ok := <-inputCh:
 			if !ok {
-				fmt.Println("channel close")
 				c.log.Info("channel closed, exiting", c.node.Name)
 				return c.cleanup()
 			}
@@ -490,7 +490,7 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 
 	wg.Go(func() error {
 		// reset run error
-		c.log.Info("trying to start emitter", "cmp", c.component.GetInfo().Name, "restart", c.needRestart)
+		c.log.Info("emitter start", "cmp", c.component.GetInfo().Name, "restart", c.needRestart)
 		defer close(c.emitCh)
 
 		// store emitErr atomic

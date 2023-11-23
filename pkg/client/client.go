@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -35,8 +36,9 @@ func SendWebhookData(urlPath string, headers map[string]string, data []byte) err
 		return err
 	}
 
+	response, _ := io.ReadAll(rsp.Body)
 	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("request failed with response code: %d", rsp.StatusCode)
+		return fmt.Errorf("request to %s failed with response code: %d %v; headers sent: %v", urlPath, rsp.StatusCode, string(response), req.Header)
 	}
 	return nil
 }
