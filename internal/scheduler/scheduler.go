@@ -36,17 +36,20 @@ type Schedule struct {
 	instancesMap cmap.ConcurrentMap[string, *runner.Runner]
 
 	// instance commands channel
-	instanceCh chan instanceRequest
+	newInstanceCh chan instanceRequest
 
 	// resource manager pass over to runners
 	manager manager.ResourceInterface
+
+	inputChMap cmap.ConcurrentMap[string, chan *runner.Msg]
 }
 
 func New() *Schedule {
 	return &Schedule{
-		instanceCh:    make(chan instanceRequest),
+		newInstanceCh: make(chan instanceRequest),
 		instancesMap:  cmap.New[*runner.Runner](),
 		componentsMap: cmap.New[module.Component](),
+		inputChMap:    cmap.New[chan *runner.Msg](),
 	}
 }
 
@@ -73,7 +76,7 @@ func (s *Schedule) Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, erro
 	statusCh := make(chan v1alpha1.TinyNodeStatus)
 	defer close(statusCh)
 
-	s.instanceCh <- instanceRequest{
+	s.newInstanceCh <- instanceRequest{
 		Node:     node,
 		StatusCh: statusCh,
 	}
@@ -81,8 +84,18 @@ func (s *Schedule) Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, erro
 }
 
 // Invoke sends data to the port of given instance name @todo
-func (s *Schedule) Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
-	return v1alpha1.TinyNodeStatus{}, nil
+func (s *Schedule) Invoke(node string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
+
+	if instanceCh, ok := s.inputChMap.Get(node); ok {
+		// send to nodes' personal channel
+
+		instanceCh <- &runner.Msg{
+			To:   utils.GetPortFullName(node, port),
+			Data: data,
+		}
+		return v1alpha1.TinyNodeStatus{}, nil
+	}
+	return v1alpha1.TinyNodeStatus{}, fmt.Errorf("node not found")
 }
 
 func (s *Schedule) Destroy(name string) error {
@@ -101,7 +114,6 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 	defer cancel()
 
 	wg, ctx := errgroup.WithContext(ctx)
-	inputChMap := cmap.New[chan *runner.Msg]()
 
 	for {
 		select {
@@ -110,7 +122,7 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 			// check subject
 			node, _ := utils.ParseFullPortName(msg.To)
 
-			if instanceCh, ok := inputChMap.Get(node); ok {
+			if instanceCh, ok := s.inputChMap.Get(node); ok {
 				// send to nodes' personal channel
 				instanceCh <- msg
 			} else {
@@ -120,12 +132,12 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 			//
 			// send outside or into some instance
 			// decide if we make external request or send im
-		case req := <-s.instanceCh:
+		case req := <-s.newInstanceCh:
 
 			cmp, ok := s.componentsMap.Get(req.Node.Spec.Component)
 			if !ok {
 				req.StatusCh <- v1alpha1.TinyNodeStatus{
-					Error: fmt.Sprintf("component %s is not presented in the module", req.Node.Spec.Component),
+					Error: fmt.Sprintf("component %s not found", req.Node.Spec.Component),
 				}
 				continue
 			}
@@ -146,16 +158,16 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 						// then close
 						defer close(inputCh)
 
-						inputChMap.Set(req.Node.Name, inputCh)
+						s.inputChMap.Set(req.Node.Name, inputCh)
 						// delete first to avoid writing into closed channel
-						defer inputChMap.Remove(req.Node.Name)
+						defer s.inputChMap.Remove(req.Node.Name)
 
 						defer func() {
 							s.log.Info("instance stopped", "name", req.Node.Name)
 						}()
 
 						// process input ports
-						return instance.Process(ctx, inputCh, eventBus)
+						return instance.Process(ctx, wg, inputCh, eventBus)
 					})
 				}
 				//configure || reconfigure
@@ -163,12 +175,6 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 					s.log.Error(err, "configure error", "node", req.Node.Name)
 				}
 
-				//if err := instance.Run(ctx, wg, eventBus); err != nil {
-				//	if err != context.Canceled {
-				//		s.log.Error(err, "run error")
-				//	}
-				//}
-				//as instance for status
 				req.StatusCh <- instance.GetStatus()
 				return instance
 			})

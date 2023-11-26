@@ -156,7 +156,7 @@ var runCmd = &cobra.Command{
 		}
 
 		if err = nodeController.SetupWithManager(mgr); err != nil {
-			l.Error(err, "unable to create node controller")
+			l.Error(err, "unable to create tinynode controller")
 			return
 		}
 
@@ -170,7 +170,7 @@ var runCmd = &cobra.Command{
 		}
 
 		if err = moduleController.SetupWithManager(mgr); err != nil {
-			l.Error(err, "unable to create module controller")
+			l.Error(err, "unable to create tinymodule controller")
 			return
 		}
 
@@ -183,7 +183,17 @@ var runCmd = &cobra.Command{
 			Manager: trackManager,
 			//
 		}).SetupWithManager(mgr); err != nil {
-			l.Error(err, "unable to create tiny tracker controller")
+			l.Error(err, "unable to create tinytracker controller")
+			return
+		}
+
+		if err = (&controller.TinySignalReconciler{
+			Client:    mgr.GetClient(),
+			Scheme:    mgr.GetScheme(),
+			Scheduler: sch,
+			Module:    moduleInfo,
+		}).SetupWithManager(mgr); err != nil {
+			l.Error(err, "unable to create tinysignal controller")
 			return
 		}
 

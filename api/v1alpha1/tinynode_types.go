@@ -22,6 +22,7 @@ import (
 
 const (
 	FlowIDLabel                    = "tinysystems.io/flow-id"
+	ModuleNameMajorLabel           = "tinysystems.io/module-name-major"
 	ModuleNameLabel                = "tinysystems.io/module-name"
 	ModuleVersionLabel             = "tinysystems.io/module-version"
 	ComponentDescriptionAnnotation = "tinysystems.io/component-description"
@@ -63,10 +64,6 @@ type TinyNodeSpec struct {
 	// Edges to send message next
 	// +kubebuilder:validation:Optional
 	Edges []TinyNodeEdge `json:"edges"`
-
-	//Run if emitter component should run
-	// +kubebuilder:validation:Optional
-	Run bool `json:"run"`
 }
 
 type TinyNodeEdge struct {
@@ -97,6 +94,7 @@ type TinyNodePortConfig struct {
 	// +kubebuilder:validation:Optional
 	// Settings depend on a sender
 	From string `json:"from,omitempty"`
+
 	// +kubebuilder:validation:Required
 	Port string `json:"port"`
 

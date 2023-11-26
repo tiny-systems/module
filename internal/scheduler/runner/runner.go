@@ -241,9 +241,8 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 }
 
 // input processes input to the inherited component
-func (c *Runner) input(ctx context.Context, msg *Msg, outputCh chan *Msg) error {
+func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan *Msg) error {
 
-	_, port := utils.ParseFullPortName(msg.To)
 	//c.log.Info("process input", "port", port, "data", msg.Data, "node", c.name)
 
 	var nodePort *m.NodePort
@@ -368,7 +367,7 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh
 	// apply spec anyway
 	c.nodeLock.Lock()
 
-	if (c.isEmitting() && !node.Spec.Run || !c.isEmitting() && node.Spec.Run) || !reflect.DeepEqual(c.node.Spec.Ports, node.Spec.Ports) {
+	if !reflect.DeepEqual(c.node.Spec.Ports, node.Spec.Ports) {
 		c.needRestart = true
 	}
 	//
@@ -381,7 +380,7 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh
 	// we rely on totally internal settings of the settings port
 	// todo consider flow envs here
 
-	return c.input(ctx, &Msg{
+	return c.input(ctx, m.SettingsPort, &Msg{
 		To:       utils.GetPortFullName(c.node.Name, m.SettingsPort),
 		Data:     []byte("{}"),
 		Callback: EmptyCallback,
@@ -390,8 +389,8 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh
 }
 
 // Process main instance loop
-// read input port and push it to the component
-func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *Msg) error {
+// read input port and apply it to the component
+func (c *Runner) Process(ctx context.Context, wg *errgroup.Group, inputCh chan *Msg, outputCh chan *Msg) error {
 
 	c.cancelStopFuncsLock.Lock()
 	ctx, c.cancelFunc = context.WithCancel(ctx)
@@ -400,15 +399,27 @@ func (c *Runner) Process(ctx context.Context, inputCh chan *Msg, outputCh chan *
 	for {
 		select {
 		case <-ctx.Done():
+
 			c.log.Info("runner process context is done", "runner", c.node.Name)
 			return c.cleanup()
+
 		case msg, ok := <-inputCh:
 			if !ok {
 				c.log.Info("channel closed, exiting", c.node.Name)
 				return c.cleanup()
 			}
-			// configuration error
-			msg.Callback(c.input(ctx, msg, outputCh))
+
+			_, port := utils.ParseFullPortName(msg.To)
+
+			// check system ports
+			switch port {
+			case m.RunPort:
+				msg.Callback(c.run(ctx, wg, outputCh))
+			case m.StopPort:
+				msg.Callback(c.stop())
+			default:
+				msg.Callback(c.input(ctx, port, msg, outputCh))
+			}
 		}
 	}
 }
@@ -451,11 +462,22 @@ func (c *Runner) Destroy() error {
 		c.cancelFunc()
 		c.cancelFunc = nil
 	}
-
 	return nil
 }
 
-func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg) error {
+func (c *Runner) stop() error {
+
+	c.cancelStopFuncsLock.Lock()
+	defer c.cancelStopFuncsLock.Unlock()
+
+	if c.stopFunc != nil {
+		c.stopFunc()
+		c.stopFunc = nil
+	}
+	return nil
+}
+
+func (c *Runner) run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg) error {
 	emitterComponent, ok := c.component.(m.Emitter)
 	if !ok {
 		// not runnable underlying component
@@ -469,13 +491,6 @@ func (c *Runner) Run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 		// seems to be running
 		// to apply settings we decided earlier that we need a restart
 		c.stopFunc()
-	}
-
-	if !c.node.Spec.Run {
-		// no need to run and not need to stop
-		// sleep here to give some time other goroutine update `emitErr` atomic
-		time.Sleep(time.Second)
-		return nil
 	}
 
 	// looks like we about to run

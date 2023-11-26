@@ -35,10 +35,19 @@ spec:
           spec:
             description: TinySignalSpec defines the desired state of TinySignal
             properties:
-              foo:
+              data:
+                format: byte
+                type: string
+              node:
                 description: Foo is an example field of TinySignal. Edit tinysignal_types.go
                   to remove/update
                 type: string
+              port:
+                type: string
+            required:
+            - data
+            - node
+            - port
             type: object
           status:
             description: TinySignalStatus defines the observed state of TinySignal
