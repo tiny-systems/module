@@ -45,7 +45,6 @@ spec:
               port:
                 type: string
             required:
-            - data
             - node
             - port
             type: object
