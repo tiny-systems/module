@@ -6,9 +6,11 @@ type (
 
 const (
 	SaveStatePort string = "_save-state"
-	GetStatePort  string = "_get-state"
-	SettingsPort  string = "_settings"
-	StatusPort    string = "_status"
+	GetStatePort         = "_get-state"
+	SettingsPort         = "_settings"
+	StatusPort           = "_status"
+	RunPort              = "_run"
+	StopPort             = "_stop"
 )
 
 const (

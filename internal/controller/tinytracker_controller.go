@@ -20,11 +20,13 @@ import (
 	"context"
 	"github.com/tiny-systems/module/internal/tracker"
 	"k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"time"
 
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
@@ -60,14 +62,17 @@ func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if errors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
 			// For additional cleanup logic use finalizers.
-			if err = r.Manager.Deregister(req.Name); err != nil {
-				l.Error(err, "destroy tracker error")
-				return reconcile.Result{}, err
-			}
-			return reconcile.Result{}, nil
+			err = r.Manager.Deregister(req.Name)
 		}
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
+	}
+
+	ago := v1.NewTime(time.Now().Add(-time.Minute * 5))
+
+	if tracker.CreationTimestamp.Before(&ago) {
+		err = r.Delete(ctx, tracker)
+		return reconcile.Result{Requeue: true}, err
 	}
 
 	err = r.Manager.Register(*tracker)
@@ -78,7 +83,9 @@ func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return reconcile.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{
+		RequeueAfter: time.Minute * 5,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

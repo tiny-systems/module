@@ -18,6 +18,11 @@ package controller
 
 import (
 	"context"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/module"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -30,7 +35,9 @@ import (
 // TinySignalReconciler reconciles a TinySignal object
 type TinySignalReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	Scheduler scheduler.Scheduler
+	Module    module.Info
 }
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals,verbs=get;list;watch;create;update;patch;delete
@@ -47,10 +54,37 @@ type TinySignalReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	l := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	// to avoid making many queries to Kubernetes API we check name itself against current module
+	m, _, err := module.ParseFullName(req.Name)
+	if err != nil {
+		l.Error(err, "node has invalid name", "name", req.Name)
+		return reconcile.Result{}, err
+	}
 
+	if m != r.Module.GetMajorNameSanitised() {
+		// not we are
+		return reconcile.Result{}, nil
+	}
+
+	signal := &operatorv1alpha1.TinySignal{}
+	err = r.Get(context.Background(), req.NamespacedName, signal)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, err
+	}
+	spew.Dump(signal)
+
+	// send signal
+	if _, err = r.Scheduler.Invoke(signal.Spec.Node, signal.Spec.Port, signal.Spec.Data); err != nil {
+		return reconcile.Result{}, err
+	}
+	spew.Dump("DELETING", signal)
+	// delete
+	_ = r.Delete(ctx, signal)
 	return ctrl.Result{}, nil
 }
 
