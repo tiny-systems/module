@@ -31,6 +31,8 @@ type TinySignalSpec struct {
 	// Foo is an example field of TinySignal. Edit tinysignal_types.go to remove/update
 	Node string `json:"node"`
 	Port string `json:"port"`
+
+	// +kubebuilder:validation:Optional
 	Data []byte `json:"data"`
 }
 
