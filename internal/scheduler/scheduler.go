@@ -90,8 +90,9 @@ func (s *Schedule) Invoke(node string, port string, data []byte) (v1alpha1.TinyN
 		// send to nodes' personal channel
 
 		instanceCh <- &runner.Msg{
-			To:   utils.GetPortFullName(node, port),
-			Data: data,
+			To:       utils.GetPortFullName(node, port),
+			Data:     data,
+			Callback: runner.EmptyCallback,
 		}
 		return v1alpha1.TinyNodeStatus{}, nil
 	}

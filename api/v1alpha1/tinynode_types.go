@@ -22,9 +22,6 @@ import (
 
 const (
 	FlowIDLabel                    = "tinysystems.io/flow-id"
-	ModuleNameMajorLabel           = "tinysystems.io/module-name-major"
-	ModuleNameLabel                = "tinysystems.io/module-name"
-	ModuleVersionLabel             = "tinysystems.io/module-version"
 	ComponentDescriptionAnnotation = "tinysystems.io/component-description"
 	ComponentInfoAnnotation        = "tinysystems.io/component-info"
 	ComponentTagsAnnotation        = "tinysystems.io/component-tags"
@@ -109,6 +106,13 @@ type TinyNodePortConfig struct {
 
 // TinyNodeStatus defines the observed state of TinyNode
 type TinyNodeStatus struct {
+
+	// +kubebuilder:validation:Optional
+	ModuleFullName string `json:"moduleFullName"`
+
+	// +kubebuilder:validation:Optional
+	ModuleVersion string `json:"moduleVersion"`
+
 	// +kubebuilder:validation:Optional
 	Ports []TinyNodePortStatus `json:"ports"`
 

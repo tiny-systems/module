@@ -95,6 +95,9 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, err
 	}
 
+	status.ModuleVersion = r.Module.Version
+	status.ModuleFullName = r.Module.Name
+
 	// update status
 	instance.Status = status
 

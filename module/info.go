@@ -17,15 +17,15 @@ type Info struct {
 	Addr      string //listed address
 }
 
-// GetFullName Container image full name
-func (i Info) GetFullName() string {
+// GetNameAndVersion Container image full name
+func (i Info) GetNameAndVersion() string {
 	return fmt.Sprintf("%s:%s", i.Name, i.Version)
 }
 
 func (i Info) GetMajorName() string {
 	v, _ := version.ParseSemantic(i.Version)
 	if v == nil {
-		return i.GetFullName()
+		return i.GetNameAndVersion()
 	}
 	return fmt.Sprintf("%s:%d", i.Name, v.Major())
 }
