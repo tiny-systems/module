@@ -103,10 +103,16 @@ spec:
                   publicURL:
                     type: string
                 type: object
-              moduleFullName:
-                type: string
-              moduleVersion:
-                type: string
+              module:
+                properties:
+                  name:
+                    type: string
+                  version:
+                    type: string
+                required:
+                - name
+                - version
+                type: object
               ports:
                 items:
                   properties:
@@ -141,6 +147,8 @@ spec:
                 type: array
               status:
                 type: string
+            required:
+            - module
             type: object
         type: object
     served: true
