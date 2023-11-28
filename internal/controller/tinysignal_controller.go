@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -76,13 +75,10 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		return reconcile.Result{}, err
 	}
-	spew.Dump(signal)
-
 	// send signal
 	if _, err = r.Scheduler.Invoke(signal.Spec.Node, signal.Spec.Port, signal.Spec.Data); err != nil {
 		return reconcile.Result{}, err
 	}
-	spew.Dump("DELETING", signal)
 	// delete
 	_ = r.Delete(ctx, signal)
 	return ctrl.Result{}, nil

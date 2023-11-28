@@ -10,8 +10,6 @@ import (
 	v1ingress "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"os"
@@ -36,44 +34,46 @@ func NewManager(c client.Client, ns string) *Resource {
 	return &Resource{client: c, namespace: ns}
 }
 
+// CleanupExampleNodes  @todo deal with it later
 func (m Resource) CleanupExampleNodes(ctx context.Context, mod module.Info) error {
-	sel := labels.NewSelector()
-
-	req, err := labels.NewRequirement(v1alpha1.FlowIDLabel, selection.Equals, []string{""})
-	if err != nil {
-		return err
-	}
-	sel = sel.Add(*req)
-
-	req, err = labels.NewRequirement(v1alpha1.ModuleNameMajorLabel, selection.Equals, []string{mod.GetMajorNameSanitised()})
-	if err != nil {
-		return err
-	}
-	sel = sel.Add(*req)
-
-	req, err = labels.NewRequirement(v1alpha1.ModuleVersionLabel, selection.NotEquals, []string{mod.Version})
-	if err != nil {
-		return err
-	}
-	sel = sel.Add(*req)
-
-	return m.client.DeleteAllOf(ctx, &v1alpha1.TinyNode{}, client.InNamespace(m.namespace), client.MatchingLabelsSelector{
-		Selector: sel,
-	})
+	//sel := labels.NewSelector()
+	//
+	//req, err := labels.NewRequirement(v1alpha1.FlowIDLabel, selection.Equals, []string{""})
+	//if err != nil {
+	//	return err
+	//}
+	//sel = sel.Add(*req)
+	//
+	//req, err = labels.NewRequirement(v1alpha1.ModuleNameMajorLabel, selection.Equals, []string{mod.GetMajorNameSanitised()})
+	//if err != nil {
+	//	return err
+	//}
+	//sel = sel.Add(*req)
+	//
+	//req, err = labels.NewRequirement(v1alpha1.ModuleVersionLabel, selection.NotEquals, []string{mod.Version})
+	//if err != nil {
+	//	return err
+	//}
+	//sel = sel.Add(*req)
+	//
+	//return m.client.DeleteAllOf(ctx, &v1alpha1.TinyNode{}, client.InNamespace(m.namespace), client.MatchingLabelsSelector{
+	//	Selector: sel,
+	//})
+	return nil
 }
 
 func (m Resource) RegisterModule(ctx context.Context, mod module.Info) error {
 
 	spec := v1alpha1.TinyModuleSpec{
-		Image: mod.GetFullName(),
+		Image: mod.GetNameAndVersion(),
 	}
 
 	node := &v1alpha1.TinyModule{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: m.namespace, // @todo make dynamic
 			Name:      mod.GetMajorNameSanitised(),
-			Labels: map[string]string{
-				v1alpha1.ModuleNameLabel: mod.Name,
+			Labels:    map[string]string{
+				//	v1alpha1.ModuleNameLabel: mod.Name,
 			},
 			Annotations: map[string]string{},
 		},
@@ -277,11 +277,11 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: m.namespace, // @todo make dynamic
 			Name:      module.GetNodeFullName(mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
-			Labels: map[string]string{
-				v1alpha1.FlowIDLabel:          "", //<-- empty flow means that's a node for palette
-				v1alpha1.ModuleNameMajorLabel: mod.GetMajorNameSanitised(),
-				v1alpha1.ModuleNameLabel:      mod.Name,
-				v1alpha1.ModuleVersionLabel:   mod.Version,
+			Labels:    map[string]string{
+				//v1alpha1.FlowIDLabel:          "", //<-- empty flow means that's a node for palette
+				//v1alpha1.ModuleNameMajorLabel: mod.GetMajorNameSanitised(),
+				//v1alpha1.ModuleNameLabel:      mod.Name,
+				//v1alpha1.ModuleVersionLabel:   mod.Version,
 			},
 			Annotations: map[string]string{
 				v1alpha1.ComponentDescriptionAnnotation: componentInfo.Description,

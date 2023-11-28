@@ -102,6 +102,10 @@ spec:
                   publicURL:
                     type: string
                 type: object
+              moduleFullName:
+                type: string
+              moduleVersion:
+                type: string
               ports:
                 items:
                   properties:
