@@ -104,14 +104,18 @@ type TinyNodePortConfig struct {
 	Configuration []byte `json:"configuration"`
 }
 
+type TinyNodeModuleStatus struct {
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+	// +kubebuilder:validation:Required
+	Version string `json:"version"`
+}
+
 // TinyNodeStatus defines the observed state of TinyNode
 type TinyNodeStatus struct {
 
-	// +kubebuilder:validation:Optional
-	ModuleFullName string `json:"moduleFullName"`
-
-	// +kubebuilder:validation:Optional
-	ModuleVersion string `json:"moduleVersion"`
+	// +kubebuilder:validation:Required
+	Module TinyNodeModuleStatus `json:"module"`
 
 	// +kubebuilder:validation:Optional
 	Ports []TinyNodePortStatus `json:"ports"`

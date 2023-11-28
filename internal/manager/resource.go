@@ -277,11 +277,8 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: m.namespace, // @todo make dynamic
 			Name:      module.GetNodeFullName(mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
-			Labels:    map[string]string{
-				//v1alpha1.FlowIDLabel:          "", //<-- empty flow means that's a node for palette
-				//v1alpha1.ModuleNameMajorLabel: mod.GetMajorNameSanitised(),
-				//v1alpha1.ModuleNameLabel:      mod.Name,
-				//v1alpha1.ModuleVersionLabel:   mod.Version,
+			Labels: map[string]string{
+				v1alpha1.FlowIDLabel: "", //<-- empty flow means that's a node for palette
 			},
 			Annotations: map[string]string{
 				v1alpha1.ComponentDescriptionAnnotation: componentInfo.Description,
