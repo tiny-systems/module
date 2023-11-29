@@ -237,6 +237,13 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 	status.Http.ListenPort = port
 	status.Http.PublicURL = c.publicURL
 
+	cmpInfo := c.component.GetInfo()
+	//
+	status.Component = v1alpha1.TinyNodeComponentStatus{
+		Description: cmpInfo.Description,
+		Info:        cmpInfo.Info,
+		Tags:        cmpInfo.Tags,
+	}
 	return status
 }
 
