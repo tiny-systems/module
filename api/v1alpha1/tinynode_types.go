@@ -21,10 +21,7 @@ import (
 )
 
 const (
-	FlowIDLabel                    = "tinysystems.io/flow-id"
-	ComponentDescriptionAnnotation = "tinysystems.io/component-description"
-	ComponentInfoAnnotation        = "tinysystems.io/component-info"
-	ComponentTagsAnnotation        = "tinysystems.io/component-tags"
+	FlowIDLabel = "tinysystems.io/flow-id"
 
 	// visual annotations used by platform
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
@@ -111,11 +108,23 @@ type TinyNodeModuleStatus struct {
 	Version string `json:"version"`
 }
 
+type TinyNodeComponentStatus struct {
+	// +kubebuilder:validation:Required
+	Description string `json:"description"`
+	// +kubebuilder:validation:Required
+	Info string `json:"info"`
+	// +kubebuilder:validation:Optional
+	Tags []string `json:"tags"`
+}
+
 // TinyNodeStatus defines the observed state of TinyNode
 type TinyNodeStatus struct {
 
 	// +kubebuilder:validation:Required
 	Module TinyNodeModuleStatus `json:"module"`
+
+	// +kubebuilder:validation:Required
+	Component TinyNodeComponentStatus `json:"component"`
 
 	// +kubebuilder:validation:Optional
 	Ports []TinyNodePortStatus `json:"ports"`

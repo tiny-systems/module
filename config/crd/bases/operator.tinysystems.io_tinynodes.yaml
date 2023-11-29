@@ -87,6 +87,20 @@ spec:
           status:
             description: TinyNodeStatus defines the observed state of TinyNode
             properties:
+              component:
+                properties:
+                  description:
+                    type: string
+                  info:
+                    type: string
+                  tags:
+                    items:
+                      type: string
+                    type: array
+                required:
+                - description
+                - info
+                type: object
               emitter:
                 type: boolean
               emitting:
@@ -147,6 +161,7 @@ spec:
               status:
                 type: string
             required:
+            - component
             - module
             type: object
         type: object

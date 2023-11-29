@@ -14,7 +14,6 @@ import (
 
 	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strings"
 )
 
 type Resource struct {
@@ -279,11 +278,6 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 			Name:      module.GetNodeFullName(mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
 			Labels: map[string]string{
 				v1alpha1.FlowIDLabel: "", //<-- empty flow means that's a node for palette
-			},
-			Annotations: map[string]string{
-				v1alpha1.ComponentDescriptionAnnotation: componentInfo.Description,
-				v1alpha1.ComponentInfoAnnotation:        componentInfo.Info,
-				v1alpha1.ComponentTagsAnnotation:        strings.Join(componentInfo.Tags, ","),
 			},
 		},
 		Spec: v1alpha1.TinyNodeSpec{
