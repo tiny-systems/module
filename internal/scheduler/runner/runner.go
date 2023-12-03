@@ -218,6 +218,13 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 		status.Status = fmt.Sprintf("ERROR: %s", status.Error)
 	}
 
+	cmpInfo := c.component.GetInfo()
+	//
+	status.Component = v1alpha1.TinyNodeComponentStatus{
+		Description: cmpInfo.Description,
+		Info:        cmpInfo.Info,
+		Tags:        cmpInfo.Tags,
+	}
 	if _, ok := c.component.(m.HTTPService); ok {
 		status.Http.Available = true
 	} else {
@@ -236,14 +243,6 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 
 	status.Http.ListenPort = port
 	status.Http.PublicURL = c.publicURL
-
-	cmpInfo := c.component.GetInfo()
-	//
-	status.Component = v1alpha1.TinyNodeComponentStatus{
-		Description: cmpInfo.Description,
-		Info:        cmpInfo.Info,
-		Tags:        cmpInfo.Tags,
-	}
 	return status
 }
 
