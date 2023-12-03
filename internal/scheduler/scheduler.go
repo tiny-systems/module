@@ -88,7 +88,6 @@ func (s *Schedule) Invoke(node string, port string, data []byte) (v1alpha1.TinyN
 
 	if instanceCh, ok := s.inputChMap.Get(node); ok {
 		// send to nodes' personal channel
-
 		instanceCh <- &runner.Msg{
 			To:       utils.GetPortFullName(node, port),
 			Data:     data,
