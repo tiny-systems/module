@@ -154,7 +154,7 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 		return ports[i].Source == ports[j].Source
 	})
 
-	var configurableDefinitions = make(map[string]*ajson.Node)
+	configurableDefinitions := make(map[string]*ajson.Node)
 
 	c.nodeLock.RLock()
 	defer c.nodeLock.RUnlock()
@@ -414,7 +414,6 @@ func (c *Runner) Process(ctx context.Context, wg *errgroup.Group, inputCh chan *
 				c.log.Info("channel closed, exiting", c.node.Name)
 				return c.cleanup()
 			}
-
 			_, port := utils.ParseFullPortName(msg.To)
 
 			// check system ports
@@ -513,7 +512,9 @@ func (c *Runner) run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg
 		// reset run error
 		c.log.Info("emitter start", "cmp", c.component.GetInfo().Name, "restart", c.needRestart)
 		defer close(c.emitCh)
-
+		defer func() {
+			c.log.Info("emitter stopped")
+		}()
 		// store emitErr atomic
 		c.emitErr.Store(
 			emitterComponent.Emit(emitCtx, func(port string, data interface{}) error {

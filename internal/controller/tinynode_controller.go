@@ -23,10 +23,14 @@ import (
 	"github.com/tiny-systems/module/module"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -58,6 +62,7 @@ type TinyNodeReconciler struct {
 func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
+	l.Info("reconcile", "tinynode", req.Name)
 	m, _, err := module.ParseFullName(req.Name)
 	if err != nil {
 		l.Error(err, "node has invalid name", "name", req.Name)
@@ -114,5 +119,30 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinyNode{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&operatorv1alpha1.TinySignal{}, &SignalEventHandler{}).
 		Complete(r)
+}
+
+var _ handler.EventHandler = &SignalEventHandler{}
+
+type SignalEventHandler struct{}
+
+func (s SignalEventHandler) Create(_ context.Context, _ event.CreateEvent, _ workqueue.RateLimitingInterface) {
+}
+func (s SignalEventHandler) Update(_ context.Context, _ event.UpdateEvent, _ workqueue.RateLimitingInterface) {
+}
+func (s SignalEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.RateLimitingInterface) {
+}
+
+func (s SignalEventHandler) Delete(ctx context.Context, event event.DeleteEvent, q workqueue.RateLimitingInterface) {
+	signal, ok := event.Object.(*operatorv1alpha1.TinySignal)
+	if !ok {
+		return
+	}
+	q.Add(reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      signal.Spec.Node,
+			Namespace: signal.Namespace,
+		},
+	})
 }

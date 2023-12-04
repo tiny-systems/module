@@ -150,10 +150,10 @@ type TinyNodeHttpStatus struct {
 	Available bool `json:"available,omitempty"`
 
 	// +kubebuilder:validation:Optional
-	ListenPort int `json:"listenPort"`
+	ListenPort int `json:"listenPort,omitempty"`
 
 	// +kubebuilder:validation:Optional
-	PublicURL string `json:"publicURL"`
+	PublicURL string `json:"publicURL,omitempty"`
 }
 
 //+kubebuilder:object:root=true

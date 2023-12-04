@@ -89,11 +89,13 @@ func (t *manager) sendPortData(msg PortMsg, tracker v1alpha1.TinyTracker) error 
 	headers := map[string]string{
 		client.HeaderFlowID:       msg.FlowID,
 		client.HeaderPortFullName: msg.PortName,
-		client.HeaderEdgeID:       msg.EdgeID,
 		"Content-Type":            "application/octet-stream",
 	}
 	if msg.Err != nil {
 		headers[client.HeaderError] = msg.Err.Error()
+	}
+	if msg.EdgeID != "" {
+		headers[client.HeaderEdgeID] = msg.EdgeID
 	}
 	return client.SendWebhookData(tracker.Spec.PortDataWebhook.URL, headers, msg.Data)
 }
@@ -123,9 +125,11 @@ func (t *manager) sendNodeStatistics(msg PortMsg, tracker v1alpha1.TinyTracker) 
 	headers := map[string]string{
 		client.HeaderFlowID:       msg.FlowID,
 		client.HeaderPortFullName: msg.PortName,
-		client.HeaderEdgeID:       msg.EdgeID,
 		client.HeaderNodeName:     msg.NodeName,
 		"Content-Type":            "application/json",
+	}
+	if msg.EdgeID != "" {
+		headers[client.HeaderEdgeID] = msg.EdgeID
 	}
 	return client.SendWebhookData(tracker.Spec.NodeStatisticsWebhook.URL, headers, data)
 }
