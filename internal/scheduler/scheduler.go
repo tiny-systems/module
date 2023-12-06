@@ -12,6 +12,7 @@ import (
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"golang.org/x/sync/errgroup"
+	"sync"
 )
 
 type Scheduler interface {
@@ -86,16 +87,25 @@ func (s *Schedule) Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, erro
 // Invoke sends data to the port of given instance name @todo
 func (s *Schedule) Invoke(node string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
 
-	if instanceCh, ok := s.inputChMap.Get(node); ok {
-		// send to nodes' personal channel
-		instanceCh <- &runner.Msg{
-			To:       utils.GetPortFullName(node, port),
-			Data:     data,
-			Callback: runner.EmptyCallback,
-		}
-		return v1alpha1.TinyNodeStatus{}, nil
+	instanceCh, ok := s.inputChMap.Get(node)
+	if !ok {
+		return v1alpha1.TinyNodeStatus{}, fmt.Errorf("node not found")
 	}
-	return v1alpha1.TinyNodeStatus{}, fmt.Errorf("node not found")
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	// send to nodes' personal channel
+	instanceCh <- &runner.Msg{
+		To:   utils.GetPortFullName(node, port),
+		Data: data,
+		Callback: func(err error) {
+			wg.Done()
+		},
+	}
+
+	wg.Wait()
+	return v1alpha1.TinyNodeStatus{}, nil
 }
 
 func (s *Schedule) Destroy(name string) error {
