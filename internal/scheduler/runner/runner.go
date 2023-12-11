@@ -396,7 +396,7 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh
 
 // Process main instance loop
 // read input port and apply it to the component
-func (c *Runner) Process(ctx context.Context, wg *errgroup.Group, inputCh chan *Msg, outputCh chan *Msg) error {
+func (c *Runner) Process(ctx context.Context, wg *errgroup.Group, instanceCh chan *Msg, outputCh chan *Msg) error {
 
 	c.cancelStopFuncsLock.Lock()
 	ctx, c.cancelFunc = context.WithCancel(ctx)
@@ -405,17 +405,15 @@ func (c *Runner) Process(ctx context.Context, wg *errgroup.Group, inputCh chan *
 	for {
 		select {
 		case <-ctx.Done():
-
 			c.log.Info("runner process context is done", "runner", c.node.Name)
 			return c.cleanup()
 
-		case msg, ok := <-inputCh:
+		case msg, ok := <-instanceCh:
 			if !ok {
-				c.log.Info("channel closed, exiting", c.node.Name)
+				c.log.Info("instance channel closed, exiting", c.node.Name)
 				return c.cleanup()
 			}
 			_, port := utils.ParseFullPortName(msg.To)
-
 			// check system ports
 			switch port {
 			case m.RunPort:
@@ -560,29 +558,31 @@ func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg
 
 		fromPort := utils.GetPortFullName(c.node.Name, port)
 
-		// send message
-		outputCh <- &Msg{
-			To:     e.To,
-			From:   fromPort,
-			EdgeID: e.ID,
-			Data:   dataBytes,
-			Callback: func(err error) {
-				// output port
-				// call to say port FROM is successfully send data
-				// only output ports may have errors
-				for _, callback := range c.callbacks {
-					callback(tracker.PortMsg{
-						NodeName:  c.node.Name,
-						EdgeID:    e.ID,
-						PortName:  fromPort, // OUTPUT PORT OF THE NODE
-						Data:      dataBytes,
-						FlowID:    c.flowID,
-						NodeStats: c.GetStats(),
-						Err:       err,
-					})
-				}
-			},
-		}
+		go func() {
+			// send message
+			outputCh <- &Msg{
+				To:     e.To,
+				From:   fromPort,
+				EdgeID: e.ID,
+				Data:   dataBytes,
+				Callback: func(err error) {
+					// output port
+					// call to say port FROM is successfully send data
+					// only output ports may have errors
+					for _, callback := range c.callbacks {
+						callback(tracker.PortMsg{
+							NodeName:  c.node.Name,
+							EdgeID:    e.ID,
+							PortName:  fromPort, // OUTPUT PORT OF THE NODE
+							Data:      dataBytes,
+							FlowID:    c.flowID,
+							NodeStats: c.GetStats(),
+							Err:       err,
+						})
+					}
+				},
+			}
+		}()
 	}
 	return nil
 }

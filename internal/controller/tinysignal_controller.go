@@ -54,6 +54,7 @@ type TinySignalReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
+	l.Info("reconcile", "tinysignal", req.Name)
 
 	// to avoid making many queries to Kubernetes API we check name itself against current module
 	m, _, err := module.ParseFullName(req.Name)
@@ -71,15 +72,16 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	err = r.Get(context.Background(), req.NamespacedName, signal)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			// delete signal if related node not found
+			_ = r.Delete(ctx, signal)
+
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
 	}
 	// send signal
-	if _, err = r.Scheduler.Invoke(signal.Spec.Node, signal.Spec.Port, signal.Spec.Data); err != nil {
-		return reconcile.Result{}, err
-	}
-	// delete
+	_, _ = r.Scheduler.Invoke(ctx, signal.Spec.Node, signal.Spec.Port, signal.Spec.Data)
+	//
 	_ = r.Delete(ctx, signal)
 	return ctrl.Result{}, nil
 }
