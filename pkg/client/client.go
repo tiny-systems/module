@@ -17,11 +17,11 @@ const (
 	HeaderError        = "X-TinySystems-Error"
 )
 
-func SendWebhookData(urlPath string, headers map[string]string, data []byte) error {
+func SendWebhookData(ctx context.Context, urlPath string, headers map[string]string, data []byte) error {
 
 	client := &http.Client{}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlPath, bytes.NewReader(data))

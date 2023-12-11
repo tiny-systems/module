@@ -236,6 +236,11 @@ var runCmd = &cobra.Command{
 		}
 
 		wg.Go(func() error {
+			l.Info("resource manager started")
+
+			defer func() {
+				l.Info("resource manager stopped")
+			}()
 			if err := crManager.Start(ctx); err != nil {
 				l.Error(err, "problem during resource manager start")
 				return err
@@ -257,8 +262,8 @@ var runCmd = &cobra.Command{
 			return nil
 		})
 
-		outputCh := make(chan *runner.Msg)
-		defer close(outputCh)
+		eventBus := make(chan *runner.Msg)
+		defer close(eventBus)
 
 		// grpc client start
 
@@ -267,23 +272,21 @@ var runCmd = &cobra.Command{
 			defer func() {
 				l.Info("gRPC client pool stopped")
 			}()
-			if err := pool.Start(ctx, outputCh); err != nil {
+			if err := pool.Start(ctx, eventBus); err != nil {
 				l.Error(err, "client pool error")
 				return err
 			}
 			return nil
 		})
-
 		// tracker
-
 		/// Instance scheduler
 		wg.Go(func() error {
 			l.Info("starting scheduler")
 			defer func() {
 				l.Info("scheduler stopped")
 			}()
-			if err := sch.Start(ctx, inputCh, outputCh, func(msg tracker.PortMsg) {
-				trackManager.Track(msg)
+			if err := sch.Start(ctx, inputCh, eventBus, func(msg tracker.PortMsg) {
+				trackManager.Track(ctx, msg)
 			}); err != nil {
 				l.Error(err, "unable to start scheduler")
 				return err

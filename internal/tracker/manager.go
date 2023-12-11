@@ -13,7 +13,7 @@ import (
 )
 
 type Manager interface {
-	Track(msg PortMsg)
+	Track(ctx context.Context, msg PortMsg)
 	Register(tracker v1alpha1.TinyTracker) error
 	Deregister(name string) error
 }
@@ -53,19 +53,19 @@ func NewManager() *manager {
 	}
 }
 
-func (t *manager) Track(msg PortMsg) {
+func (t *manager) Track(ctx context.Context, msg PortMsg) {
 
 	for _, tt := range t.trackers {
-		if err := t.sendPortData(msg, tt); err != nil {
+		if err := t.sendPortData(ctx, msg, tt); err != nil {
 			t.log.Error(err, "port webhook error", "data", msg)
 		}
-		if err := t.sendNodeStatistics(msg, tt); err != nil {
+		if err := t.sendNodeStatistics(ctx, msg, tt); err != nil {
 			t.log.Error(err, "stats webhook error", "data", msg)
 		}
 	}
 }
 
-func (t *manager) sendPortData(msg PortMsg, tracker v1alpha1.TinyTracker) error {
+func (t *manager) sendPortData(ctx context.Context, msg PortMsg, tracker v1alpha1.TinyTracker) error {
 
 	if tracker.Spec.PortDataWebhook == nil {
 		return nil
@@ -97,10 +97,10 @@ func (t *manager) sendPortData(msg PortMsg, tracker v1alpha1.TinyTracker) error 
 	if msg.EdgeID != "" {
 		headers[client.HeaderEdgeID] = msg.EdgeID
 	}
-	return client.SendWebhookData(tracker.Spec.PortDataWebhook.URL, headers, msg.Data)
+	return client.SendWebhookData(ctx, tracker.Spec.PortDataWebhook.URL, headers, msg.Data)
 }
 
-func (t *manager) sendNodeStatistics(msg PortMsg, tracker v1alpha1.TinyTracker) error {
+func (t *manager) sendNodeStatistics(ctx context.Context, msg PortMsg, tracker v1alpha1.TinyTracker) error {
 
 	if tracker.Spec.NodeStatisticsWebhook == nil {
 		return nil
@@ -131,7 +131,7 @@ func (t *manager) sendNodeStatistics(msg PortMsg, tracker v1alpha1.TinyTracker) 
 	if msg.EdgeID != "" {
 		headers[client.HeaderEdgeID] = msg.EdgeID
 	}
-	return client.SendWebhookData(tracker.Spec.NodeStatisticsWebhook.URL, headers, data)
+	return client.SendWebhookData(ctx, tracker.Spec.NodeStatisticsWebhook.URL, headers, data)
 }
 
 func (t *manager) Run(ctx context.Context) error {

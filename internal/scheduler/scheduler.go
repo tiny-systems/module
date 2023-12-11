@@ -12,7 +12,7 @@ import (
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"golang.org/x/sync/errgroup"
-	"sync"
+	"time"
 )
 
 type Scheduler interface {
@@ -21,7 +21,7 @@ type Scheduler interface {
 	//Upsert creates a new instance by using unique name, if instance is already running - updates it
 	Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error)
 	//Invoke sends data to the port of the given instance
-	Invoke(name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error)
+	Invoke(ctx context.Context, name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error)
 	//Destroy stops the instance
 	Destroy(name string) error
 	//Start starts scheduler
@@ -85,26 +85,24 @@ func (s *Schedule) Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, erro
 }
 
 // Invoke sends data to the port of given instance name @todo
-func (s *Schedule) Invoke(node string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
+func (s *Schedule) Invoke(ctx context.Context, node string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
 
 	instanceCh, ok := s.inputChMap.Get(node)
 	if !ok {
 		return v1alpha1.TinyNodeStatus{}, fmt.Errorf("node not found")
 	}
 
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-
+	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
+	defer cancel()
 	// send to nodes' personal channel
 	instanceCh <- &runner.Msg{
 		To:   utils.GetPortFullName(node, port),
 		Data: data,
-		Callback: func(err error) {
-			wg.Done()
+		Callback: func(_ error) {
+			cancel()
 		},
 	}
-
-	wg.Wait()
+	<-ctx.Done()
 	return v1alpha1.TinyNodeStatus{}, nil
 }
 
@@ -131,12 +129,10 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 
 			// check subject
 			node, _ := utils.ParseFullPortName(msg.To)
-
 			if instanceCh, ok := s.inputChMap.Get(node); ok {
 				// send to nodes' personal channel
 				instanceCh <- msg
 			} else {
-				s.log.Info("instance not found in a local map of channels", "node", node)
 				outsideCh <- msg
 			}
 			//
@@ -164,11 +160,11 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 						// main instance lifetime goroutine
 						// exit unregisters instance
 						//
-						inputCh := make(chan *runner.Msg)
+						instanceCh := make(chan *runner.Msg)
 						// then close
-						defer close(inputCh)
+						defer close(instanceCh)
 
-						s.inputChMap.Set(req.Node.Name, inputCh)
+						s.inputChMap.Set(req.Node.Name, instanceCh)
 						// delete first to avoid writing into closed channel
 						defer s.inputChMap.Remove(req.Node.Name)
 
@@ -177,7 +173,7 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 						}()
 
 						// process input ports
-						return instance.Process(ctx, wg, inputCh, eventBus)
+						return instance.Process(ctx, wg, instanceCh, eventBus)
 					})
 				}
 				//configure || reconfigure
@@ -191,6 +187,7 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 
 		case <-ctx.Done():
 			// what for others
+			s.log.Info("waiting for wg done")
 			return wg.Wait()
 		}
 	}

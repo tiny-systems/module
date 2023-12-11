@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"net"
 	"sync"
+	"time"
 )
 
 // Server receive api requests from other modules and sends it to scheduler
@@ -47,6 +48,9 @@ func (s *server) Start(ctx context.Context, output chan *runner.Msg, listenAddr 
 			err error
 			w   = new(sync.WaitGroup)
 		)
+		ctx, cancel := context.WithTimeout(ctx, time.Second*3)
+		defer cancel()
+
 		w.Add(1)
 		output <- &runner.Msg{
 			EdgeID: req.EdgeID,
@@ -54,11 +58,11 @@ func (s *server) Start(ctx context.Context, output chan *runner.Msg, listenAddr 
 			Data:   req.Payload,
 			From:   req.From,
 			Callback: func(e error) {
-				defer w.Done()
 				err = e
+				cancel()
 			},
 		}
-		w.Wait()
+		<-ctx.Done()
 		return &modulepb.MessageResponse{}, err
 	}))
 	reflection.Register(server)

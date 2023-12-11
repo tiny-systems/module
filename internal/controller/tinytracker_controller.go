@@ -54,6 +54,7 @@ type TinyTrackerReconciler struct {
 func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
 	l := log.FromContext(ctx)
+	l.Info("reconcile", "tinytracker", req.Name)
 
 	tracker := &operatorv1alpha1.TinyTracker{}
 
