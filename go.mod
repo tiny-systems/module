@@ -68,6 +68,7 @@ require (
 require (
 	github.com/docker/docker v24.0.6+incompatible
 	github.com/go-logr/zerologr v1.2.3
+	github.com/goccy/go-json v0.10.2
 	github.com/jellydator/ttlcache/v3 v3.1.0
 	github.com/onsi/ginkgo/v2 v2.11.0
 	github.com/onsi/gomega v1.27.10
