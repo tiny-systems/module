@@ -2,9 +2,9 @@ package tracker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/go-logr/logr"
+	"github.com/goccy/go-json"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/pkg/client"

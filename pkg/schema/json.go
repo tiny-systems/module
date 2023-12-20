@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"github.com/goccy/go-json"
 	"github.com/swaggest/jsonschema-go"
 	"reflect"
 	"strconv"
@@ -162,4 +163,22 @@ func reverse(s []string) []string {
 		swap(i, j)
 	}
 	return s
+}
+
+func CreateSchemaAndData(m interface{}) ([]byte, []byte, error) {
+	confData, err := json.Marshal(m)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sh, err := CreateSchema(m)
+	if err != nil {
+		return nil, nil, err
+	}
+	confSchema, err := sh.MarshalJSON()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return confSchema, confData, nil
 }

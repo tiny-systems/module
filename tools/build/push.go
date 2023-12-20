@@ -3,10 +3,10 @@ package build
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/registry"
+	"github.com/goccy/go-json"
 	"io"
 	"os"
 )

@@ -89,7 +89,7 @@ func (m Resource) RegisterModule(ctx context.Context, mod module.Info) error {
 func (m Resource) ExposePort(ctx context.Context, name string, port int) (string, error) {
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
-		return "", fmt.Errorf("unable to determine current pod")
+		return "", fmt.Errorf("unable to determine the current pod's name")
 	}
 
 	pod := &v1core.Pod{}
@@ -99,7 +99,7 @@ func (m Resource) ExposePort(ctx context.Context, name string, port int) (string
 	}, pod)
 
 	if err != nil {
-		return "", fmt.Errorf("unable to find current pod: %v")
+		return "", fmt.Errorf("unable to find current pod: %v", err)
 	}
 
 	var releaseName string

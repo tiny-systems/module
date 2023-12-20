@@ -2,9 +2,9 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/go-logr/logr"
+	"github.com/goccy/go-json"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
