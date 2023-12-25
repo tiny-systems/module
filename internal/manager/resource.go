@@ -275,7 +275,7 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 	node := &v1alpha1.TinyNode{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: m.namespace, // @todo make dynamic
-			Name:      module.GetNodeFullName(mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
+			Name:      module.GetNodeFullName("00000000", mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
 			Labels: map[string]string{
 				v1alpha1.FlowIDLabel: "", //<-- empty flow means that's a node for palette
 			},
