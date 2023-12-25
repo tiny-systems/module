@@ -70,7 +70,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if m != r.Module.GetMajorNameSanitised() {
-		// not we
+		// not us
 		return reconcile.Result{}, nil
 	}
 
