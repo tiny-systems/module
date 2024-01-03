@@ -92,20 +92,17 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, err
 	}
 
-	status, err := r.Scheduler.Upsert(*instance)
+	err = r.Scheduler.Upsert(instance)
 	if err != nil {
 		// create event?
 		l.Error(err, "scheduler instance error")
 		return reconcile.Result{}, err
 	}
 
-	status.Module = operatorv1alpha1.TinyNodeModuleStatus{
+	instance.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
 		Version: r.Module.Version,
 		Name:    r.Module.Name,
 	}
-
-	// update status
-	instance.Status = status
 
 	err = r.Status().Update(context.Background(), instance)
 	if err != nil {

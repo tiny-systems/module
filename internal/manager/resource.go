@@ -10,6 +10,8 @@ import (
 	v1ingress "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"os"
@@ -24,7 +26,7 @@ type Resource struct {
 type ResourceInterface interface {
 	CleanupExampleNodes(ctx context.Context, mod module.Info) error
 	RegisterModule(ctx context.Context, mod module.Info) error
-	ExposePort(ctx context.Context, name string, port int) (string, error)
+	ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error)
 	DisclosePort(ctx context.Context, port int) error
 	RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error
 }
@@ -35,29 +37,29 @@ func NewManager(c client.Client, ns string) *Resource {
 
 // CleanupExampleNodes  @todo deal with it later
 func (m Resource) CleanupExampleNodes(ctx context.Context, mod module.Info) error {
-	//sel := labels.NewSelector()
-	//
-	//req, err := labels.NewRequirement(v1alpha1.FlowIDLabel, selection.Equals, []string{""})
-	//if err != nil {
-	//	return err
-	//}
-	//sel = sel.Add(*req)
-	//
-	//req, err = labels.NewRequirement(v1alpha1.ModuleNameMajorLabel, selection.Equals, []string{mod.GetMajorNameSanitised()})
-	//if err != nil {
-	//	return err
-	//}
-	//sel = sel.Add(*req)
-	//
-	//req, err = labels.NewRequirement(v1alpha1.ModuleVersionLabel, selection.NotEquals, []string{mod.Version})
-	//if err != nil {
-	//	return err
-	//}
-	//sel = sel.Add(*req)
-	//
-	//return m.client.DeleteAllOf(ctx, &v1alpha1.TinyNode{}, client.InNamespace(m.namespace), client.MatchingLabelsSelector{
-	//	Selector: sel,
-	//})
+	sel := labels.NewSelector()
+
+	req, err := labels.NewRequirement(v1alpha1.FlowIDLabel, selection.Equals, []string{""})
+	if err != nil {
+		return err
+	}
+	sel = sel.Add(*req)
+
+	req, err = labels.NewRequirement(v1alpha1.ModuleNameMajorLabel, selection.Equals, []string{mod.GetMajorNameSanitised()})
+	if err != nil {
+		return err
+	}
+	sel = sel.Add(*req)
+
+	req, err = labels.NewRequirement(v1alpha1.ModuleVersionLabel, selection.NotEquals, []string{mod.Version})
+	if err != nil {
+		return err
+	}
+	sel = sel.Add(*req)
+
+	return m.client.DeleteAllOf(ctx, &v1alpha1.TinyNode{}, client.InNamespace(m.namespace), client.MatchingLabelsSelector{
+		Selector: sel,
+	})
 	return nil
 }
 
@@ -86,10 +88,18 @@ func (m Resource) RegisterModule(ctx context.Context, mod module.Info) error {
 	return err
 }
 
-func (m Resource) ExposePort(ctx context.Context, name string, port int) (string, error) {
+func (m Resource) ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error) {
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
-		return "", fmt.Errorf("unable to determine the current pod's name")
+		return []string{}, fmt.Errorf("unable to determine the current pod's name")
+	}
+
+	if hostnames == nil {
+		hostnames = []string{}
+	}
+
+	if len(hostnames) == 0 && autoHostName == "" {
+		return []string{}, fmt.Errorf("empty hostnames provided")
 	}
 
 	pod := &v1core.Pod{}
@@ -99,7 +109,7 @@ func (m Resource) ExposePort(ctx context.Context, name string, port int) (string
 	}, pod)
 
 	if err != nil {
-		return "", fmt.Errorf("unable to find current pod: %v", err)
+		return []string{}, fmt.Errorf("unable to find current pod: %v", err)
 	}
 
 	var releaseName string
@@ -109,88 +119,96 @@ func (m Resource) ExposePort(ctx context.Context, name string, port int) (string
 		}
 	}
 	if releaseName == "" {
-		return "", fmt.Errorf("release name label not found")
+		return []string{}, fmt.Errorf("release name label not found")
 	}
 
 	svc, err := m.getReleaseService(ctx, releaseName)
 	if err != nil {
-		return "", fmt.Errorf("unable to get service: %v", err)
+		return []string{}, fmt.Errorf("unable to get service: %v", err)
 	}
 
-	if err = m.exposeServicePod(ctx, svc, port); err != nil {
-		return "", err
-	}
 	ingress, _ := m.getReleaseIngress(ctx, releaseName)
 
 	if ingress == nil {
-		return "", fmt.Errorf("no ingress")
+		return []string{}, fmt.Errorf("no ingress")
 	}
 
-	return m.updateIngress(ctx, ingress, svc, name, port)
+	if err = m.exposeServicePort(ctx, svc, port); err != nil {
+		return []string{}, err
+	}
+
+	prefix := m.getIngressAutoHostnamePrefix(ctx, ingress)
+
+	if prefix != "" && autoHostName != "" {
+		hostnames = append(hostnames, fmt.Sprintf("%s-%s%s", autoHostName, svc.Namespace, prefix))
+	}
+	return m.updateIngress(ctx, ingress, svc, hostnames, port)
 }
 
-func (m Resource) updateIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, name string, port int) (string, error) {
-	var hostNamePrefix string
+func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1ingress.Ingress) string {
 
+	var hostNamePrefix string
 	for k, v := range ingress.Annotations {
 		if k == v1alpha1.IngressHostNameSuffixAnnotation {
 			hostNamePrefix = v
 		}
 	}
-	if hostNamePrefix == "" {
-		return "", fmt.Errorf("ingress hostname prefix annotations is invalid")
+	return hostNamePrefix
+}
+
+func (m Resource) updateIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, hostnames []string, port int) ([]string, error) {
+
+	if len(hostnames) == 0 {
+		return []string{}, fmt.Errorf("no hostnames provided")
 	}
 
-	var (
-		hostname = fmt.Sprintf("%s%s", name, hostNamePrefix)
-	)
+	for _, hostname := range hostnames {
 
-	var (
-		found bool
-	)
-	for _, rule := range ingress.Spec.Rules {
-		if rule.Host == hostname && rule.IngressRuleValue.HTTP != nil {
-			for _, p := range rule.IngressRuleValue.HTTP.Paths {
-				if p.Backend.Service.Port.Number == int32(port) {
-					p.Backend.Service.Name = service.Name
-					found = true
+		var found bool
+		for _, rule := range ingress.Spec.Rules {
+			if rule.Host == hostname && rule.IngressRuleValue.HTTP != nil {
+				for _, p := range rule.IngressRuleValue.HTTP.Paths {
+					if p.Backend.Service.Port.Number == int32(port) {
+						p.Backend.Service.Name = service.Name
+						found = true
+					}
 				}
+				// update rule for the given host
 			}
-			// update rule for the given host
 		}
-	}
-	if !found {
-		pathType := v1ingress.PathTypePrefix
-		ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
-			Host: hostname,
-			IngressRuleValue: v1ingress.IngressRuleValue{
-				HTTP: &v1ingress.HTTPIngressRuleValue{
-					Paths: []v1ingress.HTTPIngressPath{
-						{
-							Path:     "/",
-							PathType: &pathType,
-							Backend: v1ingress.IngressBackend{
-								Service: &v1ingress.IngressServiceBackend{
-									Name: service.Name,
-									Port: v1ingress.ServiceBackendPort{
-										Number: int32(port),
+		if !found {
+			pathType := v1ingress.PathTypePrefix
+			ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
+				Host: hostname,
+				IngressRuleValue: v1ingress.IngressRuleValue{
+					HTTP: &v1ingress.HTTPIngressRuleValue{
+						Paths: []v1ingress.HTTPIngressPath{
+							{
+								Path:     "/",
+								PathType: &pathType,
+								Backend: v1ingress.IngressBackend{
+									Service: &v1ingress.IngressServiceBackend{
+										Name: service.Name,
+										Port: v1ingress.ServiceBackendPort{
+											Number: int32(port),
+										},
 									},
 								},
 							},
 						},
 					},
 				},
-			},
-		})
+			})
+		}
 	}
 
 	if err := m.client.Update(ctx, ingress); err != nil {
-		return "", err
+		return []string{}, err
 	}
-	return hostname, nil
+	return hostnames, nil
 }
 
-func (m Resource) exposeServicePod(ctx context.Context, svc *v1core.Service, port int) error {
+func (m Resource) exposeServicePort(ctx context.Context, svc *v1core.Service, port int) error {
 	for _, p := range svc.Spec.Ports {
 		if p.Port == int32(port) {
 			// service has port already exposed
@@ -277,7 +295,9 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 			Namespace: m.namespace, // @todo make dynamic
 			Name:      module.GetNodeFullName("00000000", mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
 			Labels: map[string]string{
-				v1alpha1.FlowIDLabel: "", //<-- empty flow means that's a node for palette
+				v1alpha1.FlowIDLabel:          "", //<-- empty flow means that's a node for palette
+				v1alpha1.ModuleNameMajorLabel: mod.GetMajorNameSanitised(),
+				v1alpha1.ModuleVersionLabel:   mod.Version,
 			},
 		},
 		Spec: v1alpha1.TinyNodeSpec{

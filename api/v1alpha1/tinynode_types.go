@@ -21,12 +21,19 @@ import (
 )
 
 const (
+	// flow ID label
 	FlowIDLabel = "tinysystems.io/flow-id"
+	// module major version label
+	ModuleNameMajorLabel = "tinysystems.io/module-version-major"
+	// module exact version label
+	ModuleVersionLabel = "tinysystems.io/module-version"
 
 	// visual annotations used by platform
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
+
+	SuggestedHttpPortAnnotation = "tinysystems.io/suggested-http-port"
 
 	// ingress annotations
 	IngressHostNameSuffixAnnotation      = "tinysystems.io/ingress-hostname-suffix"
@@ -78,7 +85,7 @@ type TinyNodePortStatus struct {
 	Label         string   `json:"label"`
 	Position      Position `json:"position"`
 	Settings      bool     `json:"settings"`
-	Status        bool     `json:"status"`
+	Control       bool     `json:"control"`
 	Source        bool     `json:"source"`
 	Schema        []byte   `json:"schema"`
 	Configuration []byte   `json:"configuration"`
@@ -134,26 +141,6 @@ type TinyNodeStatus struct {
 
 	// +kubebuilder:validation:Optional
 	Status string `json:"status,omitempty"`
-
-	// +kubebuilder:validation:Optional
-	Emitter bool `json:"emitter"`
-
-	// +kubebuilder:validation:Optional
-	Emitting bool `json:"emitting"`
-
-	// +kubebuilder:validation:Optional
-	Http TinyNodeHttpStatus `json:"http"`
-}
-
-type TinyNodeHttpStatus struct {
-	// +kubebuilder:validation:Optional
-	Available bool `json:"available,omitempty"`
-
-	// +kubebuilder:validation:Optional
-	ListenPort int `json:"listenPort,omitempty"`
-
-	// +kubebuilder:validation:Optional
-	PublicURL string `json:"publicURL,omitempty"`
 }
 
 //+kubebuilder:object:root=true

@@ -102,21 +102,8 @@ spec:
                 - description
                 - info
                 type: object
-              emitter:
-                type: boolean
-              emitting:
-                type: boolean
               error:
                 type: string
-              http:
-                properties:
-                  available:
-                    type: boolean
-                  listenPort:
-                    type: integer
-                  publicURL:
-                    type: string
-                type: object
               module:
                 properties:
                   name:
@@ -133,6 +120,8 @@ spec:
                     configuration:
                       format: byte
                       type: string
+                    control:
+                      type: boolean
                     label:
                       type: string
                     name:
@@ -146,17 +135,15 @@ spec:
                       type: boolean
                     source:
                       type: boolean
-                    status:
-                      type: boolean
                   required:
                   - configuration
+                  - control
                   - label
                   - name
                   - position
                   - schema
                   - settings
                   - source
-                  - status
                   type: object
                 type: array
               status:

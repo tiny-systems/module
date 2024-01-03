@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/swaggest/jsonschema-go"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"reflect"
 	"strconv"
 	"strings"
@@ -22,23 +24,34 @@ var arrayCustomProps = []string{
 	"enumTitles",
 }
 
-func CreateSchema(m interface{}) (jsonschema.Schema, error) {
+func getDefinitionName(t reflect.Type) string {
+	return cases.Title(language.English).String(t.Name())
+}
+
+func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonschema.Schema, error) {
 	r := jsonschema.Reflector{
 		DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
 	}
 
-	var (
-		defs     = make(map[string]jsonschema.Schema)
+	if confDefs == nil {
 		confDefs = make(map[string]jsonschema.Schema)
+	}
+
+	var (
+		defs = make(map[string]jsonschema.Schema)
 	)
 
 	sh, _ := r.Reflect(m,
 		jsonschema.RootRef,
+		jsonschema.InterceptDefName(func(t reflect.Type, defaultDefName string) string {
+			return getDefinitionName(t)
+		}),
 		jsonschema.DefinitionsPrefix("#/$defs/"),
 		jsonschema.CollectDefinitions(func(name string, schema jsonschema.Schema) {
 			defs[name] = schema
 		}),
 		jsonschema.InterceptProperty(func(name string, field reflect.StructField, propertySchema *jsonschema.Schema) error {
+			// looking for values  for certain properties
 			for _, cp := range scalarCustomProps {
 				if prop, ok := field.Tag.Lookup(cp); ok {
 					var propVal interface{}
@@ -63,34 +76,50 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 					propertySchema.WithExtraPropertiesItem(cp, strings.Split(prop, ","))
 				}
 			}
+
+			defName := getDefinitionName(field.Type)
+
 			//
 			if b, ok := propertySchema.ExtraProperties["configurable"]; !ok || b != true {
+				if conf, ok := confDefs[defName]; ok {
+					// replacing with configurable schema
+					defs[defName] = conf
+					refOnly := jsonschema.Schema{}
+					ref := fmt.Sprintf("#/$defs/%s", defName)
+					refOnly.Ref = &ref
+					refOnly.WithExtraPropertiesItem("propertyOrder", propertySchema.ExtraProperties["propertyOrder"])
+					refOnly.WithExtraPropertiesItem("configurable", false)
+					*propertySchema = refOnly
+				}
+				// type is not configurable in here, but maybe be it is within the shared
 				return nil
 			}
 
-			//tag with here configurable, we need to update definition with title and description, only info we know from tags
+			// we need to update definition with title and description, only info we know from tags
 			// problem here I solve is that tags affect on inline schema and not the one in $ref
 			// copy from inline to ref definition
-			if propertySchema.Ref == nil {
-				return nil
-			}
+			//if propertySchema.Ref == nil {
+			//	return nil
+			//}
 			// make sure types with configurable tags always has own def
 			// update defs with everything except ref
 
-			ref := *propertySchema.Ref
-			defID := strings.TrimPrefix(ref, "#/$defs/")
+			//ref := *propertySchema.Ref
+			ref := fmt.Sprintf("#/$defs/%s", defName)
+			//defID := strings.TrimPrefix(ref, "#/$defs/")
 
 			propertySchema.Ref = nil
-			propertyOrder := propertySchema.ExtraProperties["propertyOrder"]
-			confDefs[defID] = *propertySchema
+			confDefs[defName] = *propertySchema
 
 			refOnly := jsonschema.Schema{}
 			refOnly.Ref = &ref
-			refOnly.WithExtraPropertiesItem("propertyOrder", propertyOrder)
+
+			refOnly.WithExtraPropertiesItem("propertyOrder", propertySchema.ExtraProperties["propertyOrder"])
 			*propertySchema = refOnly
 			return nil
 		}),
 		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
+			// fires when something is null
 			if params.Type.Kind() == reflect.Array || params.Type.Kind() == reflect.Slice {
 				a := jsonschema.Array.Type()
 				params.Schema.Type = &a
@@ -171,7 +200,7 @@ func CreateSchemaAndData(m interface{}) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	sh, err := CreateSchema(m)
+	sh, err := CreateSchema(m, nil)
 	if err != nil {
 		return nil, nil, err
 	}
