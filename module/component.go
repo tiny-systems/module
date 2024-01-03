@@ -16,9 +16,9 @@ func (c ComponentInfo) GetResourceName() string {
 	return utils.SanitizeResourceName(c.Name)
 }
 
-type Emitter interface {
-	Emit(ctx context.Context, handler Handler) error
-}
+//type Emitter interface {
+//  Emit(ctx context.Context, handler Handler) error
+//}
 
 type Component interface {
 	GetInfo() ComponentInfo
@@ -36,10 +36,10 @@ type StatefulComponent interface {
 	SetState(state []byte) error
 }
 
-type AddressUpgrade func(port int) (string, error)
+type AddressUpgrade func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error)
 
 // ListenAddressGetter gets listen port address
-type ListenAddressGetter func() (port int, upgrade AddressUpgrade)
+type ListenAddressGetter func() (suggestedPort int, upgrade AddressUpgrade)
 
 type HTTPService interface {
 	HTTPService(getter ListenAddressGetter)

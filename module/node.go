@@ -8,9 +8,6 @@ const (
 	SaveStatePort string = "_save-state"
 	GetStatePort         = "_get-state"
 	SettingsPort         = "_settings"
-	StatusPort           = "_status"
-	RunPort              = "_run"
-	StopPort             = "_stop"
 )
 
 const (
@@ -21,11 +18,18 @@ const (
 )
 
 type NodePort struct {
-	Source        bool
-	Status        bool
-	Settings      bool
-	Position      Position
-	Name          string
-	Label         string
+	// if that's a source port, source means it accepts the data, the source of incoming data
+	Source bool
+	// this port's DTO will be shown as a control panel
+	Control bool
+	// port with Settings equals true will be shown in configuration tab
+	Settings bool
+	// which side of the node will have this port
+	Position Position
+	// Name lower case programmatic name
+	Name string
+	// Human readable name (capital cased)
+	Label string
+	// DTO object
 	Configuration interface{}
 }

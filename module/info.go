@@ -40,7 +40,7 @@ func GetNodeFullName(prefix string, module string, component string) string {
 func ParseFullName(fullName string) (module string, component string, err error) {
 	parts := strings.Split(fullName, nameSeparator)
 	if len(parts) < 3 {
-		return "", "", fmt.Errorf("node name is invalid, separator not found")
+		return "", "", fmt.Errorf("node name %s is invalid, separator not found", fullName)
 	}
 	return parts[1], parts[2], nil
 }

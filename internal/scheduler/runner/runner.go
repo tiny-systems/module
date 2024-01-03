@@ -8,6 +8,7 @@ import (
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
+	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/manager"
@@ -17,10 +18,10 @@ import (
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
-	uatomic "go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,7 +36,7 @@ type Runner struct {
 	nodeLock *sync.RWMutex
 
 	// K8s resource
-	node v1alpha1.TinyNode
+	node *v1alpha1.TinyNode
 	// underlying component
 	component m.Component
 	//
@@ -44,32 +45,17 @@ type Runner struct {
 	// to control K8s resources
 	manager manager.ResourceInterface
 
-	// stopFunc stops instance emit
-	stopFunc context.CancelFunc
-
 	// cancelFunc stops entire instance
 	cancelFunc context.CancelFunc
 	//
 	cancelStopFuncsLock *sync.Mutex
 
-	// emitCh easy way to tell if emitting is in progress
-	emitCh  chan struct{}
-	emitErr *uatomic.Error
-
 	stats cmap.ConcurrentMap[string, *int64]
 
-	needRestart bool
-	callbacks   []tracker.Callback
-
-	listenPortLock *sync.Mutex
-
-	// if underlying component is HTTPServicer
-	listenPort int
-
-	publicURL string
+	callbacks []tracker.Callback
 }
 
-func NewRunner(node v1alpha1.TinyNode, component m.Component, callbacks ...tracker.Callback) *Runner {
+func NewRunner(node *v1alpha1.TinyNode, component m.Component, callbacks ...tracker.Callback) *Runner {
 
 	r := &Runner{
 		flowID:              node.Labels[v1alpha1.FlowIDLabel],
@@ -78,8 +64,6 @@ func NewRunner(node v1alpha1.TinyNode, component m.Component, callbacks ...track
 		stats:               cmap.New[*int64](),
 		nodeLock:            new(sync.RWMutex),
 		cancelStopFuncsLock: new(sync.Mutex),
-		listenPortLock:      new(sync.Mutex),
-		emitErr:             uatomic.NewError(nil),
 		callbacks:           callbacks,
 	}
 
@@ -87,35 +71,45 @@ func NewRunner(node v1alpha1.TinyNode, component m.Component, callbacks ...track
 
 	if httpEmitter, ok := component.(m.HTTPService); ok {
 		httpEmitter.HTTPService(func() (int, m.AddressUpgrade) {
-			var savedPort int
 
-			r.listenPortLock.Lock()
-			defer r.listenPortLock.Unlock()
+			var suggestedPort int
 
-			savedPort = r.listenPort
-
-			if node.Status.Http.ListenPort > 0 {
-				savedPort = node.Status.Http.ListenPort
+			if annotationPort, err := strconv.Atoi(node.Labels[v1alpha1.SuggestedHttpPortAnnotation]); err == nil {
+				suggestedPort = annotationPort
 			}
 
-			return savedPort, func(finalPort int) (string, error) {
-				r.listenPortLock.Lock()
-				defer r.listenPortLock.Unlock()
+			return suggestedPort, func(emitCtx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error) {
 
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+				// limit exposing with a timeout
+				exposeCtx, cancel := context.WithTimeout(emitCtx, time.Second*10)
 				defer cancel()
 
 				var err error
 				// upgrade
 				// hostname it's a last part of the node name
-				hostname := strings.Split(r.node.Name, ".")
+				var autoHostName string
 
-				r.publicURL, err = r.manager.ExposePort(ctx, hostname[len(hostname)-1], finalPort)
-				if err != nil {
-					return "", err
+				if auto {
+					autoHostNameParts := strings.Split(r.node.Name, ".")
+					autoHostName = autoHostNameParts[len(autoHostNameParts)-1]
 				}
-				r.listenPort = finalPort
-				return r.publicURL, err
+
+				publicURLs, err := r.manager.ExposePort(exposeCtx, autoHostName, hostnames, actualLocalPort)
+				if err != nil {
+					return []string{}, err
+				}
+
+				go func() {
+					// listen when emit ctx ends to clean up
+					<-emitCtx.Done()
+
+					discloseCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+					defer cancel()
+					if err := r.manager.DisclosePort(discloseCtx, actualLocalPort); err != nil {
+						r.log.Error(err, "unable to disclose port: %d", actualLocalPort)
+					}
+				}()
+				return publicURLs, err
 			}
 		})
 	}
@@ -133,14 +127,10 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 	return c
 }
 
-// GetStatus recreates status from scratch
-func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
+// ApplyStatus recreates status from scratch
+func (c *Runner) ApplyStatus() error {
 	status := v1alpha1.TinyNodeStatus{
-		Status:   "OK",
-		Emitting: c.isEmitting(),
-	}
-	if err := c.emitErr.Load(); err != nil {
-		status.Error = err.Error()
+		Status: "OK",
 	}
 
 	ports := c.component.Ports()
@@ -159,6 +149,13 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 	c.nodeLock.RLock()
 	defer c.nodeLock.RUnlock()
 
+	var sharedConfigurableSchemaDefinitions = make(map[string]jsonschema.Schema)
+
+	// populate shared definitions with configurable schemas first
+	for _, np := range ports {
+		_, _ = schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
+	}
+	// now do it again
 	for _, np := range ports {
 		// processing settings port first, then source, then target
 		var ps []byte //port schema settings
@@ -176,13 +173,13 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 			Label:    np.Label,
 			Position: v1alpha1.Position(np.Position),
 			Settings: np.Settings,
-			Status:   np.Status,
+			Control:  np.Control,
 			Source:   np.Source,
 		}
 
 		if np.Configuration != nil {
 			// define default schema and config using reflection
-			schemaConf, err := schema.CreateSchema(np.Configuration)
+			schemaConf, err := schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
 
 			if err == nil {
 				schemaData, _ := schemaConf.MarshalJSON()
@@ -210,10 +207,6 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 		status.Ports = append(status.Ports, pStatus)
 	}
 
-	if _, ok := c.component.(m.Emitter); ok {
-		status.Emitter = true
-	}
-
 	if status.Error != "" {
 		status.Status = fmt.Sprintf("ERROR: %s", status.Error)
 	}
@@ -225,25 +218,10 @@ func (c *Runner) GetStatus() v1alpha1.TinyNodeStatus {
 		Info:        cmpInfo.Info,
 		Tags:        cmpInfo.Tags,
 	}
-	if _, ok := c.component.(m.HTTPService); ok {
-		status.Http.Available = true
-	} else {
-		return status
-	}
 
-	c.listenPortLock.Lock()
-	defer c.listenPortLock.Unlock()
+	c.node.Status = status
 
-	port := c.listenPort
-	if port == 0 {
-		// we have not made up any port
-		// fallback to node port
-		port = c.node.Status.Http.ListenPort
-	}
-
-	status.Http.ListenPort = port
-	status.Http.PublicURL = c.publicURL
-	return status
+	return nil
 }
 
 // input processes input to the inherited component
@@ -367,16 +345,9 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 }
 
 // Configure updates specs and decides do we need to restart which handles by Run method
-func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode, outputCh chan *Msg) error {
-	c.needRestart = false
-
+func (c *Runner) Configure(ctx context.Context, node *v1alpha1.TinyNode, outputCh chan *Msg) error {
 	// apply spec anyway
 	c.nodeLock.Lock()
-
-	if !reflect.DeepEqual(c.node.Spec.Ports, node.Spec.Ports) {
-		c.needRestart = true
-	}
-	//
 	c.node = node
 	c.nodeLock.Unlock()
 
@@ -414,15 +385,7 @@ func (c *Runner) Process(ctx context.Context, wg *errgroup.Group, instanceCh cha
 				return c.cleanup()
 			}
 			_, port := utils.ParseFullPortName(msg.To)
-			// check system ports
-			switch port {
-			case m.RunPort:
-				msg.Callback(c.run(ctx, wg, outputCh))
-			case m.StopPort:
-				msg.Callback(c.stop())
-			default:
-				msg.Callback(c.input(ctx, port, msg, outputCh))
-			}
+			msg.Callback(c.input(ctx, port, msg, outputCh))
 		}
 	}
 }
@@ -431,27 +394,6 @@ func (c *Runner) cleanup() error {
 
 	c.cancelStopFuncsLock.Lock()
 	defer c.cancelStopFuncsLock.Unlock()
-
-	if c.stopFunc != nil {
-		c.stopFunc()
-		c.stopFunc = nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
-	defer cancel()
-
-	c.listenPortLock.Lock()
-	c.listenPortLock.Unlock()
-
-	if c.listenPort == 0 {
-		return nil
-	}
-
-	if err := c.manager.DisclosePort(ctx, c.listenPort); err != nil {
-		return err
-	}
-
-	c.listenPort = 0
 	return nil
 }
 
@@ -466,64 +408,6 @@ func (c *Runner) Destroy() error {
 		c.cancelFunc = nil
 	}
 	return nil
-}
-
-func (c *Runner) stop() error {
-
-	c.cancelStopFuncsLock.Lock()
-	defer c.cancelStopFuncsLock.Unlock()
-
-	if c.stopFunc != nil {
-		c.stopFunc()
-		c.stopFunc = nil
-	}
-	return nil
-}
-
-func (c *Runner) run(ctx context.Context, wg *errgroup.Group, outputCh chan *Msg) error {
-	emitterComponent, ok := c.component.(m.Emitter)
-	if !ok {
-		// not runnable underlying component
-		return nil
-	}
-
-	c.cancelStopFuncsLock.Lock()
-	defer c.cancelStopFuncsLock.Unlock()
-
-	if c.stopFunc != nil {
-		// seems to be running
-		// to apply settings we decided earlier that we need a restart
-		c.stopFunc()
-	}
-
-	// looks like we about to run
-	// spawn new goroutine
-	// create new context
-	var emitCtx context.Context
-
-	emitCtx, c.stopFunc = context.WithCancel(ctx)
-
-	// emitCh easy way to tell if emitting is in progress
-	c.emitCh = make(chan struct{})
-
-	wg.Go(func() error {
-		// reset run error
-		c.log.Info("emitter start", "cmp", c.component.GetInfo().Name, "restart", c.needRestart)
-		defer close(c.emitCh)
-		defer func() {
-			c.log.Info("emitter stopped")
-		}()
-		// store emitErr atomic
-		c.emitErr.Store(
-			emitterComponent.Emit(emitCtx, func(port string, data interface{}) error {
-				// output of the emitter
-				return c.outputHandler(port, data, outputCh)
-			}))
-		return nil
-	})
-	// give some time to fail
-	time.Sleep(time.Millisecond * 1500)
-	return c.emitErr.Load()
 }
 
 func (c *Runner) outputHandler(port string, data interface{}, outputCh chan *Msg) error {
@@ -593,18 +477,6 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) ([]byte
 		return nil, err
 	}
 	return b, json.Unmarshal(b, output)
-}
-
-func (c *Runner) isEmitting() bool {
-	if c.emitCh == nil {
-		return false
-	}
-	select {
-	case <-c.emitCh:
-		return false
-	default:
-		return true
-	}
 }
 
 func (c *Runner) GetStats() map[string]interface{} {

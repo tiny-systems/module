@@ -19,13 +19,18 @@ type Scheduler interface {
 	//Install makes component available for running nodes
 	Install(component module.Component) error
 	//Upsert creates a new instance by using unique name, if instance is already running - updates it
-	Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error)
+	Upsert(node *v1alpha1.TinyNode) error
 	//Invoke sends data to the port of the given instance
-	Invoke(ctx context.Context, name string, port string, data []byte) (v1alpha1.TinyNodeStatus, error)
+	Invoke(ctx context.Context, name string, port string, data []byte) error
 	//Destroy stops the instance
 	Destroy(name string) error
 	//Start starts scheduler
 	Start(ctx context.Context, inputCh chan *runner.Msg, outputCh chan *runner.Msg, callbacks ...tracker.Callback) error
+}
+
+type instanceRequest struct {
+	node  *v1alpha1.TinyNode
+	ready chan struct{}
 }
 
 type Schedule struct {
@@ -37,7 +42,7 @@ type Schedule struct {
 	instancesMap cmap.ConcurrentMap[string, *runner.Runner]
 
 	// instance commands channel
-	newInstanceCh chan instanceRequest
+	newInstanceCh chan *instanceRequest
 
 	// resource manager pass over to runners
 	manager manager.ResourceInterface
@@ -47,7 +52,7 @@ type Schedule struct {
 
 func New() *Schedule {
 	return &Schedule{
-		newInstanceCh: make(chan instanceRequest),
+		newInstanceCh: make(chan *instanceRequest),
 		instancesMap:  cmap.New[*runner.Runner](),
 		componentsMap: cmap.New[module.Component](),
 		inputChMap:    cmap.New[chan *runner.Msg](),
@@ -73,23 +78,22 @@ func (s *Schedule) Install(component module.Component) error {
 }
 
 // Upsert updates or creates instance
-func (s *Schedule) Upsert(node v1alpha1.TinyNode) (v1alpha1.TinyNodeStatus, error) {
-	statusCh := make(chan v1alpha1.TinyNodeStatus)
-	defer close(statusCh)
-
-	s.newInstanceCh <- instanceRequest{
-		Node:     node,
-		StatusCh: statusCh,
+func (s *Schedule) Upsert(node *v1alpha1.TinyNode) error {
+	req := &instanceRequest{
+		node:  node,
+		ready: make(chan struct{}),
 	}
-	return <-statusCh, nil
+	s.newInstanceCh <- req
+	<-req.ready
+	return nil
 }
 
 // Invoke sends data to the port of given instance name @todo
-func (s *Schedule) Invoke(ctx context.Context, node string, port string, data []byte) (v1alpha1.TinyNodeStatus, error) {
+func (s *Schedule) Invoke(ctx context.Context, node string, port string, data []byte) error {
 
 	instanceCh, ok := s.inputChMap.Get(node)
 	if !ok {
-		return v1alpha1.TinyNodeStatus{}, fmt.Errorf("node not found")
+		return fmt.Errorf("node not found")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
@@ -103,7 +107,7 @@ func (s *Schedule) Invoke(ctx context.Context, node string, port string, data []
 		},
 	}
 	<-ctx.Done()
-	return v1alpha1.TinyNodeStatus{}, nil
+	return nil
 }
 
 func (s *Schedule) Destroy(name string) error {
@@ -139,51 +143,61 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 			// send outside or into some instance
 			// decide if we make external request or send im
 		case req := <-s.newInstanceCh:
+			func() {
 
-			cmp, ok := s.componentsMap.Get(req.Node.Spec.Component)
-			if !ok {
-				req.StatusCh <- v1alpha1.TinyNodeStatus{
-					Error: fmt.Sprintf("component %s not found", req.Node.Spec.Component),
+				defer func() {
+					close(req.ready)
+				}()
+
+				cmp, ok := s.componentsMap.Get(req.node.Spec.Component)
+				if !ok {
+					req.node.Status = v1alpha1.TinyNodeStatus{
+						Error: fmt.Sprintf("component %s not found", req.node.Spec.Component),
+					}
+					return
 				}
-				continue
-			}
-			s.instancesMap.Upsert(req.Node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
-				//
-				if !exist {
-					// new instance
-					instance = runner.NewRunner(req.Node, cmp.Instance(), callbacks...).
-						// add K8s resource manager
-						SetManager(s.manager).
-						SetLogger(s.log)
+				s.instancesMap.Upsert(req.node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
+					//
+					if !exist {
+						// new instance
+						instance = runner.NewRunner(req.node, cmp.Instance(), callbacks...).
+							// add K8s resource manager
+							SetManager(s.manager).
+							SetLogger(s.log)
 
-					wg.Go(func() error {
-						// main instance lifetime goroutine
-						// exit unregisters instance
-						//
-						instanceCh := make(chan *runner.Msg)
-						// then close
-						defer close(instanceCh)
+						wg.Go(func() error {
+							// main instance lifetime goroutine
+							// exit unregisters instance
+							//
+							instanceCh := make(chan *runner.Msg)
+							// then close
+							defer close(instanceCh)
 
-						s.inputChMap.Set(req.Node.Name, instanceCh)
-						// delete first to avoid writing into closed channel
-						defer s.inputChMap.Remove(req.Node.Name)
+							s.inputChMap.Set(req.node.Name, instanceCh)
+							// delete first to avoid writing into closed channel
+							defer s.inputChMap.Remove(req.node.Name)
 
-						defer func() {
-							s.log.Info("instance stopped", "name", req.Node.Name)
-						}()
+							defer func() {
+								s.log.Info("instance stopped", "name", req.node.Name)
+							}()
 
-						// process input ports
-						return instance.Process(ctx, wg, instanceCh, eventBus)
-					})
-				}
-				//configure || reconfigure
-				if err := instance.Configure(ctx, req.Node, eventBus); err != nil {
-					s.log.Error(err, "configure error", "node", req.Node.Name)
-				}
+							// process input ports
+							return instance.Process(ctx, wg, instanceCh, eventBus)
+						})
+					}
+					//configure || reconfigure
+					if err := instance.Configure(ctx, req.node, eventBus); err != nil {
+						s.log.Error(err, "configure error", "node", req.node.Name)
+					}
 
-				req.StatusCh <- instance.GetStatus()
-				return instance
-			})
+					if err := instance.ApplyStatus(); err != nil {
+						s.log.Error(err, "apply status error", "node", req.node.Name)
+					}
+
+					return instance
+				})
+
+			}()
 
 		case <-ctx.Done():
 			// what for others
