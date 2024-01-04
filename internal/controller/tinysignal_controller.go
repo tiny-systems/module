@@ -18,8 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -57,7 +55,6 @@ type TinySignalReconciler struct {
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("reconcile", "tinysignal", req.Name)
-
 	// tiny signal names after name of node it's signaling to
 
 	// to avoid making many queries to Kubernetes API we check name itself against current module
@@ -76,15 +73,12 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	err = r.Get(context.Background(), req.NamespacedName, signal)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			fmt.Print("NOT FOUND !!!", req.NamespacedName)
 			// delete signal if related node not found
 			_ = r.Delete(ctx, signal)
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, err
 	}
-
-	spew.Dump(signal)
 
 	// send signal
 	_ = r.Scheduler.Invoke(ctx, signal.Spec.Node, signal.Spec.Port, signal.Spec.Data)
