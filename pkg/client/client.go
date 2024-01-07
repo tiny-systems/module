@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -33,12 +32,13 @@ func SendWebhookData(ctx context.Context, urlPath string, headers map[string]str
 	}
 	rsp, err := client.Do(req)
 	if err != nil {
-		return err
+
+		return nil
 	}
 
-	response, _ := io.ReadAll(rsp.Body)
+	_, _ = io.ReadAll(rsp.Body)
 	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("request to %s failed with response code: %d %v; headers sent: %v", urlPath, rsp.StatusCode, string(response), req.Header)
+		//return fmt.Errorf("request to %s failed with response code: %d %v; headers sent: %v", urlPath, rsp.StatusCode, string(response), req.Header)
 	}
 	return nil
 }

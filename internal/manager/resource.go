@@ -88,6 +88,29 @@ func (m Resource) RegisterModule(ctx context.Context, mod module.Info) error {
 	return err
 }
 
+func (m Resource) getReleaseNameByPodName(ctx context.Context, podName string) (string, error) {
+	pod := &v1core.Pod{}
+	err := m.client.Get(context.Background(), client.ObjectKey{
+		Namespace: m.namespace,
+		Name:      podName,
+	}, pod)
+
+	if err != nil {
+		return "", fmt.Errorf("unable to find current pod: %v", err)
+	}
+
+	var releaseName string
+	for k, v := range pod.ObjectMeta.Labels {
+		if k == "app.kubernetes.io/instance" {
+			releaseName = v
+		}
+	}
+	if releaseName == "" {
+		return "", fmt.Errorf("release name label not found")
+	}
+	return releaseName, nil
+}
+
 func (m Resource) ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error) {
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
@@ -102,24 +125,9 @@ func (m Resource) ExposePort(ctx context.Context, autoHostName string, hostnames
 		return []string{}, fmt.Errorf("empty hostnames provided")
 	}
 
-	pod := &v1core.Pod{}
-	err := m.client.Get(context.Background(), client.ObjectKey{
-		Namespace: m.namespace,
-		Name:      currentPod,
-	}, pod)
-
+	releaseName, err := m.getReleaseNameByPodName(ctx, currentPod)
 	if err != nil {
-		return []string{}, fmt.Errorf("unable to find current pod: %v", err)
-	}
-
-	var releaseName string
-	for k, v := range pod.ObjectMeta.Labels {
-		if k == "app.kubernetes.io/instance" {
-			releaseName = v
-		}
-	}
-	if releaseName == "" {
-		return []string{}, fmt.Errorf("release name label not found")
+		return nil, fmt.Errorf("unable to find release name: %v", err)
 	}
 
 	svc, err := m.getReleaseService(ctx, releaseName)
@@ -142,7 +150,7 @@ func (m Resource) ExposePort(ctx context.Context, autoHostName string, hostnames
 	if prefix != "" && autoHostName != "" {
 		hostnames = append(hostnames, fmt.Sprintf("%s-%s%s", autoHostName, svc.Namespace, prefix))
 	}
-	return m.updateIngress(ctx, ingress, svc, hostnames, port)
+	return m.addRulesIngress(ctx, ingress, svc, hostnames, port)
 }
 
 func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1ingress.Ingress) string {
@@ -156,56 +164,70 @@ func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1i
 	return hostNamePrefix
 }
 
-func (m Resource) updateIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, hostnames []string, port int) ([]string, error) {
+func (m Resource) removeRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, port int) error {
+
+MAIN:
+	for idx, rule := range ingress.Spec.Rules {
+		if rule.IngressRuleValue.HTTP == nil {
+			continue
+		}
+		for _, p := range rule.IngressRuleValue.HTTP.Paths {
+			if p.Backend.Service.Port.Number == int32(port) && p.Backend.Service.Name == service.Name {
+				// clean
+				ingress.Spec.Rules = removeSlice(ingress.Spec.Rules, idx)
+				continue MAIN
+			}
+		}
+	}
+	return m.client.Update(ctx, ingress)
+}
+
+func (m Resource) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, hostnames []string, port int) ([]string, error) {
 
 	if len(hostnames) == 0 {
 		return []string{}, fmt.Errorf("no hostnames provided")
 	}
 
-	for _, hostname := range hostnames {
+	pathType := v1ingress.PathTypePrefix
 
-		var found bool
-		for _, rule := range ingress.Spec.Rules {
-			if rule.Host == hostname && rule.IngressRuleValue.HTTP != nil {
-				for _, p := range rule.IngressRuleValue.HTTP.Paths {
-					if p.Backend.Service.Port.Number == int32(port) {
-						p.Backend.Service.Name = service.Name
-						found = true
-					}
-				}
-				// update rule for the given host
-			}
-		}
-		if !found {
-			pathType := v1ingress.PathTypePrefix
-			ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
-				Host: hostname,
-				IngressRuleValue: v1ingress.IngressRuleValue{
-					HTTP: &v1ingress.HTTPIngressRuleValue{
-						Paths: []v1ingress.HTTPIngressPath{
-							{
-								Path:     "/",
-								PathType: &pathType,
-								Backend: v1ingress.IngressBackend{
-									Service: &v1ingress.IngressServiceBackend{
-										Name: service.Name,
-										Port: v1ingress.ServiceBackendPort{
-											Number: int32(port),
-										},
+	for _, hostname := range hostnames {
+		ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
+			Host: hostname,
+			IngressRuleValue: v1ingress.IngressRuleValue{
+				HTTP: &v1ingress.HTTPIngressRuleValue{
+					Paths: []v1ingress.HTTPIngressPath{
+						{
+							Path:     "/",
+							PathType: &pathType,
+							Backend: v1ingress.IngressBackend{
+								Service: &v1ingress.IngressServiceBackend{
+									Name: service.Name,
+									Port: v1ingress.ServiceBackendPort{
+										Number: int32(port),
 									},
 								},
 							},
 						},
 					},
 				},
-			})
-		}
+			},
+		})
 	}
 
 	if err := m.client.Update(ctx, ingress); err != nil {
 		return []string{}, err
 	}
 	return hostnames, nil
+}
+
+func (m Resource) discloseServicePort(ctx context.Context, svc *v1core.Service, port int) error {
+	for idx, p := range svc.Spec.Ports {
+		if p.Port == int32(port) {
+			svc.Spec.Ports = removeSlice(svc.Spec.Ports, idx)
+			continue
+		}
+	}
+	return m.client.Update(ctx, svc)
 }
 
 func (m Resource) exposeServicePort(ctx context.Context, svc *v1core.Service, port int) error {
@@ -283,8 +305,31 @@ func (m Resource) getReleaseIngress(ctx context.Context, releaseName string) (*v
 }
 
 func (m Resource) DisclosePort(ctx context.Context, port int) error {
-	fmt.Printf("disclose port %d for pod %s\n", port, os.Getenv("HOSTNAME"))
-	return nil
+	currentPod := os.Getenv("HOSTNAME")
+	if currentPod == "" {
+		return fmt.Errorf("unable to determine the current pod's name")
+	}
+
+	releaseName, err := m.getReleaseNameByPodName(ctx, currentPod)
+	if err != nil {
+		return fmt.Errorf("unable to find release name: %v", err)
+	}
+
+	svc, err := m.getReleaseService(ctx, releaseName)
+	if err != nil {
+		return fmt.Errorf("unable to get service: %v", err)
+	}
+
+	ingress, _ := m.getReleaseIngress(ctx, releaseName)
+
+	if ingress == nil {
+		return fmt.Errorf("no ingress")
+	}
+
+	if err = m.discloseServicePort(ctx, svc, port); err != nil {
+		return err
+	}
+	return m.removeRulesIngress(ctx, ingress, svc, port)
 }
 
 func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error {
@@ -316,4 +361,8 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 func (m Resource) Start(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
+}
+
+func removeSlice[T any](slice []T, s int) []T {
+	return append(slice[:s], slice[s+1:]...)
 }

@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"time"
 )
 
 // TinyNodeReconciler reconciles a TinyNode object
@@ -62,7 +63,7 @@ type TinyNodeReconciler struct {
 func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	l.Info("reconcile", "tinynode", req.Name)
+	//l.Info("reconcile", "tinynode", req.Name)
 	m, _, err := module.ParseFullName(req.Name)
 	if err != nil {
 		l.Error(err, "node has invalid name", "name", req.Name)
@@ -74,10 +75,9 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, nil
 	}
 
-	instance := &operatorv1alpha1.TinyNode{}
-	err = r.Get(context.Background(), req.NamespacedName, instance)
+	node := &operatorv1alpha1.TinyNode{}
 
-	if err != nil {
+	if err = r.Get(context.Background(), req.NamespacedName, node); err != nil {
 		l.Error(err, "get tinynode error")
 		if errors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
@@ -92,24 +92,26 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, err
 	}
 
-	err = r.Scheduler.Upsert(instance)
+	node.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
+		Version: r.Module.Version,
+		Name:    r.Module.Name,
+	}
+
+	err = r.Scheduler.Upsert(node)
 	if err != nil {
 		// create event?
 		l.Error(err, "scheduler instance error")
 		return reconcile.Result{}, err
 	}
 
-	instance.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
-		Version: r.Module.Version,
-		Name:    r.Module.Name,
-	}
-
-	err = r.Status().Update(context.Background(), instance)
+	err = r.Status().Update(context.Background(), node)
 	if err != nil {
 		l.Error(err, "status update error")
 		return reconcile.Result{}, err
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{
+		RequeueAfter: time.Second * 3,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

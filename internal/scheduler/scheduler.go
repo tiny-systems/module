@@ -93,21 +93,25 @@ func (s *Schedule) Invoke(ctx context.Context, node string, port string, data []
 
 	instanceCh, ok := s.inputChMap.Get(node)
 	if !ok {
-		return fmt.Errorf("node not found")
+		return fmt.Errorf("instance not found in a map of registered instances")
 	}
-
+	var err error
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
 	// send to nodes' personal channel
 	instanceCh <- &runner.Msg{
 		To:   utils.GetPortFullName(node, port),
 		Data: data,
-		Callback: func(_ error) {
+		Callback: func(e error) {
 			cancel()
+			if e == nil {
+				return
+			}
+			s.log.Error(e, "invoice callback error")
 		},
 	}
 	<-ctx.Done()
-	return nil
+	return err
 }
 
 func (s *Schedule) Destroy(name string) error {
@@ -144,7 +148,6 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 			// decide if we make external request or send im
 		case req := <-s.newInstanceCh:
 			func() {
-
 				defer func() {
 					close(req.ready)
 				}()
@@ -182,9 +185,10 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 							}()
 
 							// process input ports
-							return instance.Process(ctx, wg, instanceCh, eventBus)
+							return instance.Process(ctx, instanceCh, eventBus)
 						})
 					}
+
 					//configure || reconfigure
 					if err := instance.Configure(ctx, req.node, eventBus); err != nil {
 						s.log.Error(err, "configure error", "node", req.node.Name)
