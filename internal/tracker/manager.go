@@ -60,7 +60,7 @@ func (t *manager) Track(ctx context.Context, msg PortMsg) {
 			t.log.Error(err, "port webhook error", "data", msg)
 		}
 		if err := t.sendNodeStatistics(ctx, msg, tt); err != nil {
-			t.log.Error(err, "stats webhook error", "data", msg)
+			//t.log.Error(err, "stats webhook error", "data", msg)
 		}
 	}
 }

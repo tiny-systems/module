@@ -286,7 +286,10 @@ var runCmd = &cobra.Command{
 				l.Info("scheduler stopped")
 			}()
 			if err := sch.Start(ctx, inputCh, eventBus, func(msg tracker.PortMsg) {
-				trackManager.Track(ctx, msg)
+				go func() {
+					// @todo add pool
+					trackManager.Track(ctx, msg)
+				}()
 			}); err != nil {
 				l.Error(err, "unable to start scheduler")
 				return err
