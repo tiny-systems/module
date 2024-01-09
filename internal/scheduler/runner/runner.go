@@ -19,6 +19,7 @@ import (
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
 	"google.golang.org/grpc/status"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"reflect"
 	"sort"
 	"strconv"
@@ -53,6 +54,8 @@ type Runner struct {
 	stats cmap.ConcurrentMap[string, *int64]
 
 	callbacks []tracker.Callback
+
+	prevPorts []m.NodePort
 }
 
 func NewRunner(node *v1alpha1.TinyNode, component m.Component, callbacks ...tracker.Callback) *Runner {
@@ -130,9 +133,14 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 
 // ApplyStatus recreates status from scratch
 func (c *Runner) ApplyStatus() error {
-	c.node.Status.Status = "OK"
 
 	ports := c.component.Ports()
+	if reflect.DeepEqual(c.prevPorts, ports) {
+		return nil
+	}
+
+	c.log.Info("build status", "node", c.node.Name)
+	c.node.Status.Status = "OK"
 	c.node.Status.Ports = make([]v1alpha1.TinyNodePortStatus, 0)
 
 	// sort ports
@@ -218,6 +226,7 @@ func (c *Runner) ApplyStatus() error {
 		Tags:        cmpInfo.Tags,
 	}
 
+	c.prevPorts = ports
 	return nil
 }
 
@@ -353,10 +362,11 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 func (c *Runner) Configure(ctx context.Context, node *v1alpha1.TinyNode, outputCh chan *Msg) error {
 	c.nodeLock.Lock()
 
-	if node.ResourceVersion == c.node.ResourceVersion {
+	if equality.Semantic.DeepEqual(c.node, node) {
 		c.nodeLock.Unlock()
 		return nil
 	}
+
 	c.node = node
 	c.nodeLock.Unlock()
 
@@ -400,7 +410,6 @@ func (c *Runner) Process(ctx context.Context, instanceCh chan *Msg, outputCh cha
 }
 
 func (c *Runner) cleanup() error {
-
 	c.cancelStopFuncsLock.Lock()
 	defer c.cancelStopFuncsLock.Unlock()
 	return nil
