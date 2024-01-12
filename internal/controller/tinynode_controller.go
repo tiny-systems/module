@@ -18,10 +18,10 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"time"
 )
 
 // TinyNodeReconciler reconciles a TinyNode object
@@ -93,36 +92,27 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, err
 	}
 
+	err = r.Scheduler.Upsert(node)
+	if err != nil {
+		// create event?
+		l.Error(err, "scheduler error")
+		node.Status.Status = fmt.Sprintf("ERROR: %v", err)
+		return reconcile.Result{}, err
+	}
+
+	l.Info("update status", "node", node.Name)
+
 	node.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
 		Version: r.Module.Version,
 		Name:    r.Module.Name,
 	}
-
-	statusBefore := node.Status.DeepCopy()
-
-	err = r.Scheduler.Upsert(node)
-	if err != nil {
-		// create event?
-		l.Error(err, "scheduler instance error")
-		return reconcile.Result{}, err
-	}
-
-	if equality.Semantic.DeepDerivative(*statusBefore, node.Status) {
-		return ctrl.Result{
-			RequeueAfter: time.Second * 3,
-		}, nil
-	}
-
-	l.Info("update status", "node", node.Name)
 	err = r.Status().Update(context.Background(), node)
 	if err != nil {
 		l.Error(err, "status update error")
 		return reconcile.Result{}, err
 	}
 
-	return ctrl.Result{
-		RequeueAfter: time.Second * 3,
-	}, nil
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

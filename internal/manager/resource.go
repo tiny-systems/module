@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"strings"
 
 	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,6 +30,7 @@ type ResourceInterface interface {
 	ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error)
 	DisclosePort(ctx context.Context, port int) error
 	RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error
+	CreateClusterNodeSignal(ctx context.Context, node *v1alpha1.TinyNode, port string, data []byte) error
 }
 
 func NewManager(c client.Client, ns string) *Resource {
@@ -166,19 +168,22 @@ func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1i
 
 func (m Resource) removeRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, port int) error {
 
+	rules := ingress.Spec.Rules[:]
+
 MAIN:
-	for idx, rule := range ingress.Spec.Rules {
+	for idx, rule := range rules {
 		if rule.IngressRuleValue.HTTP == nil {
 			continue
 		}
 		for _, p := range rule.IngressRuleValue.HTTP.Paths {
 			if p.Backend.Service.Port.Number == int32(port) && p.Backend.Service.Name == service.Name {
 				// clean
-				ingress.Spec.Rules = removeSlice(ingress.Spec.Rules, idx)
+				rules = removeSlice(rules, idx)
 				continue MAIN
 			}
 		}
 	}
+	ingress.Spec.Rules = rules
 	return m.client.Update(ctx, ingress)
 }
 
@@ -330,6 +335,19 @@ func (m Resource) DisclosePort(ctx context.Context, port int) error {
 		return err
 	}
 	return m.removeRulesIngress(ctx, ingress, svc, port)
+}
+
+func (m Resource) CreateClusterNodeSignal(ctx context.Context, node *v1alpha1.TinyNode, port string, data []byte) error {
+	signal := &v1alpha1.TinySignal{
+		Spec: v1alpha1.TinySignalSpec{
+			Node: node.Name,
+			Port: port,
+			Data: data,
+		},
+	}
+	signal.Namespace = node.Namespace
+	signal.GenerateName = fmt.Sprintf("%s-%s-", node.Name, strings.ReplaceAll(port, "_", ""))
+	return m.client.Create(ctx, signal)
 }
 
 func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error {

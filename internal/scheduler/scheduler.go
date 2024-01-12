@@ -30,6 +30,7 @@ type Scheduler interface {
 
 type instanceRequest struct {
 	node  *v1alpha1.TinyNode
+	err   error
 	ready chan struct{}
 }
 
@@ -85,7 +86,7 @@ func (s *Schedule) Upsert(node *v1alpha1.TinyNode) error {
 	}
 	s.newInstanceCh <- req
 	<-req.ready
-	return nil
+	return req.err
 }
 
 // Invoke sends data to the port of given instance name @todo
@@ -147,6 +148,7 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 			// send outside or into some instance
 			// decide if we make external request or send im
 		case req := <-s.newInstanceCh:
+
 			func() {
 				defer func() {
 					close(req.ready)
@@ -159,19 +161,19 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 					}
 					return
 				}
+
 				s.instancesMap.Upsert(req.node.Name, nil, func(exist bool, instance *runner.Runner, _ *runner.Runner) *runner.Runner {
 					//
 					if !exist {
 						// new instance
-						instance = runner.NewRunner(req.node, cmp.Instance(), callbacks...).
-							// add K8s resource manager
-							SetManager(s.manager).
-							SetLogger(s.log)
+						instance = runner.NewRunner(req.node.Name, req.node.Labels[v1alpha1.FlowIDLabel], cmp.Instance(), callbacks...).SetManager(s.manager).SetLogger(s.log)
 
 						wg.Go(func() error {
 							// main instance lifetime goroutine
 							// exit unregisters instance
-							//
+							instance.InitHTTP(req.node.Labels[v1alpha1.SuggestedHttpPortAnnotation])
+
+							//prepare own channel
 							instanceCh := make(chan *runner.Msg)
 							// then close
 							defer close(instanceCh)
@@ -183,21 +185,20 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 							defer func() {
 								s.log.Info("instance stopped", "name", req.node.Name)
 							}()
-
 							// process input ports
 							return instance.Process(ctx, instanceCh, eventBus)
 						})
 					}
 
 					//configure || reconfigure
-					if err := instance.Configure(ctx, req.node, eventBus); err != nil {
-						s.log.Error(err, "configure error", "node", req.node.Name)
+					err := instance.Configure(ctx, req.node.DeepCopy(), eventBus)
+					if err != nil {
+						req.err = fmt.Errorf("configure error: %v", err)
+						return instance
 					}
-
-					if err := instance.ApplyStatus(); err != nil {
-						s.log.Error(err, "apply status error", "node", req.node.Name)
+					if err = instance.UpdateStatus(&req.node.Status); err != nil {
+						req.err = fmt.Errorf("update status error: %v", err)
 					}
-
 					return instance
 				})
 

@@ -69,7 +69,6 @@ require (
 	github.com/go-logr/zerologr v1.2.3
 	github.com/goccy/go-json v0.10.2
 	github.com/jellydator/ttlcache/v3 v3.1.0
-	github.com/maxatome/go-testdeep v1.14.0
 	github.com/onsi/ginkgo/v2 v2.11.0
 	github.com/onsi/gomega v1.27.10
 	github.com/orcaman/concurrent-map/v2 v2.0.1
@@ -77,6 +76,7 @@ require (
 	github.com/rs/zerolog v1.31.0
 	github.com/spf13/cobra v1.7.0
 	github.com/spyzhov/ajson v0.9.0
+	github.com/stretchr/testify v1.8.4
 	github.com/swaggest/jsonschema-go v0.3.62
 	github.com/tiny-systems/errorpanic v0.7.1
 	github.com/tiny-systems/platform-api v0.0.7
@@ -109,6 +109,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/swaggest/refl v1.3.0 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/tools v0.14.0 // indirect

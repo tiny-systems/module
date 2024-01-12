@@ -8,6 +8,7 @@ const (
 	SaveStatePort string = "_save-state"
 	GetStatePort         = "_get-state"
 	SettingsPort         = "_settings"
+	RefreshPort          = "_refresh"
 )
 
 const (
