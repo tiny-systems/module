@@ -94,6 +94,7 @@ var buildCmd = &cobra.Command{
 			VersionID:  publishResponse.Module.Id,
 		}
 
+		// @todo build failure ignored
 		if err := build.Build(ctx, cwd, pathToMain, buildOpts); err != nil {
 			fmt.Printf("unable to build: %v\n", err)
 			return
