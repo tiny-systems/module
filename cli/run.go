@@ -47,7 +47,11 @@ var runCmd = &cobra.Command{
 	Short: "Run module",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("recovered in f", r)
+			}
+		}()
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
 

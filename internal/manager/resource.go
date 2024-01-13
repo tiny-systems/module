@@ -168,9 +168,13 @@ func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1i
 
 func (m Resource) removeRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, port int) error {
 
-	rules := ingress.Spec.Rules[:]
+	var (
+		rules     = ingress.Spec.Rules[:]
+		tls       = ingress.Spec.TLS[:]
+		hostnames []string
+	)
 
-MAIN:
+RULES:
 	for idx, rule := range rules {
 		if rule.IngressRuleValue.HTTP == nil {
 			continue
@@ -179,10 +183,25 @@ MAIN:
 			if p.Backend.Service.Port.Number == int32(port) && p.Backend.Service.Name == service.Name {
 				// clean
 				rules = removeSlice(rules, idx)
-				continue MAIN
+				hostnames = append(hostnames, rule.Host)
+				continue RULES
 			}
 		}
 	}
+
+TLS:
+	for idx, t := range tls {
+		for _, h := range t.Hosts {
+			for _, host := range hostnames {
+				if host != h {
+					continue
+				}
+				tls = removeSlice(tls, idx)
+				continue TLS
+			}
+		}
+	}
+	ingress.Spec.TLS = tls
 	ingress.Spec.Rules = rules
 	return m.client.Update(ctx, ingress)
 }
@@ -194,7 +213,6 @@ func (m Resource) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingres
 	}
 
 	pathType := v1ingress.PathTypePrefix
-
 	for _, hostname := range hostnames {
 		ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
 			Host: hostname,
@@ -218,6 +236,10 @@ func (m Resource) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingres
 			},
 		})
 	}
+	ingress.Spec.TLS = append(ingress.Spec.TLS, v1ingress.IngressTLS{
+		Hosts:      hostnames,
+		SecretName: fmt.Sprintf("%s-secret", ingress.Name),
+	})
 
 	if err := m.client.Update(ctx, ingress); err != nil {
 		return []string{}, err
