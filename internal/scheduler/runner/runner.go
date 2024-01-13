@@ -18,6 +18,7 @@ import (
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
+	"golang.org/x/sync/errgroup"
 	"reflect"
 	"sort"
 	"strconv"
@@ -72,19 +73,18 @@ func NewRunner(name string, flowID string, component m.Component, callbacks ...t
 	}
 }
 
-// InitHTTP if underlying component is http servicer
-func (c *Runner) InitHTTP(suggestedPortStr string) {
+// Init if underlying component is http servicer
+func (c *Runner) Init(wg *errgroup.Group, suggestedPortStr string) {
 	if httpEmitter, ok := c.component.(m.HTTPService); ok {
 		httpEmitter.HTTPService(func() (int, m.AddressUpgrade) {
-
 			var suggestedPort int
 			if annotationPort, err := strconv.Atoi(suggestedPortStr); err == nil {
 				suggestedPort = annotationPort
 			}
 
-			return suggestedPort, func(httpCtx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error) {
+			return suggestedPort, func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error) {
 				// limit exposing with a timeout
-				exposeCtx, cancel := context.WithTimeout(httpCtx, time.Second*10)
+				exposeCtx, cancel := context.WithTimeout(ctx, time.Second*10)
 				defer cancel()
 
 				var err error
@@ -102,17 +102,18 @@ func (c *Runner) InitHTTP(suggestedPortStr string) {
 					return []string{}, err
 				}
 
-				go func() {
+				wg.Go(func() error {
 					// listen when emit ctx ends to clean up
-					<-httpCtx.Done()
+					<-ctx.Done()
 					c.log.Info("cleaning up exposed port")
 
 					discloseCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 					defer cancel()
 					if err := c.manager.DisclosePort(discloseCtx, actualLocalPort); err != nil {
-						c.log.Error(err, "unable to disclose port: %d", actualLocalPort)
+						c.log.Error(err, "unable to disclose port", "port", actualLocalPort)
 					}
-				}()
+					return nil
+				})
 				return publicURLs, err
 			}
 		})
@@ -377,7 +378,7 @@ func (c *Runner) Process(ctx context.Context, instanceCh chan *Msg, outputCh cha
 		select {
 		case <-ctx.Done():
 			c.log.Info("runner process context is done", "runner", c.name)
-			return c.Destroy()
+			return ctx.Err()
 
 		case msg, ok := <-instanceCh:
 			if !ok {
@@ -408,7 +409,6 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	if err != nil {
 		return err
 	}
-	c.log.Info("output", "port", port)
 
 	c.runnerLock.RLock()
 	if port == m.RefreshPort {
