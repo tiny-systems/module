@@ -55,34 +55,28 @@ func NewManager() *manager {
 
 func (t *manager) Track(ctx context.Context, msg PortMsg) {
 
-	for _, tt := range t.trackers {
-		if err := t.sendPortData(ctx, msg, tt); err != nil {
-			t.log.Error(err, "port webhook error", "data", msg)
-		}
-		if err := t.sendNodeStatistics(ctx, msg, tt); err != nil {
-			//t.log.Error(err, "stats webhook error", "data", msg)
-		}
-	}
+	//for _, tt := range t.trackers {
+	//	if err := t.sendPortData(ctx, msg, tt); err != nil {
+	//		t.log.Error(err, "port webhook error", "data", msg)
+	//	}
+	//	if err := t.sendNodeStatistics(ctx, msg, tt); err != nil {
+	//		//t.log.Error(err, "stats webhook error", "data", msg)
+	//	}
+	//}
 }
 
 func (t *manager) sendPortData(ctx context.Context, msg PortMsg, tracker v1alpha1.TinyTracker) error {
 
-	if tracker.Spec.PortDataWebhook == nil {
+	if tracker.Spec.PortDataWebhook == nil || tracker.Spec.PortDataWebhook.FlowID != msg.FlowID {
 		return nil
 	}
 
-	if tracker.Spec.PortDataWebhook.FlowID != msg.FlowID {
-		return nil
-	}
 	if len(msg.Data) > tracker.Spec.PortDataWebhook.MaxDataSize {
 		return nil
 	}
 
-	cacheKey := buildTrackerPortCacheKey(tracker, msg.PortName)
 	t.cache.DeleteExpired()
-	_, created := t.cache.GetOrSet(cacheKey, struct{}{}, ttlcache.WithTTL[string, struct{}](tracker.Spec.PortDataWebhook.Interval.Duration))
-
-	if created {
+	if _, created := t.cache.GetOrSet(buildTrackerPortCacheKey(tracker, msg.PortName), struct{}{}, ttlcache.WithTTL[string, struct{}](tracker.Spec.PortDataWebhook.Interval.Duration)); created {
 		return nil
 	}
 
@@ -102,11 +96,7 @@ func (t *manager) sendPortData(ctx context.Context, msg PortMsg, tracker v1alpha
 
 func (t *manager) sendNodeStatistics(ctx context.Context, msg PortMsg, tracker v1alpha1.TinyTracker) error {
 
-	if tracker.Spec.NodeStatisticsWebhook == nil {
-		return nil
-	}
-
-	if tracker.Spec.NodeStatisticsWebhook.FlowID != msg.FlowID {
+	if tracker.Spec.NodeStatisticsWebhook == nil || tracker.Spec.NodeStatisticsWebhook.FlowID != msg.FlowID {
 		return nil
 	}
 
