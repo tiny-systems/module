@@ -54,15 +54,14 @@ func NewManager() *manager {
 }
 
 func (t *manager) Track(ctx context.Context, msg PortMsg) {
-
-	//for _, tt := range t.trackers {
-	//	if err := t.sendPortData(ctx, msg, tt); err != nil {
-	//		t.log.Error(err, "port webhook error", "data", msg)
-	//	}
-	//	if err := t.sendNodeStatistics(ctx, msg, tt); err != nil {
-	//		//t.log.Error(err, "stats webhook error", "data", msg)
-	//	}
-	//}
+	for _, tt := range t.trackers {
+		if err := t.sendPortData(ctx, msg, tt); err != nil {
+			t.log.Error(err, "port webhook error", "data", msg)
+		}
+		if err := t.sendNodeStatistics(ctx, msg, tt); err != nil {
+			t.log.Error(err, "stats webhook error", "data", msg)
+		}
+	}
 }
 
 func (t *manager) sendPortData(ctx context.Context, msg PortMsg, tracker v1alpha1.TinyTracker) error {
