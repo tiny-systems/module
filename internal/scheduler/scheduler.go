@@ -168,7 +168,7 @@ func (s *Schedule) Start(ctx context.Context, wg *errgroup.Group, eventBus chan 
 						wg.Go(func() error {
 							// main instance lifetime goroutine
 							// exit unregisters instance
-							instance.InitHTTP(req.node.Labels[v1alpha1.SuggestedHttpPortAnnotation])
+							instance.Init(wg, req.node.Labels[v1alpha1.SuggestedHttpPortAnnotation])
 
 							//prepare own channel
 							instanceCh := make(chan *runner.Msg)

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/go-logr/logr"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -22,6 +23,7 @@ import (
 type Resource struct {
 	client    client.Client
 	namespace string
+	log       logr.Logger
 }
 
 type ResourceInterface interface {
@@ -33,8 +35,8 @@ type ResourceInterface interface {
 	CreateClusterNodeSignal(ctx context.Context, node *v1alpha1.TinyNode, port string, data []byte) error
 }
 
-func NewManager(c client.Client, ns string) *Resource {
-	return &Resource{client: c, namespace: ns}
+func NewManager(c client.Client, log logr.Logger, ns string) *Resource {
+	return &Resource{client: c, log: log, namespace: ns}
 }
 
 // CleanupExampleNodes  @todo deal with it later
@@ -114,15 +116,15 @@ func (m Resource) getReleaseNameByPodName(ctx context.Context, podName string) (
 }
 
 func (m Resource) ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error) {
+	m.log.Info("exposing port", "port", port, "hostnames", hostnames)
+
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
 		return []string{}, fmt.Errorf("unable to determine the current pod's name")
 	}
-
 	if hostnames == nil {
 		hostnames = []string{}
 	}
-
 	if len(hostnames) == 0 && autoHostName == "" {
 		return []string{}, fmt.Errorf("empty hostnames provided")
 	}
@@ -169,38 +171,39 @@ func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1i
 func (m Resource) removeRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, port int) error {
 
 	var (
-		rules     = ingress.Spec.Rules[:]
-		tls       = ingress.Spec.TLS[:]
-		hostnames []string
+		rules            []v1ingress.IngressRule
+		tls              []v1ingress.IngressTLS
+		deletedHostnames []string
 	)
 
 RULES:
-	for idx, rule := range rules {
+	for _, rule := range ingress.Spec.Rules {
 		if rule.IngressRuleValue.HTTP == nil {
 			continue
 		}
 		for _, p := range rule.IngressRuleValue.HTTP.Paths {
 			if p.Backend.Service.Port.Number == int32(port) && p.Backend.Service.Name == service.Name {
-				// clean
-				rules = removeSlice(rules, idx)
-				hostnames = append(hostnames, rule.Host)
+				// omit saving
+				deletedHostnames = append(deletedHostnames, rule.Host)
 				continue RULES
 			}
+			rules = append(rules, rule)
 		}
 	}
 
 TLS:
-	for idx, t := range tls {
+	for _, t := range tls {
 		for _, h := range t.Hosts {
-			for _, host := range hostnames {
+			for _, host := range deletedHostnames {
 				if host != h {
+					tls = append(tls, t)
 					continue
 				}
-				tls = removeSlice(tls, idx)
 				continue TLS
 			}
 		}
 	}
+
 	ingress.Spec.TLS = tls
 	ingress.Spec.Rules = rules
 	return m.client.Update(ctx, ingress)
@@ -211,35 +214,63 @@ func (m Resource) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingres
 	if len(hostnames) == 0 {
 		return []string{}, fmt.Errorf("no hostnames provided")
 	}
-
 	pathType := v1ingress.PathTypePrefix
-	for _, hostname := range hostnames {
-		ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
-			Host: hostname,
-			IngressRuleValue: v1ingress.IngressRuleValue{
-				HTTP: &v1ingress.HTTPIngressRuleValue{
-					Paths: []v1ingress.HTTPIngressPath{
-						{
-							Path:     "/",
-							PathType: &pathType,
-							Backend: v1ingress.IngressBackend{
-								Service: &v1ingress.IngressServiceBackend{
-									Name: service.Name,
-									Port: v1ingress.ServiceBackendPort{
-										Number: int32(port),
-									},
-								},
+
+	var rule = v1ingress.IngressRuleValue{
+		HTTP: &v1ingress.HTTPIngressRuleValue{
+			Paths: []v1ingress.HTTPIngressPath{
+				{
+					Path:     "/",
+					PathType: &pathType,
+					Backend: v1ingress.IngressBackend{
+						Service: &v1ingress.IngressServiceBackend{
+							Name: service.Name,
+							Port: v1ingress.ServiceBackendPort{
+								Number: int32(port),
 							},
 						},
 					},
 				},
 			},
+		},
+	}
+
+INGRESS:
+	for _, hostname := range hostnames {
+		for _, r := range ingress.Spec.Rules {
+			if r.Host != hostname {
+				continue
+			}
+			r.IngressRuleValue = rule
+			continue INGRESS
+		}
+		ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
+			Host:             hostname,
+			IngressRuleValue: rule,
 		})
 	}
-	ingress.Spec.TLS = append(ingress.Spec.TLS, v1ingress.IngressTLS{
-		Hosts:      hostnames,
-		SecretName: fmt.Sprintf("%s-secret", ingress.Name),
-	})
+
+	var newHostNames []string
+
+HOSTNAMES:
+	for _, hostname := range hostnames {
+		for _, t := range ingress.Spec.TLS {
+			for _, th := range t.Hosts {
+				if th != hostname {
+					continue
+				}
+				continue HOSTNAMES
+			}
+		}
+		newHostNames = append(newHostNames, hostname)
+	}
+
+	if len(hostnames) > 0 {
+		ingress.Spec.TLS = append(ingress.Spec.TLS, v1ingress.IngressTLS{
+			Hosts:      hostnames,
+			SecretName: fmt.Sprintf("%s-secret", ingress.Name),
+		})
+	}
 
 	if err := m.client.Update(ctx, ingress); err != nil {
 		return []string{}, err
@@ -248,12 +279,15 @@ func (m Resource) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingres
 }
 
 func (m Resource) discloseServicePort(ctx context.Context, svc *v1core.Service, port int) error {
-	for idx, p := range svc.Spec.Ports {
-		if p.Port == int32(port) {
-			svc.Spec.Ports = removeSlice(svc.Spec.Ports, idx)
+	var ports []v1core.ServicePort
+
+	for _, p := range svc.Spec.Ports {
+		if p.Port != int32(port) {
+			ports = append(ports, p)
 			continue
 		}
 	}
+	svc.Spec.Ports = ports
 	return m.client.Update(ctx, svc)
 }
 
@@ -332,6 +366,8 @@ func (m Resource) getReleaseIngress(ctx context.Context, releaseName string) (*v
 }
 
 func (m Resource) DisclosePort(ctx context.Context, port int) error {
+	m.log.Info("disclose port", "port", port)
+
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
 		return fmt.Errorf("unable to determine the current pod's name")
@@ -401,8 +437,4 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 func (m Resource) Start(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
-}
-
-func removeSlice[T any](slice []T, s int) []T {
-	return append(slice[:s], slice[s+1:]...)
 }

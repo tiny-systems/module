@@ -105,10 +105,10 @@ var runCmd = &cobra.Command{
 		}
 
 		// run all modules
-		ctx, cancel := context.WithCancelCause(cmd.Context())
+		cmdCtx, cancel := context.WithCancelCause(cmd.Context())
 		defer cancel(nil)
 
-		wg, ctx := errgroup.WithContext(ctx)
+		wg, ctx := errgroup.WithContext(cmdCtx)
 
 		listenAddr := make(chan string)
 		defer close(listenAddr)
@@ -144,7 +144,7 @@ var runCmd = &cobra.Command{
 		// add listening address to the module info
 		moduleInfo.Addr = <-listenAddr
 
-		crManager := manager.NewManager(mgr.GetClient(), namespace)
+		crManager := manager.NewManager(mgr.GetClient(), l, namespace)
 
 		//
 		sch := scheduler.New().
