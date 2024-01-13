@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sort"
 	"strings"
 
 	"os"
@@ -266,9 +267,11 @@ HOSTNAMES:
 	}
 
 	if len(hostnames) > 0 {
+
+		sort.Strings(hostnames)
 		ingress.Spec.TLS = append(ingress.Spec.TLS, v1ingress.IngressTLS{
 			Hosts:      hostnames,
-			SecretName: fmt.Sprintf("%s-secret", ingress.Name),
+			SecretName: fmt.Sprintf("%s-secret", fmt.Sprintf("%s-tls", strings.Join(hostnames, "-"))),
 		})
 	}
 
