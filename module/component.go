@@ -30,12 +30,6 @@ type Component interface {
 	Instance() Component
 }
 
-// StatefulComponent WIP
-type StatefulComponent interface {
-	GetState() ([]byte, error)
-	SetState(state []byte) error
-}
-
 type AddressUpgrade func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error)
 
 // ListenAddressGetter gets listen port address
