@@ -75,11 +75,9 @@ func NewRunner(name string, flowID string, component m.Component, callbacks ...t
 // InitHTTP if underlying component is http servicer
 func (c *Runner) InitHTTP(suggestedPortStr string) {
 	if httpEmitter, ok := c.component.(m.HTTPService); ok {
-
 		httpEmitter.HTTPService(func() (int, m.AddressUpgrade) {
 
 			var suggestedPort int
-
 			if annotationPort, err := strconv.Atoi(suggestedPortStr); err == nil {
 				suggestedPort = annotationPort
 			}
@@ -224,7 +222,7 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 // input processes input to the inherited component
 func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan *Msg) error {
-	c.log.Info("process input", "port", port, "data", msg.Data, "node", c.name)
+	//c.log.Info("process input", "port", port, "data", msg.Data, "node", c.name)
 
 	var nodePort *m.NodePort
 	for _, p := range c.component.Ports() {
@@ -234,7 +232,6 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 		}
 	}
 	if nodePort == nil {
-		fmt.Println("WE HAVE NO SUCH PORT", port)
 		// ignore if we have no such port
 		return nil
 	}

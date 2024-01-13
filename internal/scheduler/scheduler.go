@@ -25,7 +25,7 @@ type Scheduler interface {
 	//Destroy stops the instance
 	Destroy(name string) error
 	//Start starts scheduler
-	Start(ctx context.Context, inputCh chan *runner.Msg, outputCh chan *runner.Msg, callbacks ...tracker.Callback) error
+	Start(ctx context.Context, wg *errgroup.Group, inputCh chan *runner.Msg, outputCh chan *runner.Msg, callbacks ...tracker.Callback) error
 }
 
 type instanceRequest struct {
@@ -125,12 +125,10 @@ func (s *Schedule) Destroy(name string) error {
 	return nil
 }
 
-func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outsideCh chan *runner.Msg, callbacks ...tracker.Callback) error {
+func (s *Schedule) Start(ctx context.Context, wg *errgroup.Group, eventBus chan *runner.Msg, outsideCh chan *runner.Msg, callbacks ...tracker.Callback) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	wg, ctx := errgroup.WithContext(ctx)
 
 	for {
 		select {
@@ -167,7 +165,6 @@ func (s *Schedule) Start(ctx context.Context, eventBus chan *runner.Msg, outside
 					if !exist {
 						// new instance
 						instance = runner.NewRunner(req.node.Name, req.node.Labels[v1alpha1.FlowIDLabel], cmp.Instance(), callbacks...).SetManager(s.manager).SetLogger(s.log)
-
 						wg.Go(func() error {
 							// main instance lifetime goroutine
 							// exit unregisters instance
