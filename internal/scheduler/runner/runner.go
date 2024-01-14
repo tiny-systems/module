@@ -133,7 +133,6 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 
 // ApplyStatus recreates status from scratch
 func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
-	c.log.Info("build status", "node", c.name)
 
 	ports := c.component.Ports()
 
@@ -233,7 +232,6 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 		}
 	}
 	if nodePort == nil {
-		// ignore if we have no such port
 		return nil
 	}
 
