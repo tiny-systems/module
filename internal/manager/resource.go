@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sort"
 	"strings"
 
 	"os"
@@ -238,11 +237,11 @@ func (m Resource) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingres
 
 INGRESS:
 	for _, hostname := range hostnames {
-		for _, r := range ingress.Spec.Rules {
+		for idx, r := range ingress.Spec.Rules {
 			if r.Host != hostname {
 				continue
 			}
-			r.IngressRuleValue = rule
+			ingress.Spec.Rules[idx].IngressRuleValue = rule
 			continue INGRESS
 		}
 		ingress.Spec.Rules = append(ingress.Spec.Rules, v1ingress.IngressRule{
@@ -266,13 +265,13 @@ HOSTNAMES:
 		newHostNames = append(newHostNames, hostname)
 	}
 
-	if len(hostnames) > 0 {
-
-		sort.Strings(hostnames)
-		ingress.Spec.TLS = append(ingress.Spec.TLS, v1ingress.IngressTLS{
-			Hosts:      hostnames,
-			SecretName: fmt.Sprintf("%s-secret", fmt.Sprintf("%s-tls", strings.Join(hostnames, "-"))),
-		})
+	if len(newHostNames) > 0 {
+		for _, hostname := range newHostNames {
+			ingress.Spec.TLS = append(ingress.Spec.TLS, v1ingress.IngressTLS{
+				Hosts:      []string{hostname},
+				SecretName: fmt.Sprintf("%s-tls", hostname),
+			})
+		}
 	}
 
 	if err := m.client.Update(ctx, ingress); err != nil {
@@ -285,10 +284,11 @@ func (m Resource) discloseServicePort(ctx context.Context, svc *v1core.Service, 
 	var ports []v1core.ServicePort
 
 	for _, p := range svc.Spec.Ports {
-		if p.Port != int32(port) {
-			ports = append(ports, p)
+		if p.Port == int32(port) {
 			continue
 		}
+		// save others
+		ports = append(ports, p)
 	}
 	svc.Spec.Ports = ports
 	return m.client.Update(ctx, svc)

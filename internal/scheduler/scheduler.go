@@ -108,7 +108,7 @@ func (s *Schedule) Invoke(ctx context.Context, node string, port string, data []
 			if e == nil {
 				return
 			}
-			s.log.Error(e, "invoice callback error")
+			s.log.Error(e, "invoke callback error")
 		},
 	}
 	<-ctx.Done()
