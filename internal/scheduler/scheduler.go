@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/pkg/errors"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/manager"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
@@ -182,8 +183,13 @@ func (s *Schedule) Start(ctx context.Context, wg *errgroup.Group, eventBus chan 
 							defer func() {
 								s.log.Info("instance stopped", "name", req.node.Name)
 							}()
+
 							// process input ports
-							return instance.Process(ctx, instanceCh, eventBus)
+							err := instance.Process(ctx, instanceCh, eventBus)
+							if errors.Is(err, context.Canceled) {
+								return nil
+							}
+							return err
 						})
 					}
 
