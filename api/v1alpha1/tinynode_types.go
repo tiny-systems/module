@@ -32,6 +32,7 @@ const (
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
+	ComponentCustomDescription = "tinysystems.io/custom-description"
 
 	SuggestedHttpPortAnnotation = "tinysystems.io/suggested-http-port"
 
