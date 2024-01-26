@@ -57,6 +57,7 @@ func applyRunFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&grpcAddr, "grpc-server", "g", ":0", "gRPC server listen address")
 	cmd.Flags().BoolVarP(&enableLeaderElection, "leader-elect", "l", false, "Enable leader election for controller manager. "+
 		"Enabling this will ensure there is only one active controller manager.")
+
 	cmd.MarkFlagRequired("version")
 	cmd.MarkFlagRequired("name")
 

@@ -125,9 +125,8 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
-.PHONY: generate-charts
-generate-charts: kustomize
-	$(KUSTOMIZE) build config/default | helmify --image-pull-secrets charts/tinysystems-operator
+.PHONY: generate-crd-chart
+generate-crd-chart: kustomize
 	$(KUSTOMIZE) build config/crd | helmify charts/tinysystems-crd
 
 ##@ Build Dependencies
