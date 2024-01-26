@@ -25,11 +25,14 @@ controllerManager:
     - --health-probe-bind-address=:8081
     - --metrics-bind-address=127.0.0.1:8080
     - --leader-elect
+    extraEnvs: []
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
         drop:
         - ALL
+    env:
+      uptraceDsn: ""
     image:
       repository: registry.gitlab.com/tiny-systems/public-containers/controller
       tag: latest
