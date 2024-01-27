@@ -36,14 +36,14 @@ spec:
         resources: {{- toYaml .Values.controllerManager.kubeRbacProxy.resources | nindent  10 }}
         securityContext: {{- toYaml .Values.controllerManager.kubeRbacProxy.containerSecurityContext | nindent 10 }}
       - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
-        {{- if .Values.controllerManager.manager.extraEnvs }}
-          {{- toYaml .Values.controllerManager.manager.extraEnvs | nindent 10 }}
-        {{- end }}
         command:
         - /manager
         env:
-        - name: KUBERNETES_CLUSTER_DOMAIN
-          value: {{ quote .Values.kubernetesClusterDomain }}
+          {{- if .Values.controllerManager.manager.extraEnv }}
+            {{- toYaml .Values.controllerManager.manager.extraEnv | nindent 10 }}
+          {{- end }}
+          - name: KUBERNETES_CLUSTER_DOMAIN
+            value: {{ quote .Values.kubernetesClusterDomain }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}
         livenessProbe:
