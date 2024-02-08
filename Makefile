@@ -165,3 +165,7 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+
+.PHONY: generate-docs
+generate-docs:
+	crd-ref-docs --source-path ./api --renderer=markdown --config=crd-api-doc-config.yaml --output-path=api-docs.md

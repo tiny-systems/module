@@ -16,7 +16,6 @@ import (
 	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
-	"github.com/uptrace/uptrace-go/uptrace"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -43,13 +42,6 @@ var (
 	probeAddr            string
 )
 
-func init() {
-	uptrace.ConfigureOpentelemetry(
-		uptrace.WithServiceName(name),
-		uptrace.WithServiceVersion(version),
-	)
-}
-
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run module",
@@ -60,6 +52,7 @@ var runCmd = &cobra.Command{
 				fmt.Println("recovered", r)
 			}
 		}()
+
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
 
