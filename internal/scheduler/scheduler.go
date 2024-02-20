@@ -12,6 +12,8 @@ import (
 	"github.com/tiny-systems/module/internal/tracker"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"time"
 )
@@ -49,6 +51,9 @@ type Schedule struct {
 	// resource manager pass over to runners
 	manager manager.ResourceInterface
 
+	tracer trace.Tracer
+	meter  metric.Meter
+
 	inputChMap cmap.ConcurrentMap[string, chan *runner.Msg]
 }
 
@@ -68,6 +73,16 @@ func (s *Schedule) SetLogger(l logr.Logger) *Schedule {
 
 func (s *Schedule) SetManager(m manager.ResourceInterface) *Schedule {
 	s.manager = m
+	return s
+}
+
+func (s *Schedule) SetMeter(m metric.Meter) *Schedule {
+	s.meter = m
+	return s
+}
+
+func (s *Schedule) SetTracer(t trace.Tracer) *Schedule {
+	s.tracer = t
 	return s
 }
 
@@ -104,6 +119,7 @@ func (s *Schedule) Invoke(ctx context.Context, node string, port string, data []
 	instanceCh <- &runner.Msg{
 		To:   utils.GetPortFullName(node, port),
 		Data: data,
+		Ctx:  ctx,
 		Callback: func(e error) {
 			cancel()
 			if e == nil {
@@ -156,7 +172,7 @@ func (s *Schedule) Start(ctx context.Context, wg *errgroup.Group, eventBus chan 
 				cmp, ok := s.componentsMap.Get(req.node.Spec.Component)
 				if !ok {
 					req.node.Status = v1alpha1.TinyNodeStatus{
-						Error: fmt.Sprintf("component %s not found", req.node.Spec.Component),
+						Error: fmt.Sprintf("component %s is not registered", req.node.Spec.Component),
 					}
 					return
 				}
@@ -165,11 +181,18 @@ func (s *Schedule) Start(ctx context.Context, wg *errgroup.Group, eventBus chan 
 					//
 					if !exist {
 						// new instance
-						instance = runner.NewRunner(req.node.Name, req.node.Labels[v1alpha1.FlowIDLabel], cmp.Instance(), callbacks...).SetManager(s.manager).SetLogger(s.log)
+						instance = runner.NewRunner(req.node.Name, req.node.Labels[v1alpha1.FlowIDLabel], cmp.Instance(), callbacks...).
+							SetManager(s.manager).
+							SetLogger(s.log).
+							SetTracer(s.tracer).
+							SetMeter(s.meter)
+
 						wg.Go(func() error {
 							// main instance lifetime goroutine
 							// exit unregisters instance
-							instance.Init(wg, req.node.Labels[v1alpha1.SuggestedHttpPortAnnotation])
+							if err := instance.Init(wg, req.node.Labels[v1alpha1.SuggestedHttpPortAnnotation]); err != nil {
+								return nil
+							}
 
 							//prepare own channel
 							instanceCh := make(chan *runner.Msg)

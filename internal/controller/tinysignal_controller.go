@@ -81,7 +81,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// send signal
-	l.Info("invoking", "node", signal.Spec.Node, "port", signal.Spec.Port)
+	l.Info("signal invoking", "node", signal.Spec.Node, "port", signal.Spec.Port)
 	if err = r.Scheduler.Invoke(ctx, signal.Spec.Node, signal.Spec.Port, signal.Spec.Data); err != nil {
 		l.Error(err, "invoke error")
 	}

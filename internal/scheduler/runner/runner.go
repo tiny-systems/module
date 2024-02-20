@@ -18,6 +18,10 @@ import (
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"reflect"
 	"sort"
@@ -42,24 +46,21 @@ type Runner struct {
 	component m.Component
 	//
 	log logr.Logger
-
 	// to control K8s resources
 	manager manager.ResourceInterface
-
 	// cancelFunc stops entire instance
 	cancelFunc context.CancelFunc
 	//
 	cancelStopFuncsLock *sync.Mutex
-
-	stats cmap.ConcurrentMap[string, *int64]
-
-	callbacks []tracker.Callback
-
-	node *v1alpha1.TinyNode
+	stats               cmap.ConcurrentMap[string, *int64]
+	callbacks           []tracker.Callback
+	node                *v1alpha1.TinyNode
+	//
+	tracer trace.Tracer
+	meter  metric.Meter
 }
 
 func NewRunner(name string, flowID string, component m.Component, callbacks ...tracker.Callback) *Runner {
-
 	return &Runner{
 		flowID: flowID,
 		//node:                node,
@@ -74,51 +75,65 @@ func NewRunner(name string, flowID string, component m.Component, callbacks ...t
 }
 
 // Init if underlying component is http servicer
-func (c *Runner) Init(wg *errgroup.Group, suggestedPortStr string) {
-	if httpEmitter, ok := c.component.(m.HTTPService); ok {
-		httpEmitter.HTTPService(func() (int, m.AddressUpgrade) {
-			var suggestedPort int
-			if annotationPort, err := strconv.Atoi(suggestedPortStr); err == nil {
-				suggestedPort = annotationPort
-			}
-
-			return suggestedPort, func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error) {
-				// limit exposing with a timeout
-				exposeCtx, cancel := context.WithTimeout(ctx, time.Second*10)
-				defer cancel()
-
-				var err error
-				// upgrade
-				// hostname it's a last part of the node name
-				var autoHostName string
-
-				if auto {
-					autoHostNameParts := strings.Split(c.name, ".")
-					autoHostName = autoHostNameParts[len(autoHostNameParts)-1]
-				}
-
-				publicURLs, err := c.manager.ExposePort(exposeCtx, autoHostName, hostnames, actualLocalPort)
-				if err != nil {
-					return []string{}, err
-				}
-
-				wg.Go(func() error {
-					// listen when emit ctx ends to clean up
-					<-ctx.Done()
-					c.log.Info("cleaning up exposed port")
-
-					discloseCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-					defer cancel()
-					if err := c.manager.DisclosePort(discloseCtx, actualLocalPort); err != nil {
-						c.log.Error(err, "unable to disclose port", "port", actualLocalPort)
-					}
-					return nil
-				})
-				return publicURLs, err
-			}
-		})
+func (c *Runner) Init(wg *errgroup.Group, suggestedPortStr string) error {
+	httpEmitter, ok := c.component.(m.HTTPService)
+	if !ok {
+		return nil
 	}
 
+	httpEmitter.HTTPService(func() (int, m.AddressUpgrade) {
+		var suggestedPort int
+		if annotationPort, err := strconv.Atoi(suggestedPortStr); err == nil {
+			suggestedPort = annotationPort
+		}
+
+		return suggestedPort, func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error) {
+			// limit exposing with a timeout
+			exposeCtx, cancel := context.WithTimeout(ctx, time.Second*10)
+			defer cancel()
+
+			var err error
+			// upgrade
+			// hostname it's a last part of the node name
+			var autoHostName string
+
+			if auto {
+				autoHostNameParts := strings.Split(c.name, ".")
+				autoHostName = autoHostNameParts[len(autoHostNameParts)-1]
+			}
+
+			publicURLs, err := c.manager.ExposePort(exposeCtx, autoHostName, hostnames, actualLocalPort)
+			if err != nil {
+				return []string{}, err
+			}
+
+			wg.Go(func() error {
+				// listen when emit ctx ends to clean up
+				<-ctx.Done()
+				c.log.Info("cleaning up exposed port")
+
+				discloseCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+				defer cancel()
+				if err := c.manager.DisclosePort(discloseCtx, actualLocalPort); err != nil {
+					c.log.Error(err, "unable to disclose port", "port", actualLocalPort)
+				}
+				return nil
+			})
+			return publicURLs, err
+		}
+	})
+
+	return nil
+}
+
+func (c *Runner) SetTracer(t trace.Tracer) *Runner {
+	c.tracer = t
+	return c
+}
+
+func (c *Runner) SetMeter(m metric.Meter) *Runner {
+	c.meter = m
+	return c
 }
 
 func (c *Runner) SetManager(m manager.ResourceInterface) *Runner {
@@ -131,7 +146,7 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 	return c
 }
 
-// ApplyStatus recreates status from scratch
+// UpdateStatus apply status changes
 func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 	ports := c.component.Ports()
@@ -222,7 +237,7 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 // input processes input to the inherited component
 func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan *Msg) error {
-	//c.log.Info("process input", "port", port, "data", msg.Data, "node", c.name)
+	c.log.Info("input", "port", port, "data", msg.Data, "node", c.name)
 
 	var nodePort *m.NodePort
 	for _, p := range c.component.Ports() {
@@ -312,18 +327,38 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	counter, _ := c.stats.Get(key)
 	atomic.AddInt64(counter, 1)
 
-	err = errorpanic.Wrap(func() error {
-		// panic safe
-		//c.log.Info("component call", "port", port, "node", c.name)
-		return c.component.Handle(ctx, func(port string, data interface{}) error {
-			//c.log.Info("component callback handler", "port", port, "node", c.name)
-			if e := c.outputHandler(ctx, port, data, outputCh); e != nil {
-				c.log.Error(e, "handler output error")
-			}
-			return nil
-		}, port, portData)
+	// invoke component call
+	func() {
 
-	})
+		if msg.Ctx == nil {
+			msg.Ctx = ctx // root ctx
+		}
+
+		spanCtx, span := c.tracer.Start(msg.Ctx, fmt.Sprintf("%s:%s", c.name, port), trace.WithAttributes(
+			attribute.String("service_name", c.name),
+		),
+		)
+
+		defer span.End()
+		err = errorpanic.Wrap(func() error {
+			// panic safe
+			c.log.Info("component call", "port", port, "node", c.name)
+
+			return c.component.Handle(spanCtx, func(outputPort string, outputData interface{}) error {
+				c.log.Info("component callback handler", "port", port, "node", c.name)
+
+				if e := c.outputHandler(spanCtx, outputPort, outputData, outputCh); e != nil {
+					c.log.Error(e, "handler output error")
+				}
+				return nil
+			}, port, portData)
+		})
+
+		if err != nil {
+			span.RecordError(err, trace.WithStackTrace(true))
+			span.SetStatus(codes.Error, err.Error())
+		}
+	}()
 
 	if err != nil {
 		return err
@@ -351,6 +386,7 @@ func (c *Runner) Configure(ctx context.Context, node *v1alpha1.TinyNode, outputC
 	c.node = node
 	c.runnerLock.Unlock()
 
+	// 3s to apply settings sounds fair
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
 	// we do not send anything to settings port outside
@@ -408,16 +444,15 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		return err
 	}
 
-	c.runnerLock.RLock()
 	if port == m.RefreshPort {
 		// create tiny signal instead
 		if err = c.manager.CreateClusterNodeSignal(ctx, c.node, port, dataBytes); err != nil {
 			c.log.Error(err, "create signal error")
 		}
-		c.runnerLock.RUnlock()
 		return err
 	}
 
+	c.runnerLock.RLock()
 	edges := c.node.Spec.Edges[:]
 	c.runnerLock.RUnlock()
 
@@ -429,6 +464,7 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		// send to destination
 		// track how many messages component send
 		var y int64
+
 		key := metrics.GetMetricKey(c.name, metrics.MetricNodeMessageSent)
 		c.stats.SetIfAbsent(key, &y)
 		counter, _ := c.stats.Get(key)
@@ -444,8 +480,10 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		fromPort := utils.GetPortFullName(c.name, port)
 
 		go func() {
+
 			// send message
 			eventBus <- &Msg{
+				Ctx:    ctx,
 				To:     e.To,
 				From:   fromPort,
 				EdgeID: e.ID,
@@ -467,8 +505,10 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 					}
 				},
 			}
+
 		}()
 	}
+
 	return nil
 }
 
@@ -480,6 +520,7 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) ([]byte
 	return b, json.Unmarshal(b, output)
 }
 
+// GetStats @todo deprecate
 func (c *Runner) GetStats() map[string]interface{} {
 
 	statsMap := map[string]interface{}{}
@@ -504,3 +545,16 @@ func (c *Runner) GetStats() map[string]interface{} {
 	}
 	return statsMap
 }
+
+//main.AddEvent("log", trace.WithAttributes(
+// // Log severity and message.
+// attribute.String("log.severity", "ERROR"),
+// attribute.String("log.message", "request failed"),
+// // Optional.
+// attribute.String("code.function", "org.FetchUser"),
+// attribute.String("code.filepath", "org/user.go"),
+// attribute.Int("code.lineno", 123),
+//
+// // Additional details.
+// attribute.String("foo", "hello world"),
+//))

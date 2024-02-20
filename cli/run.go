@@ -16,12 +16,15 @@ import (
 	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
+	"github.com/uptrace/uptrace-go/uptrace"
+	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"net"
+	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -47,6 +50,14 @@ var runCmd = &cobra.Command{
 	Short: "Run module",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
+
+		uptrace.ConfigureOpentelemetry(
+			uptrace.WithDSN(os.Getenv("UPTRACE_DSN")),
+		)
+
+		// Send buffered spans and free resources.
+		defer uptrace.Shutdown(context.Background())
+
 		defer func() {
 			if r := recover(); r != nil {
 				fmt.Println("recovered", r)
@@ -147,9 +158,14 @@ var runCmd = &cobra.Command{
 
 		crManager := manager.NewManager(mgr.GetClient(), l, namespace)
 
+		tracer := otel.Tracer(name)
+		meter := otel.Meter(name)
+
 		//
 		sch := scheduler.New().
 			SetLogger(l).
+			SetMeter(meter).
+			SetTracer(tracer).
 			SetManager(crManager)
 
 		nodeController := &controller.TinyNodeReconciler{
