@@ -16,10 +16,6 @@ func (c ComponentInfo) GetResourceName() string {
 	return utils.SanitizeResourceName(c.Name)
 }
 
-//type Emitter interface {
-//  Emit(ctx context.Context, handler Handler) error
-//}
-
 type Component interface {
 	GetInfo() ComponentInfo
 	//Handle handles incoming requests

@@ -1,9 +1,13 @@
 package runner
 
+import "context"
+
 var EmptyCallback = func(err error) {}
 
 // Msg being sent via instances edges
 type Msg struct {
+	// call ctx
+	Ctx context.Context
 	// which edge lead this message, optional
 	EdgeID string `json:"edgeID"`
 	// which node:port sent message, optional
