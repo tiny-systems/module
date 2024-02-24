@@ -11,8 +11,6 @@ import (
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
-	"github.com/tiny-systems/module/internal/manager"
-	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
@@ -23,13 +21,15 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
+	"oya.to/namedlocker"
 	"reflect"
 	"sort"
-	"strconv"
-	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
+)
+
+const (
+	nodeLock = "_node_lock"
 )
 
 type Runner struct {
@@ -37,94 +37,44 @@ type Runner struct {
 
 	flowID string
 	//
-	runnerLock *sync.RWMutex
+
+	runnerLocks namedlocker.Store
 
 	name string
-	// K8s resource
 
 	// underlying component
 	component m.Component
 	//
 	log logr.Logger
 	// to control K8s resources
-	manager manager.ResourceInterface
-	// cancelFunc stops entire instance
-	cancelFunc context.CancelFunc
+
+	closeCh chan struct{}
+
 	//
-	cancelStopFuncsLock *sync.Mutex
-	stats               cmap.ConcurrentMap[string, *int64]
-	callbacks           []tracker.Callback
-	node                *v1alpha1.TinyNode
+	stats cmap.ConcurrentMap[string, *int64]
+
+	node v1alpha1.TinyNode
 	//
+
 	tracer trace.Tracer
-	meter  metric.Meter
+
+	meter metric.Meter
 }
 
-func NewRunner(name string, flowID string, component m.Component, callbacks ...tracker.Callback) *Runner {
+func NewRunner(name string, component m.Component) *Runner {
 	return &Runner{
-		flowID: flowID,
-		//node:                node,
+
 		name:      name,
 		component: component,
 		stats:     cmap.New[*int64](),
+
 		//
-		runnerLock:          new(sync.RWMutex),
-		cancelStopFuncsLock: new(sync.Mutex),
-		callbacks:           callbacks,
+		runnerLocks: namedlocker.Store{},
+		closeCh:     make(chan struct{}),
 	}
 }
 
-// Init if underlying component is http servicer
-func (c *Runner) Init(wg *errgroup.Group, suggestedPortStr string) error {
-	httpEmitter, ok := c.component.(m.HTTPService)
-	if !ok {
-		return nil
-	}
-
-	httpEmitter.HTTPService(func() (int, m.AddressUpgrade) {
-		var suggestedPort int
-		if annotationPort, err := strconv.Atoi(suggestedPortStr); err == nil {
-			suggestedPort = annotationPort
-		}
-
-		return suggestedPort, func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error) {
-			// limit exposing with a timeout
-			exposeCtx, cancel := context.WithTimeout(ctx, time.Second*10)
-			defer cancel()
-
-			var err error
-			// upgrade
-			// hostname it's a last part of the node name
-			var autoHostName string
-
-			if auto {
-				autoHostNameParts := strings.Split(c.name, ".")
-				autoHostName = autoHostNameParts[len(autoHostNameParts)-1]
-			}
-
-			publicURLs, err := c.manager.ExposePort(exposeCtx, autoHostName, hostnames, actualLocalPort)
-			if err != nil {
-				return []string{}, err
-			}
-
-			wg.Go(func() error {
-				// listen when emit ctx ends to clean up
-				<-ctx.Done()
-				c.log.Info("cleaning up exposed port")
-
-				discloseCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-				defer cancel()
-				if err := c.manager.DisclosePort(discloseCtx, actualLocalPort); err != nil {
-					c.log.Error(err, "unable to disclose port", "port", actualLocalPort)
-				}
-				return nil
-			})
-			return publicURLs, err
-		}
-	})
-
-	return nil
-}
+//
 
 func (c *Runner) SetTracer(t trace.Tracer) *Runner {
 	c.tracer = t
@@ -136,11 +86,6 @@ func (c *Runner) SetMeter(m metric.Meter) *Runner {
 	return c
 }
 
-func (c *Runner) SetManager(m manager.ResourceInterface) *Runner {
-	c.manager = m
-	return c
-}
-
 func (c *Runner) SetLogger(l logr.Logger) *Runner {
 	c.log = l
 	return c
@@ -149,7 +94,14 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 // UpdateStatus apply status changes
 func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
-	ports := c.component.Ports()
+	var ports []m.NodePort
+	// trim system ports
+	for _, p := range c.component.Ports() {
+		if p.Name == m.HttpPort {
+			continue
+		}
+		ports = append(ports, p)
+	}
 
 	status.Status = "OK"
 	status.Ports = make([]v1alpha1.TinyNodePortStatus, 0)
@@ -171,6 +123,7 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 	}
 	// now do it again
 	for _, np := range ports {
+
 		// processing settings port first, then source, then target
 		var ps []byte //port schema settings
 
@@ -235,9 +188,16 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 	return nil
 }
 
-// input processes input to the inherited component
-func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan *Msg) error {
+// Input processes input to the inherited component
+func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) error {
+	_, port := utils.ParseFullPortName(msg.To)
+
 	c.log.Info("input", "port", port, "data", msg.Data, "node", c.name)
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		defer cancel()
+		<-c.closeCh
+	}()
 
 	var nodePort *m.NodePort
 	for _, p := range c.component.Ports() {
@@ -251,26 +211,26 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 	}
 
 	var portConfig *v1alpha1.TinyNodePortConfig
-
-	c.runnerLock.RLock()
+	//
+	c.runnerLocks.Lock(nodeLock)
+	//
 	for _, pc := range c.node.Spec.Ports {
 		if pc.From == msg.From && pc.Port == port {
 			portConfig = &pc
 			break
 		}
 	}
-	c.runnerLock.RUnlock()
+	//
+	c.runnerLocks.Unlock(nodeLock)
 
 	var (
-		portData      interface{}
-		portDataBytes []byte
-		err           error
+		portData interface{}
+		err      error
 	)
 
 	if portConfig != nil && len(portConfig.Configuration) > 0 {
 		// create config
 		portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
-
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
 			return errors.Wrap(err, "ajson parse requestData payload error")
@@ -298,7 +258,7 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 
 		// all good, we can say that's the data for incoming port
 		// adapt
-		portDataBytes, err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
+		err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
 		if err != nil {
 			return errors.Wrap(err, "map decode from config map to port input type")
 		}
@@ -306,7 +266,6 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 
 	} else {
 		portData = nodePort.Configuration
-		portDataBytes, err = json.Marshal(portData)
 		if err != nil {
 			return errors.Wrap(err, "unable to encode port data")
 		}
@@ -329,26 +288,19 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 
 	// invoke component call
 	func() {
-
-		if msg.Ctx == nil {
-			msg.Ctx = ctx // root ctx
-		}
-
-		spanCtx, span := c.tracer.Start(msg.Ctx, fmt.Sprintf("%s:%s", c.name, port), trace.WithAttributes(
-			attribute.String("service_name", c.name),
-		),
+		spanCtx, span := c.tracer.Start(ctx, fmt.Sprintf("%s:%s", c.name, port), trace.WithAttributes(
+			attribute.String("service_name", c.name)),
 		)
 
 		defer span.End()
 		err = errorpanic.Wrap(func() error {
 			// panic safe
-			c.log.Info("component call", "port", port, "node", c.name)
+			c.log.Info("component call", "port", port, "node", c.name, "data", portData)
 
 			return c.component.Handle(spanCtx, func(outputPort string, outputData interface{}) error {
-				c.log.Info("component callback handler", "port", port, "node", c.name)
-
-				if e := c.outputHandler(spanCtx, outputPort, outputData, outputCh); e != nil {
-					c.log.Error(e, "handler output error")
+				c.log.Info("component callback handler", "port", outputPort, "node", c.name, "data", outputData)
+				if e := c.outputHandler(spanCtx, outputPort, outputData, outputHandler); e != nil {
+					c.log.Error(e, "handler output error", "name", c.name)
 				}
 				return nil
 			}, port, portData)
@@ -358,33 +310,26 @@ func (c *Runner) input(ctx context.Context, port string, msg *Msg, outputCh chan
 			span.RecordError(err, trace.WithStackTrace(true))
 			span.SetStatus(codes.Error, err.Error())
 		}
+
 	}()
 
 	if err != nil {
 		return err
 	}
-
-	// we can say now that data successfully applied to input port
-	// input ports always have no errors
-	for _, callback := range c.callbacks {
-		callback(tracker.PortMsg{
-			NodeName:  c.name,
-			EdgeID:    msg.EdgeID,
-			PortName:  msg.To, // INPUT PORT OF THE NODE
-			Data:      portDataBytes,
-			FlowID:    c.flowID,
-			NodeStats: c.GetStats(),
-		})
-	}
-
 	return err
 }
 
+func (c *Runner) Node() v1alpha1.TinyNode {
+	c.runnerLocks.Lock(nodeLock)
+	defer c.runnerLocks.Unlock(nodeLock)
+	return c.node
+}
+
 // Configure updates specs and decides do we need to restart which handles by Run method
-func (c *Runner) Configure(ctx context.Context, node *v1alpha1.TinyNode, outputCh chan *Msg) error {
-	c.runnerLock.Lock()
+func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode) error {
+	c.runnerLocks.Lock(nodeLock)
 	c.node = node
-	c.runnerLock.Unlock()
+	c.runnerLocks.Unlock(nodeLock)
 
 	// 3s to apply settings sounds fair
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
@@ -393,68 +338,44 @@ func (c *Runner) Configure(ctx context.Context, node *v1alpha1.TinyNode, outputC
 	// we rely on totally internal settings of the settings port
 	// todo consider flow envs here
 
-	return c.input(ctx, m.SettingsPort, &Msg{
-		To:       utils.GetPortFullName(c.name, m.SettingsPort),
-		Data:     []byte("{}"),
-		Callback: EmptyCallback,
-	}, outputCh)
+	return c.Input(ctx, &Msg{
+		To:   utils.GetPortFullName(c.name, m.SettingsPort),
+		Data: []byte("{}"),
+	}, nil)
 }
 
-// Process main instance loop
-// read input port and apply it to the component
-func (c *Runner) Process(ctx context.Context, instanceCh chan *Msg, outputCh chan *Msg) error {
-
-	c.cancelStopFuncsLock.Lock()
-	ctx, c.cancelFunc = context.WithCancel(ctx)
-	c.cancelStopFuncsLock.Unlock()
-
-	for {
-		select {
-		case <-ctx.Done():
-			c.log.Info("runner process context is done", "runner", c.name)
-			return ctx.Err()
-
-		case msg, ok := <-instanceCh:
-			if !ok {
-				c.log.Info("instance channel closed, exiting", c.name)
-				return c.Destroy()
-			}
-			_, port := utils.ParseFullPortName(msg.To)
-			msg.Callback(c.input(ctx, port, msg, outputCh))
-		}
+// Cancel cancels all entity requests
+func (c *Runner) Cancel() {
+	var ok = true
+	select {
+	case _, ok = <-c.closeCh:
+	default:
 	}
-}
-
-// Destroy stops the instance inclusing emit
-func (c *Runner) Destroy() error {
-
-	c.cancelStopFuncsLock.Lock()
-	defer c.cancelStopFuncsLock.Unlock()
-
-	if c.cancelFunc != nil {
-		c.cancelFunc()
-		c.cancelFunc = nil
+	if !ok {
+		return
 	}
-	return nil
+	close(c.closeCh)
 }
 
-func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, eventBus chan *Msg) error {
+func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) error {
+
+	// system port, no edges connected send it out
+	if port == m.RefreshPort {
+		return handler(ctx, &Msg{
+			To: utils.GetPortFullName(c.name, port),
+		})
+	}
+
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 
-	if port == m.RefreshPort {
-		// create tiny signal instead
-		if err = c.manager.CreateClusterNodeSignal(ctx, c.node, port, dataBytes); err != nil {
-			c.log.Error(err, "create signal error")
-		}
-		return err
-	}
-
-	c.runnerLock.RLock()
+	c.runnerLocks.Lock(nodeLock)
 	edges := c.node.Spec.Edges[:]
-	c.runnerLock.RUnlock()
+	c.runnerLocks.Unlock(nodeLock)
+
+	wg, ctx := errgroup.WithContext(ctx)
 
 	for _, e := range edges {
 		if e.Port != port {
@@ -477,47 +398,28 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		counter, _ = c.stats.Get(key)
 		atomic.AddInt64(counter, 1)
 
+		if handler == nil {
+			continue
+		}
 		fromPort := utils.GetPortFullName(c.name, port)
-
-		go func() {
-
-			// send message
-			eventBus <- &Msg{
-				Ctx:    ctx,
+		wg.Go(func() error {
+			return handler(ctx, &Msg{
 				To:     e.To,
 				From:   fromPort,
 				EdgeID: e.ID,
 				Data:   dataBytes,
-				Callback: func(err error) {
-					// output port
-					// call to say port FROM is successfully send data
-					// only output ports may have errors
-					for _, callback := range c.callbacks {
-						callback(tracker.PortMsg{
-							NodeName:  c.name,
-							EdgeID:    e.ID,
-							PortName:  fromPort, // OUTPUT PORT OF THE NODE
-							Data:      dataBytes,
-							FlowID:    c.flowID,
-							NodeStats: c.GetStats(),
-							Err:       err,
-						})
-					}
-				},
-			}
-
-		}()
+			})
+		})
 	}
-
-	return nil
+	return wg.Wait()
 }
 
-func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) ([]byte, error) {
+func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 	b, err := json.Marshal(input)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return b, json.Unmarshal(b, output)
+	return json.Unmarshal(b, output)
 }
 
 // GetStats @todo deprecate

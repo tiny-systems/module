@@ -24,6 +24,7 @@ type pool struct {
 	log          logr.Logger
 	addressTable cmap.ConcurrentMap[string, string]
 	clients      cmap.ConcurrentMap[string, module.ModuleServiceClient]
+	errGroup     *errgroup.Group
 }
 
 func (p *pool) Register(moduleName, addr string) {
@@ -36,7 +37,7 @@ func (p *pool) Deregister(moduleName string) {
 
 func NewPool() *pool {
 	return &pool{
-		addressTable: cmap.New[string](), clients: cmap.New[module.ModuleServiceClient](),
+		addressTable: cmap.New[string](), clients: cmap.New[module.ModuleServiceClient](), errGroup: &errgroup.Group{},
 	}
 }
 
@@ -45,48 +46,39 @@ func (p *pool) SetLogger(l logr.Logger) *pool {
 	return p
 }
 
-func (p *pool) Start(ctx context.Context, inputCh chan *runner.Msg) error {
-
-	wg, ctx := errgroup.WithContext(ctx)
-
-	for {
-		select {
-
-		case <-ctx.Done():
-			return wg.Wait()
-
-		case msg := <-inputCh:
-			moduleName, _, err := module2.ParseFullName(msg.To)
-			if err != nil {
-				p.log.Error(err, "unable to parse node name")
-				continue
-			}
-
-			addr, ok := p.addressTable.Get(moduleName)
-			if !ok {
-				p.log.Error(err, "module address is unknown", "name", moduleName)
-				continue
-			}
-			client, err := p.getClient(ctx, wg, addr)
-			if err != nil {
-				p.log.Error(err, "unable to get client", "addr", addr)
-			}
-
-			// sending request using gRPC
-			_, err = client.Message(ctx, &module.MessageRequest{
-				From:    msg.From,
-				Payload: msg.Data,
-				EdgeID:  msg.EdgeID,
-				To:      msg.To,
-			})
-
-			// error if we could not manage to send it
-			msg.Callback(err)
-		}
+func (p *pool) Handler(ctx context.Context, msg *runner.Msg) error {
+	moduleName, _, err := module2.ParseFullName(msg.To)
+	if err != nil {
+		return err
 	}
+
+	addr, ok := p.addressTable.Get(moduleName)
+	if !ok {
+		p.log.Error(err, "module address is unknown", "name", moduleName)
+		return err
+	}
+	client, err := p.getClient(ctx, addr)
+	if err != nil {
+		p.log.Error(err, "unable to get client", "addr", addr)
+	}
+
+	// sending request using gRPC
+	_, err = client.Message(ctx, &module.MessageRequest{
+		From:    msg.From,
+		Payload: msg.Data,
+		EdgeID:  msg.EdgeID,
+		To:      msg.To,
+	})
+	return err
 }
 
-func (p *pool) getClient(ctx context.Context, wg *errgroup.Group, addr string) (module.ModuleServiceClient, error) {
+func (p *pool) Start(ctx context.Context) error {
+
+	<-ctx.Done()
+	return p.errGroup.Wait()
+}
+
+func (p *pool) getClient(ctx context.Context, addr string) (module.ModuleServiceClient, error) {
 
 	client, ok := p.clients.Get(addr)
 	if ok {
@@ -99,7 +91,7 @@ func (p *pool) getClient(ctx context.Context, wg *errgroup.Group, addr string) (
 		return nil, err
 	}
 
-	wg.Go(func() error {
+	p.errGroup.Go(func() error {
 		<-ctx.Done()
 		p.log.Info("closing connection", "addr", addr)
 		conn.Close()

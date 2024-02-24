@@ -9,6 +9,7 @@ const (
 	GetStatePort         = "_get-state"
 	SettingsPort         = "_settings"
 	RefreshPort          = "_refresh"
+	HttpPort             = "_http"
 )
 
 const (

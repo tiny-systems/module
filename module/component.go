@@ -30,7 +30,3 @@ type AddressUpgrade func(ctx context.Context, auto bool, hostnames []string, act
 
 // ListenAddressGetter gets listen port address
 type ListenAddressGetter func() (suggestedPort int, upgrade AddressUpgrade)
-
-type HTTPService interface {
-	HTTPService(getter ListenAddressGetter)
-}

@@ -19,7 +19,9 @@ package controller
 import (
 	"context"
 	"github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -66,6 +68,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if m != r.Module.GetMajorNameSanitised() {
 		// not we are
+		l.Info("signal is not for current module: %s %s", m, r.Module.GetMajorNameSanitised())
 		return reconcile.Result{}, nil
 	}
 
@@ -82,9 +85,15 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// send signal
 	l.Info("signal invoking", "node", signal.Spec.Node, "port", signal.Spec.Port)
-	if err = r.Scheduler.Invoke(ctx, signal.Spec.Node, signal.Spec.Port, signal.Spec.Data); err != nil {
-		l.Error(err, "invoke error")
-	}
+
+	go func() {
+		if err = r.Scheduler.Handle(context.Background(), &runner.Msg{
+			To:   utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
+			Data: signal.Spec.Data,
+		}); err != nil {
+			l.Error(err, "invoke error")
+		}
+	}()
 
 	_ = r.Delete(ctx, signal)
 	return ctrl.Result{}, nil

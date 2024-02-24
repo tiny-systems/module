@@ -11,7 +11,6 @@ import (
 	"github.com/tiny-systems/module/internal/controller"
 	"github.com/tiny-systems/module/internal/manager"
 	"github.com/tiny-systems/module/internal/scheduler"
-	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server"
 	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
@@ -66,6 +65,8 @@ var runCmd = &cobra.Command{
 
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
+
+		l.Info("starting")
 
 		moduleInfo := m.Info{
 			Version:   version,
@@ -125,11 +126,34 @@ var runCmd = &cobra.Command{
 		listenAddr := make(chan string)
 		defer close(listenAddr)
 
+		tracer := otel.Tracer(name)
+		meter := otel.Meter(name)
+
+		pool := client.NewPool().
+			SetLogger(l)
+
+		//
+		crManager := manager.NewManager(mgr.GetClient(), l, namespace)
+
+		//
+		trackManager := tracker.NewManager().SetLogger(l)
+
+		//
+		sch := scheduler.New(pool.Handler, func(msg tracker.PortMsg) {
+			go func() {
+				// @todo add pool
+				trackManager.Track(ctx, msg)
+			}()
+		}).
+			SetLogger(l).
+			SetMeter(meter).
+			SetTracer(tracer).
+			SetManager(crManager)
+
 		// create gRPC server
 
-		serv := server.New().SetLogger(l)
-		inputCh := make(chan *runner.Msg)
-		defer close(inputCh)
+		serv := server.New().
+			SetLogger(l)
 
 		wg.Go(func() error {
 			l.Info("Starting gRPC server")
@@ -137,7 +161,7 @@ var runCmd = &cobra.Command{
 			defer func() {
 				l.Info("gRPC server stopped")
 			}()
-			if err := serv.Start(ctx, inputCh, grpcAddr, func(addr net.Addr) {
+			if err := serv.Start(ctx, sch.Handle, grpcAddr, func(addr net.Addr) {
 				// @todo check if inside of container
 				parts := strings.Split(addr.String(), ":")
 				if len(parts) > 0 {
@@ -156,18 +180,6 @@ var runCmd = &cobra.Command{
 		// add listening address to the module info
 		moduleInfo.Addr = <-listenAddr
 
-		crManager := manager.NewManager(mgr.GetClient(), l, namespace)
-
-		tracer := otel.Tracer(name)
-		meter := otel.Meter(name)
-
-		//
-		sch := scheduler.New().
-			SetLogger(l).
-			SetMeter(meter).
-			SetTracer(tracer).
-			SetManager(crManager)
-
 		nodeController := &controller.TinyNodeReconciler{
 			Client:    mgr.GetClient(),
 			Scheme:    mgr.GetScheme(),
@@ -181,8 +193,6 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		pool := client.NewPool().SetLogger(l)
-
 		moduleController := &controller.TinyModuleReconciler{
 			Client:     mgr.GetClient(),
 			Scheme:     mgr.GetScheme(),
@@ -194,9 +204,6 @@ var runCmd = &cobra.Command{
 			l.Error(err, "unable to create tinymodule controller")
 			return
 		}
-
-		trackManager := tracker.NewManager().
-			SetLogger(l)
 
 		if err = (&controller.TinyTrackerReconciler{
 			Client:  mgr.GetClient(),
@@ -228,7 +235,6 @@ var runCmd = &cobra.Command{
 			l.Error(err, "unable to set up health check")
 			return
 		}
-
 		l.Info("installing components", "versionID", versionID)
 
 		// uninstall palette resources from previous versions
@@ -244,7 +250,6 @@ var runCmd = &cobra.Command{
 			return
 		}
 		///
-
 		for _, cmp := range registry.Get() {
 			l.Info("registering", "component", cmp.GetInfo().Name)
 
@@ -283,9 +288,6 @@ var runCmd = &cobra.Command{
 			return nil
 		})
 
-		eventBus := make(chan *runner.Msg)
-		defer close(eventBus)
-
 		// grpc client start
 
 		wg.Go(func() error {
@@ -293,7 +295,7 @@ var runCmd = &cobra.Command{
 			defer func() {
 				l.Info("gRPC client pool stopped")
 			}()
-			if err := pool.Start(ctx, eventBus); err != nil {
+			if err := pool.Start(ctx); err != nil {
 				l.Error(err, "client pool error")
 				return err
 			}
@@ -306,12 +308,7 @@ var runCmd = &cobra.Command{
 			defer func() {
 				l.Info("scheduler stopped")
 			}()
-			if err := sch.Start(ctx, wg, inputCh, eventBus, func(msg tracker.PortMsg) {
-				go func() {
-					// @todo add pool
-					trackManager.Track(ctx, msg)
-				}()
-			}); err != nil {
+			if err := sch.Start(ctx); err != nil {
 				l.Error(err, "unable to start scheduler")
 				return err
 			}
