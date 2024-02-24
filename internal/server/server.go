@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -35,7 +34,7 @@ func (s *server) SetLogger(l logr.Logger) *server {
 	return s
 }
 
-func (s *server) Start(ctx context.Context, output chan *runner.Msg, listenAddr string, clb func(net.Addr)) error {
+func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr string, clb func(net.Addr)) error {
 
 	wg, ctx := errgroup.WithContext(ctx)
 
@@ -44,25 +43,16 @@ func (s *server) Start(ctx context.Context, output chan *runner.Msg, listenAddr 
 	//
 	modulepb.RegisterModuleServiceServer(server, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
-		var (
-			err error
-			w   = new(sync.WaitGroup)
-		)
 		ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 		defer cancel()
 
-		w.Add(1)
-		output <- &runner.Msg{
+		err := handler(ctx, &runner.Msg{
 			EdgeID: req.EdgeID,
 			To:     req.To,
 			Data:   req.Payload,
 			From:   req.From,
-			Callback: func(e error) {
-				err = e
-				cancel()
-			},
-		}
-		<-ctx.Done()
+		})
+
 		return &modulepb.MessageResponse{}, err
 	}))
 	reflection.Register(server)

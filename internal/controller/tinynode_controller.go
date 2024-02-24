@@ -91,8 +91,8 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-
-	err = r.Scheduler.Upsert(node)
+	//node
+	err = r.Scheduler.Upsert(ctx, node)
 	if err != nil {
 		// create event?
 		l.Error(err, "scheduler error")

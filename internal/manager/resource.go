@@ -32,7 +32,7 @@ type ResourceInterface interface {
 	ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error)
 	DisclosePort(ctx context.Context, port int) error
 	RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error
-	CreateClusterNodeSignal(ctx context.Context, node *v1alpha1.TinyNode, port string, data []byte) error
+	CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error
 }
 
 func NewManager(c client.Client, log logr.Logger, ns string) *Resource {
@@ -398,7 +398,7 @@ func (m Resource) DisclosePort(ctx context.Context, port int) error {
 	return m.removeRulesIngress(ctx, ingress, svc, port)
 }
 
-func (m Resource) CreateClusterNodeSignal(ctx context.Context, node *v1alpha1.TinyNode, port string, data []byte) error {
+func (m Resource) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error {
 	signal := &v1alpha1.TinySignal{
 		Spec: v1alpha1.TinySignalSpec{
 			Node: node.Name,
