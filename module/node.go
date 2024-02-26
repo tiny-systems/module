@@ -4,12 +4,12 @@ type (
 	Position int
 )
 
+// system ports
 const (
-	SaveStatePort string = "_save-state"
-	GetStatePort         = "_get-state"
-	SettingsPort         = "_settings"
-	RefreshPort          = "_refresh"
-	HttpPort             = "_http"
+	//RefreshPort target port. Useful when component wants refresh its look in cluster, triggers reconcile for the node
+	RefreshPort = "_refresh"
+	//HttpPort source port. Provides addressUpgrader
+	HttpPort = "_http"
 )
 
 const (
