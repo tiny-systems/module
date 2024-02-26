@@ -338,9 +338,21 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode) error {
 	// we rely on totally internal settings of the settings port
 	// todo consider flow envs here
 
+	var settingsPort string
+
+	for _, p := range c.component.Ports() {
+		if !p.Settings {
+			continue
+		}
+		settingsPort = p.Name
+	}
+	if settingsPort == "" {
+		return nil
+	}
+
 	return c.Input(ctx, &Msg{
-		To:   utils.GetPortFullName(c.name, m.SettingsPort),
-		Data: []byte("{}"),
+		To:   utils.GetPortFullName(c.name, settingsPort),
+		Data: []byte("{}"), // no external data send to port, rely solely on port config
 	}, nil)
 }
 
