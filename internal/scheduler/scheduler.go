@@ -110,6 +110,17 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 	}
 	node := instance.Node()
 
+	for _, callback := range s.callbacks {
+		callback(tracker.PortMsg{
+			NodeName:  node.Name,
+			EdgeID:    msg.EdgeID,
+			PortName:  msg.To, // INPUT PORT OF THE NODE
+			Data:      msg.Data,
+			FlowID:    node.Labels[v1alpha1.FlowIDLabel],
+			NodeStats: instance.GetStats(),
+		})
+	}
+
 	// send to nodes' personal channel
 	return instance.Input(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) error {
 
@@ -135,7 +146,6 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 				NodeStats: instance.GetStats(),
 			})
 		}
-
 		// run itself
 		return s.Handle(outCtx, outMsg)
 	})
