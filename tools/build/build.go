@@ -123,7 +123,7 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 	for scanner.Scan() {
 		fmt.Printf("%s\n", scanner.Text())
 	}
-	return nil
+	return scanner.Err()
 }
 
 func appendFile(filename string, data []byte, tw *tar.Writer) error {
