@@ -11,6 +11,7 @@ WORKDIR /manager
 COPY . .
 #MOD_PREPARE#
 RUN go mod download
+RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-X github.com/tiny-systems/module/cli.versionID=${VERSION_ID}" -o /bin/manager #MAIN_PATH#
 
 # Step 3: Final
