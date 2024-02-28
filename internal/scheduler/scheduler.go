@@ -50,17 +50,17 @@ type Schedule struct {
 
 	errGroup *errgroup.Group
 
-	outputHandler runner.Handler
-	callbacks     []tracker.Callback
+	outsideHandler runner.Handler
+	callbacks      []tracker.Callback
 }
 
 func New(outsideHandler runner.Handler, callbacks ...tracker.Callback) *Schedule {
 	return &Schedule{
-		instancesMap:  cmap.New[*runner.Runner](),
-		componentsMap: cmap.New[module.Component](),
-		errGroup:      &errgroup.Group{},
-		outputHandler: outsideHandler,
-		callbacks:     callbacks,
+		instancesMap:   cmap.New[*runner.Runner](),
+		componentsMap:  cmap.New[module.Component](),
+		errGroup:       &errgroup.Group{},
+		outsideHandler: outsideHandler,
+		callbacks:      callbacks,
 	}
 }
 
@@ -94,7 +94,6 @@ func (s *Schedule) Install(component module.Component) error {
 
 // Handle handles incoming
 func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
-
 	//ctx context.Context, node string, port string, data []byte
 	nodeName, port := utils.ParseFullPortName(msg.To)
 
@@ -106,7 +105,7 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 	instance, ok := s.instancesMap.Get(nodeName)
 	if !ok {
 		// send outside
-		return s.outputHandler(ctx, msg)
+		return s.outsideHandler(ctx, msg)
 	}
 	node := instance.Node()
 
