@@ -74,8 +74,6 @@ func NewRunner(name string, component m.Component) *Runner {
 	}
 }
 
-//
-
 func (c *Runner) SetTracer(t trace.Tracer) *Runner {
 	c.tracer = t
 	return c
@@ -125,17 +123,18 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 	for _, np := range ports {
 
 		// processing settings port first, then source, then target
-		var ps []byte //port schema settings
+		var portSchema []byte //port schema settings
 
+		// find if we have port settings which might extend the json schema of the port with configurable definitions
 		for _, sp := range c.node.Spec.Ports {
 			// for own configs, from is empty
-			if np.Name == sp.Port || sp.From == "" {
-				ps = sp.Schema
+			if np.Name == sp.Port || sp.From == "" { // exact port or just any internal port (not edge's one) @todo might need improvement
+				portSchema = sp.Schema
 				break
 			}
 		}
 
-		pStatus := v1alpha1.TinyNodePortStatus{
+		portStatus := v1alpha1.TinyNodePortStatus{
 			Name:     np.Name,
 			Label:    np.Label,
 			Position: v1alpha1.Position(np.Position),
@@ -150,28 +149,25 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 			if err == nil {
 				schemaData, _ := schemaConf.MarshalJSON()
-				pStatus.Schema = schemaData
+				portStatus.Schema = schemaData
 			} else {
 				c.log.Error(err, "create schema error")
 			}
 
 			confData, _ := json.Marshal(np.Configuration)
-			pStatus.Configuration = confData
+			portStatus.Configuration = confData
 		}
 
-		// get default port schema and value from runtime
-		// each request use to actualise knowledge of manager about defaults of a node
-
-		if len(pStatus.Schema) > 0 && len(ps) > 0 {
+		if len(portStatus.Schema) > 0 && len(portSchema) > 0 {
 			// our schema is original re-generated schema + updatable (configurable) definitions
-			updatedSchema, err := UpdateWithConfigurableDefinitions(pStatus.Schema, ps, configurableDefinitions)
+			updatedSchema, err := UpdateWithConfigurableDefinitions(portStatus.Schema, portSchema, configurableDefinitions)
 			if err != nil {
 				c.log.Error(err, "update schema")
 			} else {
-				pStatus.Schema = updatedSchema
+				portStatus.Schema = updatedSchema
 			}
 		}
-		status.Ports = append(status.Ports, pStatus)
+		status.Ports = append(status.Ports, portStatus)
 	}
 
 	if status.Error != "" {
@@ -185,6 +181,7 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 		Info:        cmpInfo.Info,
 		Tags:        cmpInfo.Tags,
 	}
+
 	return nil
 }
 
@@ -192,7 +189,7 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) error {
 	_, port := utils.ParseFullPortName(msg.To)
 
-	c.log.Info("input", "port", port, "data", msg.Data, "node", c.name)
+	c.log.Info("input", "port", port, "node", c.name)
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer cancel()
@@ -295,10 +292,10 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) err
 		defer span.End()
 		err = errorpanic.Wrap(func() error {
 			// panic safe
-			c.log.Info("component call", "port", port, "node", c.name, "data", portData)
+			c.log.Info("component call", "port", port, "node", c.name)
 
 			return c.component.Handle(spanCtx, func(outputPort string, outputData interface{}) error {
-				c.log.Info("component callback handler", "port", outputPort, "node", c.name, "data", outputData)
+				c.log.Info("component callback handler", "port", outputPort, "node", c.name)
 				if e := c.outputHandler(spanCtx, outputPort, outputData, outputHandler); e != nil {
 					c.log.Error(e, "handler output error", "name", c.name)
 				}
@@ -386,11 +383,12 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	c.runnerLocks.Lock(nodeLock)
 	edges := c.node.Spec.Edges[:]
 	c.runnerLocks.Unlock(nodeLock)
-
 	wg, ctx := errgroup.WithContext(ctx)
 
 	for _, e := range edges {
-		if e.Port != port {
+		var edge = e
+		//
+		if edge.Port != port {
 			// edge is not configured for this port as source
 			continue
 		}
@@ -405,7 +403,7 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 
 		// track how many messages passed through edge
 		var i int64
-		key = metrics.GetMetricKey(e.ID, metrics.MetricEdgeMessageSent)
+		key = metrics.GetMetricKey(edge.ID, metrics.MetricEdgeMessageSent)
 		c.stats.SetIfAbsent(key, &i)
 		counter, _ = c.stats.Get(key)
 		atomic.AddInt64(counter, 1)
@@ -414,11 +412,12 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			continue
 		}
 		fromPort := utils.GetPortFullName(c.name, port)
+
 		wg.Go(func() error {
 			return handler(ctx, &Msg{
-				To:     e.To,
+				To:     edge.To,
 				From:   fromPort,
-				EdgeID: e.ID,
+				EdgeID: edge.ID,
 				Data:   dataBytes,
 			})
 		})

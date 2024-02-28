@@ -121,7 +121,7 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 	}
 	scanner := bufio.NewScanner(res.Body)
 	for scanner.Scan() {
-		fmt.Println(scanner.Text())
+		fmt.Printf("%s\n", scanner.Text())
 	}
 	return nil
 }
