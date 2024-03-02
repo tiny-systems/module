@@ -138,10 +138,10 @@ type TinyNodeStatus struct {
 	Ports []TinyNodePortStatus `json:"ports"`
 
 	// +kubebuilder:validation:Optional
-	Error string `json:"error,omitempty"`
-
-	// +kubebuilder:validation:Optional
 	Status string `json:"status,omitempty"`
+
+	//+kubebuilder:validation:Optional
+	Error bool `json:"error,omitempty"`
 }
 
 //+kubebuilder:object:root=true
