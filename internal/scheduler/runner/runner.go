@@ -67,7 +67,6 @@ func NewRunner(name string, component m.Component) *Runner {
 		name:      name,
 		component: component,
 		stats:     cmap.New[*int64](),
-
 		//
 		runnerLocks: namedlocker.Store{},
 		closeCh:     make(chan struct{}),
@@ -168,10 +167,6 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 			}
 		}
 		status.Ports = append(status.Ports, portStatus)
-	}
-
-	if status.Error != "" {
-		status.Status = fmt.Sprintf("ERROR: %s", status.Error)
 	}
 
 	cmpInfo := c.component.GetInfo()
@@ -284,34 +279,28 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) err
 	atomic.AddInt64(counter, 1)
 
 	// invoke component call
-	func() {
-		spanCtx, span := c.tracer.Start(ctx, fmt.Sprintf("%s:%s", c.name, port), trace.WithAttributes(
-			attribute.String("service_name", c.name)),
-		)
 
-		defer span.End()
-		err = errorpanic.Wrap(func() error {
-			// panic safe
-			c.log.Info("component call", "port", port, "node", c.name)
+	spanCtx, span := c.tracer.Start(ctx, fmt.Sprintf("%s:%s", c.name, port), trace.WithAttributes(
+		attribute.String("service_name", c.name)),
+	)
 
-			return c.component.Handle(spanCtx, func(outputPort string, outputData interface{}) error {
-				c.log.Info("component callback handler", "port", outputPort, "node", c.name)
-				if e := c.outputHandler(spanCtx, outputPort, outputData, outputHandler); e != nil {
-					c.log.Error(e, "handler output error", "name", c.name)
-				}
-				return nil
-			}, port, portData)
-		})
+	defer span.End()
+	err = errorpanic.Wrap(func() error {
+		// panic safe
+		c.log.Info("component call", "port", port, "node", c.name)
 
-		if err != nil {
-			span.RecordError(err, trace.WithStackTrace(true))
-			span.SetStatus(codes.Error, err.Error())
-		}
-
-	}()
+		return c.component.Handle(spanCtx, func(outputPort string, outputData interface{}) error {
+			c.log.Info("component callback handler", "port", outputPort, "node", c.name)
+			if e := c.outputHandler(spanCtx, outputPort, outputData, outputHandler); e != nil {
+				c.log.Error(e, "handler output error", "name", c.name)
+			}
+			return nil
+		}, port, portData)
+	})
 
 	if err != nil {
-		return err
+		span.RecordError(err, trace.WithStackTrace(true))
+		span.SetStatus(codes.Error, err.Error())
 	}
 	return err
 }
@@ -324,9 +313,6 @@ func (c *Runner) Node() v1alpha1.TinyNode {
 
 // Configure updates specs and decides do we need to restart which handles by Run method
 func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode) error {
-	c.runnerLocks.Lock(nodeLock)
-	c.node = node
-	c.runnerLocks.Unlock(nodeLock)
 
 	// 3s to apply settings sounds fair
 	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
@@ -347,10 +333,18 @@ func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode) error {
 		return nil
 	}
 
-	return c.Input(ctx, &Msg{
+	if err := c.Input(ctx, &Msg{
 		To:   utils.GetPortFullName(c.name, settingsPort),
 		Data: []byte("{}"), // no external data send to port, rely solely on port config
-	}, nil)
+	}, nil); err != nil {
+		return err
+	}
+
+	c.runnerLocks.Lock(nodeLock)
+	defer c.runnerLocks.Unlock(nodeLock)
+	c.node = node
+
+	return nil
 }
 
 // Cancel cancels all entity requests
@@ -368,7 +362,7 @@ func (c *Runner) Cancel() {
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) error {
 
-	// system port, no edges connected send it out
+	// system ports have no edges connected send it outside
 	if port == m.RefreshPort {
 		return handler(ctx, &Msg{
 			To: utils.GetPortFullName(c.name, port),
@@ -383,6 +377,7 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	c.runnerLocks.Lock(nodeLock)
 	edges := c.node.Spec.Edges[:]
 	c.runnerLocks.Unlock(nodeLock)
+
 	wg, ctx := errgroup.WithContext(ctx)
 
 	for _, e := range edges {
@@ -458,16 +453,3 @@ func (c *Runner) GetStats() map[string]interface{} {
 	}
 	return statsMap
 }
-
-//main.AddEvent("log", trace.WithAttributes(
-// // Log severity and message.
-// attribute.String("log.severity", "ERROR"),
-// attribute.String("log.message", "request failed"),
-// // Optional.
-// attribute.String("code.function", "org.FetchUser"),
-// attribute.String("code.filepath", "org/user.go"),
-// attribute.Int("code.lineno", 123),
-//
-// // Additional details.
-// attribute.String("foo", "hello world"),
-//))

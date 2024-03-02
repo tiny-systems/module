@@ -170,9 +170,12 @@ func (s *Schedule) Upsert(ctx context.Context, node *v1alpha1.TinyNode) (err err
 			})
 		}
 		//configure || reconfigure
-		err = instance.Configure(ctx, *node.DeepCopy())
-		if err != nil {
-			err = fmt.Errorf("configure error: %v", err)
+		configErr := instance.Configure(ctx, *node.DeepCopy())
+		if configErr != nil {
+			status := &node.Status
+			status.Error = true
+			status.Status = configErr.Error()
+			return instance
 		}
 		if err = instance.UpdateStatus(&node.Status); err != nil {
 			err = fmt.Errorf("update status error: %v", err)

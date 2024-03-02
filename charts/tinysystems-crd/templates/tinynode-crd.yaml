@@ -103,7 +103,7 @@ spec:
                 - info
                 type: object
               error:
-                type: string
+                type: boolean
               module:
                 properties:
                   name:
