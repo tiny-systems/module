@@ -85,8 +85,6 @@ type TinyNodePortStatus struct {
 	Name          string   `json:"name"`
 	Label         string   `json:"label"`
 	Position      Position `json:"position"`
-	Settings      bool     `json:"settings"`
-	Control       bool     `json:"control"`
 	Source        bool     `json:"source"`
 	Schema        []byte   `json:"schema"`
 	Configuration []byte   `json:"configuration"`

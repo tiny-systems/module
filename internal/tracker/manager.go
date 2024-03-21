@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-logr/logr"
-	"github.com/goccy/go-json"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/pkg/client"
@@ -58,14 +57,10 @@ func (t *manager) Track(ctx context.Context, msg PortMsg) {
 		if err := t.sendPortData(ctx, msg, tt); err != nil {
 			t.log.Error(err, "port webhook error", "data", msg)
 		}
-		if err := t.sendNodeStatistics(ctx, msg, tt); err != nil {
-			t.log.Error(err, "stats webhook error", "data", msg)
-		}
 	}
 }
 
 func (t *manager) sendPortData(ctx context.Context, msg PortMsg, tracker v1alpha1.TinyTracker) error {
-
 	if tracker.Spec.PortDataWebhook == nil || tracker.Spec.PortDataWebhook.FlowID != msg.FlowID {
 		return nil
 	}
@@ -91,36 +86,6 @@ func (t *manager) sendPortData(ctx context.Context, msg PortMsg, tracker v1alpha
 		headers[client.HeaderEdgeID] = msg.EdgeID
 	}
 	return client.SendWebhookData(ctx, tracker.Spec.PortDataWebhook.URL, headers, msg.Data)
-}
-
-func (t *manager) sendNodeStatistics(ctx context.Context, msg PortMsg, tracker v1alpha1.TinyTracker) error {
-
-	if tracker.Spec.NodeStatisticsWebhook == nil || tracker.Spec.NodeStatisticsWebhook.FlowID != msg.FlowID {
-		return nil
-	}
-
-	t.cache.DeleteExpired()
-	_, created := t.cache.GetOrSet(buildTrackerPortCacheKey(tracker, msg.NodeName), struct{}{}, ttlcache.WithTTL[string, struct{}](tracker.Spec.NodeStatisticsWebhook.Interval.Duration))
-
-	if created {
-		return nil
-	}
-
-	data, err := json.Marshal(msg.NodeStats)
-	if err != nil {
-		return err
-	}
-
-	headers := map[string]string{
-		client.HeaderFlowID:       msg.FlowID,
-		client.HeaderPortFullName: msg.PortName,
-		client.HeaderNodeName:     msg.NodeName,
-		"Content-Type":            "application/json",
-	}
-	if msg.EdgeID != "" {
-		headers[client.HeaderEdgeID] = msg.EdgeID
-	}
-	return client.SendWebhookData(ctx, tracker.Spec.NodeStatisticsWebhook.URL, headers, data)
 }
 
 func (t *manager) Run(ctx context.Context) error {

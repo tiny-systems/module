@@ -119,8 +119,6 @@ spec:
                     configuration:
                       format: byte
                       type: string
-                    control:
-                      type: boolean
                     label:
                       type: string
                     name:
@@ -130,18 +128,14 @@ spec:
                     schema:
                       format: byte
                       type: string
-                    settings:
-                      type: boolean
                     source:
                       type: boolean
                   required:
                   - configuration
-                  - control
                   - label
                   - name
                   - position
                   - schema
-                  - settings
                   - source
                   type: object
                 type: array

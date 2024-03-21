@@ -1,4 +1,4 @@
-package manager
+package resource
 
 import (
 	"context"
@@ -20,13 +20,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type Resource struct {
+type Manager struct {
 	client    client.Client
 	namespace string
 	log       logr.Logger
 }
 
-type ResourceInterface interface {
+type ManagerInterface interface {
 	CleanupExampleNodes(ctx context.Context, mod module.Info) error
 	RegisterModule(ctx context.Context, mod module.Info) error
 	ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error)
@@ -35,12 +35,12 @@ type ResourceInterface interface {
 	CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error
 }
 
-func NewManager(c client.Client, log logr.Logger, ns string) *Resource {
-	return &Resource{client: c, log: log, namespace: ns}
+func NewManager(c client.Client, log logr.Logger, ns string) *Manager {
+	return &Manager{client: c, log: log, namespace: ns}
 }
 
 // CleanupExampleNodes  @todo deal with it later
-func (m Resource) CleanupExampleNodes(ctx context.Context, mod module.Info) error {
+func (m Manager) CleanupExampleNodes(ctx context.Context, mod module.Info) error {
 	sel := labels.NewSelector()
 
 	req, err := labels.NewRequirement(v1alpha1.FlowIDLabel, selection.Equals, []string{""})
@@ -67,7 +67,7 @@ func (m Resource) CleanupExampleNodes(ctx context.Context, mod module.Info) erro
 	return nil
 }
 
-func (m Resource) RegisterModule(ctx context.Context, mod module.Info) error {
+func (m Manager) RegisterModule(ctx context.Context, mod module.Info) error {
 
 	spec := v1alpha1.TinyModuleSpec{
 		Image: mod.GetNameAndVersion(),
@@ -92,7 +92,7 @@ func (m Resource) RegisterModule(ctx context.Context, mod module.Info) error {
 	return err
 }
 
-func (m Resource) getReleaseNameByPodName(ctx context.Context, podName string) (string, error) {
+func (m Manager) getReleaseNameByPodName(ctx context.Context, podName string) (string, error) {
 	pod := &v1core.Pod{}
 	err := m.client.Get(context.Background(), client.ObjectKey{
 		Namespace: m.namespace,
@@ -115,7 +115,7 @@ func (m Resource) getReleaseNameByPodName(ctx context.Context, podName string) (
 	return releaseName, nil
 }
 
-func (m Resource) ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error) {
+func (m Manager) ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error) {
 	m.log.Info("exposing port", "port", port, "hostnames", hostnames)
 
 	currentPod := os.Getenv("HOSTNAME")
@@ -157,7 +157,7 @@ func (m Resource) ExposePort(ctx context.Context, autoHostName string, hostnames
 	return m.addRulesIngress(ctx, ingress, svc, hostnames, port)
 }
 
-func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1ingress.Ingress) string {
+func (m Manager) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1ingress.Ingress) string {
 
 	var hostNamePrefix string
 	for k, v := range ingress.Annotations {
@@ -168,7 +168,7 @@ func (m Resource) getIngressAutoHostnamePrefix(ctx context.Context, ingress *v1i
 	return hostNamePrefix
 }
 
-func (m Resource) removeRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, port int) error {
+func (m Manager) removeRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, port int) error {
 
 	var (
 		rules            []v1ingress.IngressRule
@@ -209,7 +209,7 @@ TLS:
 	return m.client.Update(ctx, ingress)
 }
 
-func (m Resource) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, hostnames []string, port int) ([]string, error) {
+func (m Manager) addRulesIngress(ctx context.Context, ingress *v1ingress.Ingress, service *v1core.Service, hostnames []string, port int) ([]string, error) {
 
 	if len(hostnames) == 0 {
 		return []string{}, fmt.Errorf("no hostnames provided")
@@ -280,7 +280,7 @@ HOSTNAMES:
 	return hostnames, nil
 }
 
-func (m Resource) discloseServicePort(ctx context.Context, svc *v1core.Service, port int) error {
+func (m Manager) discloseServicePort(ctx context.Context, svc *v1core.Service, port int) error {
 	var ports []v1core.ServicePort
 
 	for _, p := range svc.Spec.Ports {
@@ -294,7 +294,7 @@ func (m Resource) discloseServicePort(ctx context.Context, svc *v1core.Service, 
 	return m.client.Update(ctx, svc)
 }
 
-func (m Resource) exposeServicePort(ctx context.Context, svc *v1core.Service, port int) error {
+func (m Manager) exposeServicePort(ctx context.Context, svc *v1core.Service, port int) error {
 	for _, p := range svc.Spec.Ports {
 		if p.Port == int32(port) {
 			// service has port already exposed
@@ -309,7 +309,7 @@ func (m Resource) exposeServicePort(ctx context.Context, svc *v1core.Service, po
 	return m.client.Update(ctx, svc)
 }
 
-func (m Resource) getReleaseService(ctx context.Context, releaseName string) (*v1core.Service, error) {
+func (m Manager) getReleaseService(ctx context.Context, releaseName string) (*v1core.Service, error) {
 	servicesList := &v1core.ServiceList{}
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{
@@ -340,7 +340,7 @@ func (m Resource) getReleaseService(ctx context.Context, releaseName string) (*v
 	return &servicesList.Items[0], nil
 }
 
-func (m Resource) getReleaseIngress(ctx context.Context, releaseName string) (*v1ingress.Ingress, error) {
+func (m Manager) getReleaseIngress(ctx context.Context, releaseName string) (*v1ingress.Ingress, error) {
 	ingressList := &v1ingress.IngressList{}
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{
@@ -368,7 +368,7 @@ func (m Resource) getReleaseIngress(ctx context.Context, releaseName string) (*v
 	return &ingressList.Items[0], nil
 }
 
-func (m Resource) DisclosePort(ctx context.Context, port int) error {
+func (m Manager) DisclosePort(ctx context.Context, port int) error {
 	m.log.Info("disclose port", "port", port)
 
 	currentPod := os.Getenv("HOSTNAME")
@@ -398,7 +398,7 @@ func (m Resource) DisclosePort(ctx context.Context, port int) error {
 	return m.removeRulesIngress(ctx, ingress, svc, port)
 }
 
-func (m Resource) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error {
+func (m Manager) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error {
 	signal := &v1alpha1.TinySignal{
 		Spec: v1alpha1.TinySignalSpec{
 			Node: node.Name,
@@ -411,7 +411,7 @@ func (m Resource) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.Tin
 	return m.client.Create(ctx, signal)
 }
 
-func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error {
+func (m Manager) RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error {
 
 	componentInfo := c.GetInfo()
 	node := &v1alpha1.TinyNode{
@@ -437,7 +437,7 @@ func (m Resource) RegisterExampleNode(ctx context.Context, c module.Component, m
 	return err
 }
 
-func (m Resource) Start(ctx context.Context) error {
+func (m Manager) Start(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
 }

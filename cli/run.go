@@ -9,13 +9,14 @@ import (
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/client"
 	"github.com/tiny-systems/module/internal/controller"
-	"github.com/tiny-systems/module/internal/manager"
-	"github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/internal/resource"
+	sch "github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server"
 	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/registry"
-	"github.com/uptrace/uptrace-go/uptrace"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -44,29 +45,48 @@ var (
 	probeAddr            string
 )
 
+var (
+	ErrInvalidModuleName    = fmt.Errorf("invalid module name")
+	ErrInvalidModuleVersion = fmt.Errorf("invalid module version")
+)
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run module",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		uptrace.ConfigureOpentelemetry(
-			uptrace.WithDSN(os.Getenv("UPTRACE_DSN")),
+		metrics.ConfigureOpenTelemetry(
+			metrics.WithDSN(os.Getenv("OTLP_DSN")),
 		)
 
 		// Send buffered spans and free resources.
-		defer uptrace.Shutdown(context.Background())
-
-		defer func() {
-			if r := recover(); r != nil {
-				fmt.Println("recovered", r)
-			}
-		}()
+		defer metrics.Shutdown(context.Background())
 
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
 
+		defer func() {
+			if r := recover(); r != nil {
+				l.Info("recovered", "from", r)
+			}
+		}()
+
 		l.Info("starting")
+
+		if name == "" {
+			l.Error(ErrInvalidModuleName, "module name is empty")
+			return
+		}
+		if version == "" {
+			l.Error(ErrInvalidModuleVersion, "module name is empty")
+			return
+		}
+
+		if strings.HasPrefix(version, "v") {
+			l.Error(ErrInvalidModuleVersion, "version should not start with v prefix")
+			return
+		}
 
 		moduleInfo := m.Info{
 			Version:   version,
@@ -117,7 +137,7 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		// run all modules
+		// run all systems
 		cmdCtx, cancel := context.WithCancelCause(cmd.Context())
 		defer cancel(nil)
 
@@ -126,20 +146,34 @@ var runCmd = &cobra.Command{
 		listenAddr := make(chan string)
 		defer close(listenAddr)
 
-		tracer := otel.Tracer(name)
-		meter := otel.Meter(name)
-
-		pool := client.NewPool().
-			SetLogger(l)
-
-		//
-		crManager := manager.NewManager(mgr.GetClient(), l, namespace)
+		var (
+			tracer = otel.Tracer(name)
+			meter  = otel.Meter(name)
+			pool   = client.NewPool().SetLogger(l)
+		)
 
 		//
-		trackManager := tracker.NewManager().SetLogger(l)
+		var (
+			resourceManager = resource.NewManager(mgr.GetClient(), l, namespace)
+			trackManager    = tracker.NewManager().SetLogger(l)
+			scheduler       sch.Scheduler
+		)
 
 		//
-		sch := scheduler.New(pool.Handler, func(msg tracker.PortMsg) {
+		scheduler = sch.New(func(ctx context.Context, msg *runner.Msg) error {
+			m, _, err := m.ParseFullName(msg.To)
+			if err != nil {
+				return fmt.Errorf("parse destination error: %v", err)
+			}
+
+			if m == moduleInfo.GetMajorNameSanitised() {
+				// destination is the current module
+				return scheduler.Handle(ctx, msg)
+			}
+			// gRPC call
+			return pool.Handler(ctx, msg)
+		}, func(msg tracker.PortMsg) {
+
 			go func() {
 				// @todo add pool
 				trackManager.Track(ctx, msg)
@@ -148,20 +182,20 @@ var runCmd = &cobra.Command{
 			SetLogger(l).
 			SetMeter(meter).
 			SetTracer(tracer).
-			SetManager(crManager)
+			SetManager(resourceManager)
 
 		// create gRPC server
-
-		serv := server.New().
-			SetLogger(l)
+		var (
+			serv = server.New().SetLogger(l)
+		)
 
 		wg.Go(func() error {
-			l.Info("Starting gRPC server")
+			l.Info("starting gRPC server")
 
 			defer func() {
 				l.Info("gRPC server stopped")
 			}()
-			if err := serv.Start(ctx, sch.Handle, grpcAddr, func(addr net.Addr) {
+			if err := serv.Start(ctx, scheduler.Handle, grpcAddr, func(addr net.Addr) {
 				// @todo check if inside of container
 				parts := strings.Split(addr.String(), ":")
 				if len(parts) > 0 {
@@ -183,7 +217,7 @@ var runCmd = &cobra.Command{
 		nodeController := &controller.TinyNodeReconciler{
 			Client:    mgr.GetClient(),
 			Scheme:    mgr.GetScheme(),
-			Scheduler: sch,
+			Scheduler: scheduler,
 			Recorder:  mgr.GetEventRecorderFor("tiny-controller"),
 			Module:    moduleInfo,
 		}
@@ -218,7 +252,7 @@ var runCmd = &cobra.Command{
 		if err = (&controller.TinySignalReconciler{
 			Client:    mgr.GetClient(),
 			Scheme:    mgr.GetScheme(),
-			Scheduler: sch,
+			Scheduler: scheduler,
 			Module:    moduleInfo,
 		}).SetupWithManager(mgr); err != nil {
 			l.Error(err, "unable to create tinysignal controller")
@@ -238,14 +272,14 @@ var runCmd = &cobra.Command{
 		l.Info("installing components", "versionID", versionID)
 
 		// uninstall palette resources from previous versions
-		if err = crManager.CleanupExampleNodes(ctx, moduleInfo); err != nil {
+		if err = resourceManager.CleanupExampleNodes(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to cleanup previous versions components")
 			return
 		}
 
 		l.Info("registering", "module", moduleInfo.GetMajorName())
 
-		if err = crManager.RegisterModule(ctx, moduleInfo); err != nil {
+		if err = resourceManager.RegisterModule(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to register a module")
 			return
 		}
@@ -253,10 +287,10 @@ var runCmd = &cobra.Command{
 		for _, cmp := range registry.Get() {
 			l.Info("registering", "component", cmp.GetInfo().Name)
 
-			if err = crManager.RegisterExampleNode(ctx, cmp, moduleInfo); err != nil {
+			if err = resourceManager.RegisterExampleNode(ctx, cmp, moduleInfo); err != nil {
 				l.Error(err, "unable to register", "component", cmp.GetInfo().Name)
 			}
-			if err := sch.Install(cmp); err != nil {
+			if err := scheduler.Install(cmp); err != nil {
 				l.Error(err, "unable to install", "component", cmp.GetInfo().Name)
 			}
 		}
@@ -267,7 +301,7 @@ var runCmd = &cobra.Command{
 			defer func() {
 				l.Info("resource manager stopped")
 			}()
-			if err := crManager.Start(ctx); err != nil {
+			if err := resourceManager.Start(ctx); err != nil {
 				l.Error(err, "problem during resource manager start")
 				return err
 			}
@@ -308,7 +342,7 @@ var runCmd = &cobra.Command{
 			defer func() {
 				l.Info("scheduler stopped")
 			}()
-			if err := sch.Start(ctx); err != nil {
+			if err := scheduler.Start(ctx); err != nil {
 				l.Error(err, "unable to start scheduler")
 				return err
 			}

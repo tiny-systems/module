@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
@@ -91,21 +90,26 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-	//node
-	err = r.Scheduler.Upsert(ctx, node)
-	if err != nil {
-		// create event?
-		l.Error(err, "scheduler error")
-		node.Status.Status = fmt.Sprintf("ERROR: %v", err)
-		return reconcile.Result{}, err
-	}
 
-	l.Info("update status", "node", node.Name)
+	status := &node.Status
 
-	node.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
+	// update status with current module info
+	status.Module = operatorv1alpha1.TinyNodeModuleStatus{
 		Version: r.Module.Version,
 		Name:    r.Module.Name,
 	}
+
+	// upsert in scheduler
+	err = r.Scheduler.Update(ctx, node)
+	if err != nil {
+		l.Error(err, "scheduler upsert error")
+		status.Error = true
+		status.Status = err.Error()
+	}
+
+	node.Status = *status
+	l.Info("update status", "node", node.Name)
+
 	err = r.Status().Update(context.Background(), node)
 	if err != nil {
 		l.Error(err, "status update error")
@@ -139,6 +143,12 @@ func (s SignalEventHandler) Delete(ctx context.Context, event event.DeleteEvent,
 	if !ok {
 		return
 	}
+
+	if signal.Spec.Port != module.ReconcilePort {
+		// do not reconcile if signal was used as a way to send data
+		return
+	}
+
 	q.Add(reconcile.Request{
 		NamespacedName: types.NamespacedName{
 			Name:      signal.Spec.Node,

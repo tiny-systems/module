@@ -72,8 +72,8 @@ func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	ago := v1.NewTime(time.Now().Add(-time.Minute * 60))
 
 	if tracker.CreationTimestamp.Before(&ago) {
-		err = r.Delete(ctx, tracker)
-		return reconcile.Result{Requeue: true}, err
+		_ = r.Delete(ctx, tracker)
+		return reconcile.Result{Requeue: true}, nil
 	}
 
 	err = r.Manager.Register(*tracker)

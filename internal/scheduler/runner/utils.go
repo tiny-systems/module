@@ -3,6 +3,7 @@ package runner
 import (
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
+	"golang.org/x/exp/slices"
 )
 
 func UpdateWithConfigurableDefinitions(original []byte, updateWith []byte, configurableDefinitions map[string]*ajson.Node) ([]byte, error) {
@@ -24,7 +25,10 @@ func UpdateWithConfigurableDefinitions(original []byte, updateWith []byte, confi
 		return nil, err
 	}
 
-	for _, defKey := range originalNodeDefs.Keys() {
+	keys := originalNodeDefs.Keys()
+	slices.Sort(keys)
+
+	for _, defKey := range keys {
 		v, err := originalNodeDefs.GetKey(defKey)
 
 		if err != nil {
