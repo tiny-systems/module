@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"github.com/go-logr/logr"
 	"github.com/goccy/go-json"
-	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
-	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/evaluator"
+	"github.com/tiny-systems/module/pkg/jsonschema-go"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -21,27 +20,15 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
-	"oya.to/namedlocker"
 	"reflect"
 	"sort"
-	"sync/atomic"
-	"time"
-)
-
-const (
-	nodeLock = "_node_lock"
+	"sync"
 )
 
 type Runner struct {
 	// unique instance name
 
-	flowID string
-	//
-
-	runnerLocks namedlocker.Store
-
 	name string
-
 	// underlying component
 	component m.Component
 	//
@@ -49,27 +36,23 @@ type Runner struct {
 	// to control K8s resources
 
 	closeCh chan struct{}
-
 	//
-	stats cmap.ConcurrentMap[string, *int64]
 
 	node v1alpha1.TinyNode
 	//
-
 	tracer trace.Tracer
 
-	meter metric.Meter
+	meter    metric.Meter
+	nodeLock *sync.Mutex
 }
 
 func NewRunner(name string, component m.Component) *Runner {
 	return &Runner{
-
 		name:      name,
 		component: component,
-		stats:     cmap.New[*int64](),
+		nodeLock:  &sync.Mutex{},
 		//
-		runnerLocks: namedlocker.Store{},
-		closeCh:     make(chan struct{}),
+		closeCh: make(chan struct{}),
 	}
 }
 
@@ -88,6 +71,10 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 	return c
 }
 
+func (c *Runner) Component() m.Component {
+	return c.component
+}
+
 // UpdateStatus apply status changes
 func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
@@ -101,26 +88,47 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 	}
 
 	status.Status = "OK"
+	status.Error = false
 	status.Ports = make([]v1alpha1.TinyNodePortStatus, 0)
 
 	// sort ports
-	sort.Slice(ports, func(i, j int) bool {
-		if ports[i].Settings != ports[j].Settings {
-			return true
-		}
-		return ports[i].Source == ports[j].Source
+	sort.SliceStable(ports, func(i, j int) bool {
+		return ports[i].Name < ports[j].Name
 	})
 
-	configurableDefinitions := make(map[string]*ajson.Node)
-	var sharedConfigurableSchemaDefinitions = make(map[string]jsonschema.Schema)
+	var (
+		configurableDefinitions             = make(map[string]*ajson.Node)
+		sharedConfigurableSchemaDefinitions = make(map[string]jsonschema.Schema)
+	)
 
-	// populate shared definitions with configurable schemas first
+	// populate shared definitions with configurable schemas first (settings port
 	for _, np := range ports {
+		if np.Name != m.SettingsPort {
+			continue
+		}
+		_, _ = schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
+		break
+	}
+
+	// source ports and not settings
+	for _, np := range ports {
+		if !np.Source || np.Name == m.SettingsPort {
+			continue
+		}
 		_, _ = schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
 	}
+
+	// populate shared definitions with configurable schemas first (target ports)
+	for _, np := range ports {
+		if np.Source {
+			continue
+		}
+		_, _ = schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
+	}
+	// sharedConfigurableSchemaDefinitions collected
+
 	// now do it again
 	for _, np := range ports {
-
 		// processing settings port first, then source, then target
 		var portSchema []byte //port schema settings
 
@@ -137,8 +145,6 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 			Name:     np.Name,
 			Label:    np.Label,
 			Position: v1alpha1.Position(np.Position),
-			Settings: np.Settings,
-			Control:  np.Control,
 			Source:   np.Source,
 		}
 
@@ -148,6 +154,12 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 			if err == nil {
 				schemaData, _ := schemaConf.MarshalJSON()
+				fmt.Println()
+				fmt.Println()
+				fmt.Println()
+				fmt.Println(c.name, np.Name)
+				fmt.Println(string(schemaData))
+
 				portStatus.Schema = schemaData
 			} else {
 				c.log.Error(err, "create schema error")
@@ -176,18 +188,33 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 		Info:        cmpInfo.Info,
 		Tags:        cmpInfo.Tags,
 	}
+	return nil
+}
 
+func (c *Runner) getPortConfig(from string, port string) *v1alpha1.TinyNodePortConfig {
+	c.nodeLock.Lock()
+	defer c.nodeLock.Unlock()
+	//
+	for _, pc := range c.node.Spec.Ports {
+		if pc.From == from && pc.Port == port {
+			return &pc
+		}
+	}
 	return nil
 }
 
 // Input processes input to the inherited component
+// applies port config for the given port if any
 func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) error {
 	_, port := utils.ParseFullPortName(msg.To)
 
-	c.log.Info("input", "port", port, "node", c.name)
+	c.incMetricCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
+	defer c.incMetricCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgOut)
+
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer cancel()
+		// close all ongoing requests
 		<-c.closeCh
 	}()
 
@@ -198,27 +225,23 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) err
 			break
 		}
 	}
+
 	if nodePort == nil {
+		// component has no such port
 		return nil
 	}
 
-	var portConfig *v1alpha1.TinyNodePortConfig
-	//
-	c.runnerLocks.Lock(nodeLock)
-	//
-	for _, pc := range c.node.Spec.Ports {
-		if pc.From == msg.From && pc.Port == port {
-			portConfig = &pc
-			break
-		}
-	}
-	//
-	c.runnerLocks.Unlock(nodeLock)
-
 	var (
-		portData interface{}
-		err      error
+		portConfig = c.getPortConfig(msg.From, port)
+		portData   interface{}
+		err        error
 	)
+
+	ctx, span := c.tracer.Start(ctx, msg.EdgeID, trace.WithAttributes(
+		attribute.String("node", c.name),
+		attribute.String("port", port)),
+	)
+	defer span.End()
 
 	if portConfig != nil && len(portConfig.Configuration) > 0 {
 		// create config
@@ -257,44 +280,23 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) err
 		portData = portInputData.Interface()
 
 	} else {
+		//
 		portData = nodePort.Configuration
 		if err != nil {
 			return errors.Wrap(err, "unable to encode port data")
 		}
 	}
 
-	// stats
-	if msg.EdgeID != "" {
-		var i int64
-		key := metrics.GetMetricKey(msg.EdgeID, metrics.MetricEdgeMessageReceived)
-		c.stats.SetIfAbsent(key, &i)
-		counter, _ := c.stats.Get(key)
-		atomic.AddInt64(counter, 1)
-	}
-
-	var i int64
-	key := metrics.GetMetricKey(c.name, metrics.MetricNodeMessageReceived)
-	c.stats.SetIfAbsent(key, &i)
-	counter, _ := c.stats.Get(key)
-	atomic.AddInt64(counter, 1)
-
-	// invoke component call
-
-	spanCtx, span := c.tracer.Start(ctx, fmt.Sprintf("%s:%s", c.name, port), trace.WithAttributes(
-		attribute.String("service_name", c.name)),
-	)
-
-	defer span.End()
 	err = errorpanic.Wrap(func() error {
 		// panic safe
 		c.log.Info("component call", "port", port, "node", c.name)
 
-		return c.component.Handle(spanCtx, func(outputPort string, outputData interface{}) error {
+		return c.component.Handle(ctx, func(outputPort string, outputData interface{}) error {
 			c.log.Info("component callback handler", "port", outputPort, "node", c.name)
-			if e := c.outputHandler(spanCtx, outputPort, outputData, outputHandler); e != nil {
+			if e := c.outputHandler(ctx, outputPort, outputData, outputHandler); e != nil {
 				c.log.Error(e, "handler output error", "name", c.name)
 			}
-			return nil
+			return err
 		}, port, portData)
 	})
 
@@ -306,48 +308,21 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) err
 }
 
 func (c *Runner) Node() v1alpha1.TinyNode {
-	c.runnerLocks.Lock(nodeLock)
-	defer c.runnerLocks.Unlock(nodeLock)
+	c.nodeLock.Lock()
+	defer c.nodeLock.Unlock()
 	return c.node
 }
 
-// Configure updates specs and decides do we need to restart which handles by Run method
-func (c *Runner) Configure(ctx context.Context, node v1alpha1.TinyNode) error {
+// SetNode updates specs and decides do we need to restart which handles by Run method
+func (c *Runner) SetNode(node v1alpha1.TinyNode) {
+	c.nodeLock.Lock()
+	defer c.nodeLock.Unlock()
 
-	// 3s to apply settings sounds fair
-	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
-	defer cancel()
-	// we do not send anything to settings port outside
-	// we rely on totally internal settings of the settings port
-	// todo consider flow envs here
-
-	var settingsPort string
-
-	for _, p := range c.component.Ports() {
-		if !p.Settings {
-			continue
-		}
-		settingsPort = p.Name
-	}
-	if settingsPort == "" {
-		return nil
-	}
-
-	if err := c.Input(ctx, &Msg{
-		To:   utils.GetPortFullName(c.name, settingsPort),
-		Data: []byte("{}"), // no external data send to port, rely solely on port config
-	}, nil); err != nil {
-		return err
-	}
-
-	c.runnerLocks.Lock(nodeLock)
-	defer c.runnerLocks.Unlock(nodeLock)
 	c.node = node
-
-	return nil
 }
 
-// Cancel cancels all entity requests
+// Cancel cancels all ongoing requests
+// safe to call more than once
 func (c *Runner) Cancel() {
 	var ok = true
 	select {
@@ -362,8 +337,8 @@ func (c *Runner) Cancel() {
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) error {
 
-	// system ports have no edges connected send it outside
-	if port == m.RefreshPort {
+	// system ports have no edges connected to it so send empty signal outside
+	if port == m.ReconcilePort {
 		return handler(ctx, &Msg{
 			To: utils.GetPortFullName(c.name, port),
 		})
@@ -374,9 +349,11 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		return err
 	}
 
-	c.runnerLocks.Lock(nodeLock)
+	c.nodeLock.Lock()
 	edges := c.node.Spec.Edges[:]
-	c.runnerLocks.Unlock(nodeLock)
+	c.nodeLock.Unlock()
+
+	// get all edges to connected nodes
 
 	wg, ctx := errgroup.WithContext(ctx)
 
@@ -387,28 +364,15 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			// edge is not configured for this port as source
 			continue
 		}
-		// send to destination
-		// track how many messages component send
-		var y int64
-
-		key := metrics.GetMetricKey(c.name, metrics.MetricNodeMessageSent)
-		c.stats.SetIfAbsent(key, &y)
-		counter, _ := c.stats.Get(key)
-		atomic.AddInt64(counter, 1)
-
-		// track how many messages passed through edge
-		var i int64
-		key = metrics.GetMetricKey(edge.ID, metrics.MetricEdgeMessageSent)
-		c.stats.SetIfAbsent(key, &i)
-		counter, _ = c.stats.Get(key)
-		atomic.AddInt64(counter, 1)
-
 		if handler == nil {
 			continue
 		}
 		fromPort := utils.GetPortFullName(c.name, port)
 
 		wg.Go(func() error {
+			// send to destination
+			// track how many messages component send
+
 			return handler(ctx, &Msg{
 				To:     edge.To,
 				From:   fromPort,
@@ -417,6 +381,7 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			})
 		})
 	}
+	// wait while all port will be unblocked
 	return wg.Wait()
 }
 
@@ -428,28 +393,24 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 	return json.Unmarshal(b, output)
 }
 
-// GetStats @todo deprecate
-func (c *Runner) GetStats() map[string]interface{} {
-
-	statsMap := map[string]interface{}{}
-
-	for _, k := range c.stats.Keys() {
-		counter, _ := c.stats.Get(k)
-		if counter == nil {
-			continue
-		}
-		val := *counter
-		entityID, metric, err := metrics.GetEntityAndMetric(k)
-		if err != nil {
-			continue
-		}
-
-		if statsMap[entityID] == nil {
-			statsMap[entityID] = map[string]interface{}{}
-		}
-		if statsMapSub, ok := statsMap[entityID].(map[string]interface{}); ok {
-			statsMapSub[metric.String()] = val
-		}
+func (c *Runner) incMetricCounter(ctx context.Context, val int64, name string, m metrics.Metric) {
+	if name == "" {
+		return
 	}
-	return statsMap
+	counter, err := c.meter.Int64Counter(
+		string(m),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		c.log.Error(err, "metric counter err")
+		return
+	}
+
+	var attrs = []metric.AddOption{
+		metric.WithAttributes(
+			attribute.String("element", name),
+			attribute.String("flowID", c.Node().Labels[v1alpha1.FlowIDLabel]),
+		),
+	}
+	counter.Add(ctx, val, attrs...)
 }

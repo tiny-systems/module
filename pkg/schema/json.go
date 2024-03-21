@@ -3,7 +3,8 @@ package schema
 import (
 	"fmt"
 	"github.com/goccy/go-json"
-	"github.com/swaggest/jsonschema-go"
+	"github.com/tiny-systems/module/pkg/jsonschema-go"
+	"golang.org/x/exp/slices"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"reflect"
@@ -50,10 +51,14 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 		jsonschema.CollectDefinitions(func(name string, schema jsonschema.Schema) {
 			defs[name] = schema
 		}),
-		jsonschema.InterceptProperty(func(name string, field reflect.StructField, propertySchema *jsonschema.Schema) error {
+		jsonschema.InterceptProp(func(params jsonschema.InterceptPropParams) error {
+			if !params.Processed {
+				return nil
+			}
+
 			// looking for values  for certain properties
 			for _, cp := range scalarCustomProps {
-				if prop, ok := field.Tag.Lookup(cp); ok {
+				if prop, ok := params.Field.Tag.Lookup(cp); ok {
 					var propVal interface{}
 					if prop == "true" || prop == "false" {
 						propVal, _ = strconv.ParseBool(prop)
@@ -67,29 +72,31 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 						// as is
 						propVal = prop
 					}
-					propertySchema.WithExtraPropertiesItem(cp, propVal)
+					params.PropertySchema.WithExtraPropertiesItem(cp, propVal)
 				}
 			}
 
 			for _, cp := range arrayCustomProps {
-				if prop, ok := field.Tag.Lookup(cp); ok {
-					propertySchema.WithExtraPropertiesItem(cp, strings.Split(prop, ","))
+				if prop, ok := params.Field.Tag.Lookup(cp); ok {
+					params.PropertySchema.WithExtraPropertiesItem(cp, strings.Split(prop, ","))
 				}
 			}
 
-			defName := getDefinitionName(field.Type)
+			defName := getDefinitionName(params.Field.Type)
 
 			//
-			if b, ok := propertySchema.ExtraProperties["configurable"]; !ok || b != true {
+			if b, ok := params.PropertySchema.ExtraProperties["configurable"]; !ok || b != true {
+				// not configurable; replace with configurable if any
+
 				if conf, ok := confDefs[defName]; ok {
 					// replacing with configurable schema
 					defs[defName] = conf
 					refOnly := jsonschema.Schema{}
 					ref := fmt.Sprintf("#/$defs/%s", defName)
 					refOnly.Ref = &ref
-					refOnly.WithExtraPropertiesItem("propertyOrder", propertySchema.ExtraProperties["propertyOrder"])
+					refOnly.WithExtraPropertiesItem("propertyOrder", params.PropertySchema.ExtraProperties["propertyOrder"])
 					refOnly.WithExtraPropertiesItem("configurable", false)
-					*propertySchema = refOnly
+					*params.PropertySchema = refOnly
 				}
 				// type is not configurable in here, but maybe be it is within the shared
 				return nil
@@ -108,16 +115,18 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 			ref := fmt.Sprintf("#/$defs/%s", defName)
 			//defID := strings.TrimPrefix(ref, "#/$defs/")
 
-			propertySchema.Ref = nil
-			confDefs[defName] = *propertySchema
+			params.PropertySchema.Ref = nil
+			confDefs[defName] = *params.PropertySchema
 
 			refOnly := jsonschema.Schema{}
 			refOnly.Ref = &ref
 
-			refOnly.WithExtraPropertiesItem("propertyOrder", propertySchema.ExtraProperties["propertyOrder"])
-			*propertySchema = refOnly
+			refOnly.WithExtraPropertiesItem("propertyOrder", params.PropertySchema.ExtraProperties["propertyOrder"])
+			*params.PropertySchema = refOnly
 			return nil
+
 		}),
+
 		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
 			// fires when something is null
 			if params.Type.Kind() == reflect.Array || params.Type.Kind() == reflect.Slice {
@@ -129,8 +138,26 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 
 	// build json path for each definition how it's related to node's root
 	definitionPaths := make(map[string]tagDefinition)
-	for defName, schema := range defs {
-		for k, v := range schema.Properties {
+
+	defNames := make([]string, 0)
+	for k := range defs {
+		defNames = append(defNames, k)
+	}
+	slices.Sort(defNames)
+
+	for _, defName := range defNames {
+		schema := defs[defName]
+
+		propsNames := make([]string, 0)
+		for k := range schema.Properties {
+			propsNames = append(propsNames, k)
+		}
+
+		slices.Sort(propsNames)
+
+		for _, k := range propsNames {
+			v := schema.Properties[k]
+
 			var typ jsonschema.SimpleType
 			if v.TypeObject != nil && v.TypeObject.Type != nil && v.TypeObject.Type.SimpleTypes != nil {
 				typ = *v.TypeObject.Type.SimpleTypes
@@ -156,21 +183,24 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 			definitionPaths[from] = t
 		}
 	}
-	for k, d := range defs {
-		if c, ok := confDefs[k]; ok {
+
+	for _, defName := range defNames {
+		schema := defs[defName]
+
+		if c, ok := confDefs[defName]; ok {
 			// definition is configurable
-			d.Title = c.Title
-			d.Description = c.Description
-			if d.Type == nil {
-				d.Type = c.Type
+			schema.Title = c.Title
+			schema.Description = c.Description
+			if schema.Type == nil {
+				schema.Type = c.Type
 			}
-			d.WithExtraPropertiesItem("configurable", true)
+			schema.WithExtraPropertiesItem("configurable", true)
 		}
 
-		path := strings.Join(reverse(append(getPath(k, definitionPaths, []string{}), "$")), ".")
+		path := strings.Join(reverse(append(getPath(defName, definitionPaths, []string{}), "$")), ".")
 		//	add json path to each definition
-		updated := d.WithExtraPropertiesItem("path", path)
-		defs[k] = *updated
+		updated := schema.WithExtraPropertiesItem("path", path)
+		defs[defName] = *updated
 	}
 
 	sh.WithExtraPropertiesItem("$defs", defs)

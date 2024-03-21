@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"net"
-	"time"
 )
 
 // Server receive api requests from other modules and sends it to scheduler
@@ -43,7 +42,7 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 	//
 	modulepb.RegisterModuleServiceServer(server, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
-		ctx, cancel := context.WithTimeout(ctx, time.Second*3)
+		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
 		err := handler(ctx, &runner.Msg{
@@ -52,9 +51,9 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 			Data:   req.Payload,
 			From:   req.From,
 		})
-
 		return &modulepb.MessageResponse{}, err
 	}))
+
 	reflection.Register(server)
 
 	lis, err := net.Listen("tcp", listenAddr)
@@ -67,12 +66,7 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 
 	wg.Go(func() error {
 		// run grpc server
-		err = server.Serve(lis)
-		if err != nil {
-			//
-			return err
-		}
-		return nil
+		return server.Serve(lis)
 	})
 
 	<-ctx.Done()

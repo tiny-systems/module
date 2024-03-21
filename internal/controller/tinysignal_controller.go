@@ -56,7 +56,7 @@ type TinySignalReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
-	//l.Info("reconcile", "tinysignal", req.Name)
+	l.Info("reconcile", "tinysignal", req.Name)
 	// tiny signal names after name of node it's signaling to
 
 	// to avoid making many queries to Kubernetes API we check name itself against current module
@@ -68,7 +68,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if m != r.Module.GetMajorNameSanitised() {
 		// not we are
-		l.Info("signal is not for current module: %s %s", m, r.Module.GetMajorNameSanitised())
+		l.Info("signal is not for the current module", "module", m, "current", r.Module.GetMajorNameSanitised())
 		return reconcile.Result{}, nil
 	}
 
@@ -83,17 +83,17 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return reconcile.Result{}, err
 	}
 
-	// send signal
-	l.Info("signal invoking", "node", signal.Spec.Node, "port", signal.Spec.Port)
+	if signal.Spec.Port == module.ReconcilePort {
+		_ = r.Delete(ctx, signal)
+		return ctrl.Result{}, nil
+	}
 
-	go func() {
-		if err = r.Scheduler.Handle(context.Background(), &runner.Msg{
-			To:   utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
-			Data: signal.Spec.Data,
-		}); err != nil {
-			l.Error(err, "invoke error")
-		}
-	}()
+	if err = r.Scheduler.HandleInternal(ctx, &runner.Msg{
+		To:   utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
+		Data: signal.Spec.Data,
+	}); err != nil {
+		l.Error(err, "invoke error")
+	}
 
 	_ = r.Delete(ctx, signal)
 	return ctrl.Result{}, nil

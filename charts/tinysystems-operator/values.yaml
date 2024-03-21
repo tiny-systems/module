@@ -31,8 +31,7 @@ controllerManager:
       capabilities:
         drop:
         - ALL
-    env:
-      uptraceDsn: ""
+    env: {}
     image:
       repository: registry.gitlab.com/tiny-systems/public-containers/controller
       tag: latest
