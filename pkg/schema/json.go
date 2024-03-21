@@ -3,7 +3,7 @@ package schema
 import (
 	"fmt"
 	"github.com/goccy/go-json"
-	"github.com/tiny-systems/module/pkg/jsonschema-go"
+	"github.com/swaggest/jsonschema-go"
 	"golang.org/x/exp/slices"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"

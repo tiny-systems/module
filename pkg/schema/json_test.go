@@ -2,8 +2,8 @@ package schema
 
 import (
 	"github.com/google/go-cmp/cmp"
+	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/module"
-	"github.com/tiny-systems/module/pkg/jsonschema-go"
 	"testing"
 )
 
