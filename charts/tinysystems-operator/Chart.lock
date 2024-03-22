@@ -1,6 +1,6 @@
 dependencies:
 - name: tinysystems-crd
   repository: https://tiny-systems.github.io/module
-  version: 0.1.16
-digest: sha256:a775bdd7d5df83a155b700b639c36468665ad6a941e6272fee83e1d0e3aac3b0
-generated: "2024-01-03T23:31:45.614342Z"
+  version: 0.1.18
+digest: sha256:7687eed820d85ba88a0cea1eb4ca3d08ec7ee15c99369140844e30145ab6dc95
+generated: "2024-03-22T00:19:35.736642Z"
