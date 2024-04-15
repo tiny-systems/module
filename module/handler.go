@@ -1,3 +1,5 @@
 package module
 
-type Handler func(port string, data interface{}) error
+import "context"
+
+type Handler func(ctx context.Context, port string, data interface{}) error

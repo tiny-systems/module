@@ -42,9 +42,10 @@ type Schedule struct {
 	// registered components map
 	componentsMap cmap.ConcurrentMap[string, module.Component]
 	//
-	cancelFuncs cmap.ConcurrentMap[string, context.CancelFunc]
+	//cancelFuncs cmap.ConcurrentMap[string, context.CancelFunc]
 	// instances map
 	instancesMap cmap.ConcurrentMap[string, *runner.Runner]
+
 	// K8s resource manager pass over to runners
 	manager resource.ManagerInterface
 	// open telemetry tracer
@@ -52,22 +53,21 @@ type Schedule struct {
 	// open telemetry metric meter
 	meter metric.Meter
 
+	tracker tracker.Manager
+
 	// meant to be for all background processes
 	errGroup *errgroup.Group
 	// pretty much self-explanatory
 	outsideHandler runner.Handler
-	//
-	callbacks []tracker.Callback
 }
 
-func New(outsideHandler runner.Handler, callbacks ...tracker.Callback) *Schedule {
+func New(outsideHandler runner.Handler) *Schedule {
 	return &Schedule{
-		instancesMap:   cmap.New[*runner.Runner](),
-		componentsMap:  cmap.New[module.Component](),
-		cancelFuncs:    cmap.New[context.CancelFunc](),
+		instancesMap:  cmap.New[*runner.Runner](),
+		componentsMap: cmap.New[module.Component](),
+		//cancelFuncs:    cmap.New[context.CancelFunc](),
 		errGroup:       &errgroup.Group{},
 		outsideHandler: outsideHandler,
-		callbacks:      callbacks,
 	}
 }
 
@@ -88,6 +88,11 @@ func (s *Schedule) SetMeter(m metric.Meter) *Schedule {
 
 func (s *Schedule) SetTracer(t trace.Tracer) *Schedule {
 	s.tracer = t
+	return s
+}
+
+func (s *Schedule) SetTracker(t tracker.Manager) *Schedule {
+	s.tracker = t
 	return s
 }
 
@@ -139,16 +144,6 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 }
 
 func (s *Schedule) send(ctx context.Context, instance *runner.Runner, msg *runner.Msg) error {
-	if cf, ok := s.cancelFuncs.Get(msg.To); ok {
-		// cancel previous request
-		cf()
-	}
-	// run again
-	ctx, cancel := context.WithCancel(ctx)
-	s.cancelFuncs.Set(msg.To, cancel)
-
-	defer s.cancelFuncs.Remove(msg.To)
-
 	return instance.Input(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) error {
 		return s.handleOutput(outCtx, instance, outMsg)
 	})
@@ -165,23 +160,13 @@ func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner,
 			return fmt.Errorf("create signal error: %v", err)
 		}
 	}
-
-	for _, callback := range s.callbacks {
-		callback(tracker.PortMsg{
-			NodeName: node.Name,
-			EdgeID:   outMsg.EdgeID,
-			PortName: outMsg.From, // INPUT PORT OF THE NODE
-			Data:     outMsg.Data,
-			FlowID:   node.Labels[v1alpha1.FlowIDLabel],
-		})
-	}
 	return s.outsideHandler(outCtx, outMsg)
 }
 
 func (s *Schedule) Destroy(name string) error {
 	s.log.Info("destroy", "node", name)
 	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
-		// remove from map
+		// remove from map first so no one can access it
 		s.instancesMap.Remove(name)
 		instance.Cancel()
 	}
@@ -206,6 +191,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 		runnerInstance = runner.NewRunner(node.Name, cmpInstance).
 			SetLogger(s.log).
 			SetTracer(s.tracer).
+			SetTracker(s.tracker).
 			SetMeter(s.meter)
 
 		s.errGroup.Go(func() error {
@@ -220,12 +206,13 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 		// backup node instance had before
 		nodeBackup = runnerInstance.Node()
 	)
-	// try new node
+	// update instance
+
 	runnerInstance.SetNode(*node.DeepCopy())
+
 	var err = new(atomic.Error)
 
 	s.errGroup.Go(func() error {
-
 		err.Store(s.send(context.Background(), runnerInstance, &runner.Msg{
 			To:   utils.GetPortFullName(node.Name, module.SettingsPort),
 			Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config

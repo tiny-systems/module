@@ -15,8 +15,9 @@ import (
 type Metric string
 
 const (
-	MetricEdgeMsgIn  = "tiny.edge.msg.in"
-	MetricEdgeMsgOut = "tiny.edge.msg.out"
+	MetricNodeMsgIn  Metric = "tiny.node.msg.in"
+	MetricNodeMsgOut        = "tiny.node.msg.out"
+	MetricEdgeBusy          = "tiny.edge.busy"
 )
 
 // ConfigureOpenTelemetry configures OpenTelemetry.
@@ -65,6 +66,8 @@ func ConfigureOpenTelemetry(opts ...Option) error {
 }
 
 func configurePropagator(conf *config) {
+	conf.traceSampler = sdktrace.AlwaysSample()
+
 	textMapPropagator := conf.textMapPropagator
 	if textMapPropagator == nil {
 		textMapPropagator = propagation.NewCompositeTextMapPropagator(

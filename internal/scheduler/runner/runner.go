@@ -10,6 +10,7 @@ import (
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
@@ -23,6 +24,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"time"
 )
 
 type Runner struct {
@@ -36,11 +38,14 @@ type Runner struct {
 	// to control K8s resources
 
 	closeCh chan struct{}
-	//
 
 	node v1alpha1.TinyNode
+
+	ports m.NodePort
+
 	//
-	tracer trace.Tracer
+	tracer  trace.Tracer
+	tracker tracker.Manager
 
 	meter    metric.Meter
 	nodeLock *sync.Mutex
@@ -51,13 +56,17 @@ func NewRunner(name string, component m.Component) *Runner {
 		name:      name,
 		component: component,
 		nodeLock:  &sync.Mutex{},
-		//
-		closeCh: make(chan struct{}),
+		closeCh:   make(chan struct{}),
 	}
 }
 
 func (c *Runner) SetTracer(t trace.Tracer) *Runner {
 	c.tracer = t
+	return c
+}
+
+func (c *Runner) SetTracker(t tracker.Manager) *Runner {
+	c.tracker = t
 	return c
 }
 
@@ -154,12 +163,6 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 			if err == nil {
 				schemaData, _ := schemaConf.MarshalJSON()
-				fmt.Println()
-				fmt.Println()
-				fmt.Println()
-				fmt.Println(c.name, np.Name)
-				fmt.Println(string(schemaData))
-
 				portStatus.Schema = schemaData
 			} else {
 				c.log.Error(err, "create schema error")
@@ -205,11 +208,8 @@ func (c *Runner) getPortConfig(from string, port string) *v1alpha1.TinyNodePortC
 
 // Input processes input to the inherited component
 // applies port config for the given port if any
-func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) error {
+func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (err error) {
 	_, port := utils.ParseFullPortName(msg.To)
-
-	c.incMetricCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
-	defer c.incMetricCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgOut)
 
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
@@ -234,14 +234,18 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) err
 	var (
 		portConfig = c.getPortConfig(msg.From, port)
 		portData   interface{}
-		err        error
+		data       []byte
 	)
 
-	ctx, span := c.tracer.Start(ctx, msg.EdgeID, trace.WithAttributes(
-		attribute.String("node", c.name),
-		attribute.String("port", port)),
-	)
-	defer span.End()
+	ctx, span := c.tracer.Start(ctx, msg.EdgeID)
+
+	defer func() {
+		if err != nil {
+			span.RecordError(err, trace.WithStackTrace(true))
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
 
 	if portConfig != nil && len(portConfig.Configuration) > 0 {
 		// create config
@@ -272,38 +276,47 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) err
 		}
 
 		// all good, we can say that's the data for incoming port
-		// adapt
-		err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
+		// adaptive
+		data, err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
 		if err != nil {
 			return errors.Wrap(err, "map decode from config map to port input type")
 		}
 		portData = portInputData.Interface()
 
 	} else {
-		//
-		portData = nodePort.Configuration
+
+		data, err = json.Marshal(nodePort.Configuration)
 		if err != nil {
-			return errors.Wrap(err, "unable to encode port data")
+			return fmt.Errorf("unable to encode nodeport configuration: %v", err)
 		}
+		portData = nodePort.Configuration
+	}
+
+	// send span data only is tracker is on
+	if c.tracker.Active(c.Node().Labels[v1alpha1.FlowIDLabel]) {
+		span.AddEvent("data", trace.WithAttributes(attribute.String("payload", string(data))))
 	}
 
 	err = errorpanic.Wrap(func() error {
 		// panic safe
 		c.log.Info("component call", "port", port, "node", c.name)
+		c.setGauge(1, msg.EdgeID, metrics.MetricEdgeBusy)
 
-		return c.component.Handle(ctx, func(outputPort string, outputData interface{}) error {
+		defer func() {
+			c.setGauge(0, msg.EdgeID, metrics.MetricEdgeBusy)
+		}()
+
+		return c.component.Handle(ctx, func(ctx context.Context, outputPort string, outputData interface{}) error {
 			c.log.Info("component callback handler", "port", outputPort, "node", c.name)
-			if e := c.outputHandler(ctx, outputPort, outputData, outputHandler); e != nil {
-				c.log.Error(e, "handler output error", "name", c.name)
+
+			if err = c.outputHandler(ctx, outputPort, outputData, outputHandler); err != nil {
+				c.log.Error(err, "handler output error", "name", c.name)
+				return err
 			}
 			return err
 		}, port, portData)
 	})
 
-	if err != nil {
-		span.RecordError(err, trace.WithStackTrace(true))
-		span.SetStatus(codes.Error, err.Error())
-	}
 	return err
 }
 
@@ -322,16 +335,7 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) {
 }
 
 // Cancel cancels all ongoing requests
-// safe to call more than once
 func (c *Runner) Cancel() {
-	var ok = true
-	select {
-	case _, ok = <-c.closeCh:
-	default:
-	}
-	if !ok {
-		return
-	}
 	close(c.closeCh)
 }
 
@@ -385,18 +389,52 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	return wg.Wait()
 }
 
-func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
+func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) ([]byte, error) {
 	b, err := json.Marshal(input)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return json.Unmarshal(b, output)
+	return b, json.Unmarshal(b, output)
 }
 
-func (c *Runner) incMetricCounter(ctx context.Context, val int64, name string, m metrics.Metric) {
+//Int64UpDownCounter
+
+func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 	if name == "" {
 		return
 	}
+	gauge, _ := c.meter.Int64ObservableGauge(string(m),
+		metric.WithUnit("1"),
+	)
+
+	var (
+		r   metric.Registration
+		err error
+	)
+
+	if r, err = c.meter.RegisterCallback(
+		func(ctx context.Context, o metric.Observer) error {
+			o.ObserveInt64(gauge, val,
+				metric.WithAttributes(
+					attribute.String("element", name),
+					attribute.String("flowID", c.Node().Labels[v1alpha1.FlowIDLabel])),
+			)
+			return nil
+		},
+		gauge,
+	); err != nil {
+		c.log.Error(err, "metric gauge err")
+		return
+	}
+
+	go func() {
+		time.Sleep(time.Second)
+		_ = r.Unregister()
+	}()
+}
+
+func (c *Runner) incCounter(ctx context.Context, val int64, port string, m metrics.Metric) {
+
 	counter, err := c.meter.Int64Counter(
 		string(m),
 		metric.WithUnit("1"),
@@ -408,7 +446,8 @@ func (c *Runner) incMetricCounter(ctx context.Context, val int64, name string, m
 
 	var attrs = []metric.AddOption{
 		metric.WithAttributes(
-			attribute.String("element", name),
+			attribute.String("element", c.name),
+			attribute.String("port", port),
 			attribute.String("flowID", c.Node().Labels[v1alpha1.FlowIDLabel]),
 		),
 	}
