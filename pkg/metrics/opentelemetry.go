@@ -22,7 +22,7 @@ func configureMetrics(ctx context.Context, client *client, conf *config) error {
 
 	reader := sdkmetric.NewPeriodicReader(
 		exp,
-		sdkmetric.WithInterval(5000*time.Millisecond),
+		sdkmetric.WithInterval(time.Second),
 	)
 
 	providerOptions := append(conf.metricOptions,
@@ -44,9 +44,7 @@ func configureMetrics(ctx context.Context, client *client, conf *config) error {
 func otlpMetricClient(ctx context.Context, conf *config, dsn *DSN) (sdkmetric.Exporter, error) {
 	options := []otlpmetricgrpc.Option{
 		otlpmetricgrpc.WithEndpoint(dsn.OTLPEndpoint()),
-		otlpmetricgrpc.WithHeaders(map[string]string{
-			"original-dsn": dsn.String(),
-		}),
+		otlpmetricgrpc.WithHeaders(map[string]string{}),
 		otlpmetricgrpc.WithCompressor(gzip.Name),
 		otlpmetricgrpc.WithTemporalitySelector(preferDeltaTemporalitySelector),
 	}
@@ -66,8 +64,11 @@ func otlpMetricClient(ctx context.Context, conf *config, dsn *DSN) (sdkmetric.Ex
 }
 
 func preferDeltaTemporalitySelector(kind sdkmetric.InstrumentKind) metricdata.Temporality {
+	return metricdata.DeltaTemporality
+
 	switch kind {
 	case sdkmetric.InstrumentKindCounter,
+		sdkmetric.InstrumentKindObservableUpDownCounter,
 		sdkmetric.InstrumentKindObservableCounter,
 		sdkmetric.InstrumentKindHistogram:
 		return metricdata.DeltaTemporality

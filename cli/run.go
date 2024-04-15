@@ -60,11 +60,19 @@ var runCmd = &cobra.Command{
 			metrics.WithDSN(os.Getenv("OTLP_DSN")),
 		)
 
-		// Send buffered spans and free resources.
-		defer metrics.Shutdown(context.Background())
-
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
+
+		// Send buffered spans and free resources.
+		defer func() {
+			ctx := context.Background()
+			if err := metrics.ForceFlush(ctx); err != nil {
+				l.Error(err, "force flush metrics")
+			}
+			if err := metrics.Shutdown(ctx); err != nil {
+				l.Error(err, "shutdown metrics")
+			}
+		}()
 
 		defer func() {
 			if r := recover(); r != nil {
@@ -172,15 +180,10 @@ var runCmd = &cobra.Command{
 			}
 			// gRPC call
 			return pool.Handler(ctx, msg)
-		}, func(msg tracker.PortMsg) {
-
-			go func() {
-				// @todo add pool
-				trackManager.Track(ctx, msg)
-			}()
 		}).
 			SetLogger(l).
 			SetMeter(meter).
+			SetTracker(trackManager).
 			SetTracer(tracer).
 			SetManager(resourceManager)
 

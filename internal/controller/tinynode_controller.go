@@ -100,7 +100,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// upsert in scheduler
-	err = r.Scheduler.Update(ctx, node)
+	err = r.Scheduler.Update(context.Background(), node)
 	if err != nil {
 		l.Error(err, "scheduler upsert error")
 		status.Error = true

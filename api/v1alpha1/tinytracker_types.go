@@ -26,33 +26,14 @@ import (
 type TinyTrackerPortDataWebhook struct {
 	FlowID string `json:"flowID"`
 
-	// URL of the POST request
-	URL string `json:"url,omitempty"`
-
-	//Interval send requests not often than interval
-	Interval metav1.Duration `json:"interval"`
-
 	//Do not send data bigger than below
 	MaxDataSize int `json:"maxDataSize"`
-}
-
-type TinyTrackerStatisticsWebhook struct {
-	FlowID string `json:"flowID"`
-
-	// URL of the POST request
-	URL string `json:"url,omitempty"`
-
-	//Interval send requests not often than interval
-	Interval metav1.Duration `json:"interval"`
 }
 
 // TinyTrackerSpec defines the desired state of Tracker
 type TinyTrackerSpec struct {
 	// +kubebuilder:validation:Optional
 	PortDataWebhook *TinyTrackerPortDataWebhook `json:"portDataWebhook"`
-
-	// +kubebuilder:validation:Optional
-	NodeStatisticsWebhook *TinyTrackerStatisticsWebhook `json:"nodeStatisticsWebhook"`
 }
 
 // TinyTrackerStatus defines the observed state of TinyTracker

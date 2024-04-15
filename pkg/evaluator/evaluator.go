@@ -32,11 +32,7 @@ func (c *Evaluator) calculateResult(valNode *ajson.Node) (interface{}, error) {
 			if expression, ok := o["expression"]; ok {
 				if expr, _ := expression.GetString(); expr != "" {
 					// if expression exists - calculate it
-					res, err := c.callback(expr)
-					if err == nil {
-						// replace by callback
-						return res, nil
-					}
+					return c.callback(expr)
 				}
 				var ok bool
 				if valNode, ok = o["value"]; ok {

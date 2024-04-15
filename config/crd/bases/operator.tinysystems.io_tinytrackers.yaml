@@ -34,36 +34,15 @@ spec:
           spec:
             description: TinyTrackerSpec defines the desired state of Tracker
             properties:
-              nodeStatisticsWebhook:
-                properties:
-                  flowID:
-                    type: string
-                  interval:
-                    description: Interval send requests not often than interval
-                    type: string
-                  url:
-                    description: URL of the POST request
-                    type: string
-                required:
-                - flowID
-                - interval
-                type: object
               portDataWebhook:
                 properties:
                   flowID:
                     type: string
-                  interval:
-                    description: Interval send requests not often than interval
-                    type: string
                   maxDataSize:
                     description: Do not send data bigger than below
                     type: integer
-                  url:
-                    description: URL of the POST request
-                    type: string
                 required:
                 - flowID
-                - interval
                 - maxDataSize
                 type: object
             type: object
