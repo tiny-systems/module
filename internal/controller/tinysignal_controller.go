@@ -84,13 +84,16 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if signal.Spec.Port == module.ReconcilePort {
+		// we do not use signals for reconcile directly
 		_ = r.Delete(ctx, signal)
 		return ctrl.Result{}, nil
 	}
 
-	if err = r.Scheduler.HandleInternal(ctx, &runner.Msg{
-		To:   utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
-		Data: signal.Spec.Data,
+	// todo add app level context
+	if err = r.Scheduler.HandleInternal(context.Background(), &runner.Msg{
+		EdgeID: utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
+		To:     utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
+		Data:   signal.Spec.Data,
 	}); err != nil {
 		l.Error(err, "invoke error")
 	}

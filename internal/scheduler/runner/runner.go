@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/go-logr/logr"
 	"github.com/goccy/go-json"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
 	"github.com/swaggest/jsonschema-go"
@@ -31,6 +32,9 @@ type Runner struct {
 	// unique instance name
 
 	name string
+
+	flowID string
+
 	// underlying component
 	component m.Component
 	//
@@ -41,22 +45,28 @@ type Runner struct {
 
 	node v1alpha1.TinyNode
 
-	ports m.NodePort
+	//
+	portsCache     []m.NodePort
+	portsCacheLock *sync.RWMutex
 
 	//
 	tracer  trace.Tracer
 	tracker tracker.Manager
 
-	meter    metric.Meter
+	meter metric.Meter
+	//
 	nodeLock *sync.Mutex
+
+	previousSettings interface{}
 }
 
 func NewRunner(name string, component m.Component) *Runner {
 	return &Runner{
-		name:      name,
-		component: component,
-		nodeLock:  &sync.Mutex{},
-		closeCh:   make(chan struct{}),
+		name:           name,
+		component:      component,
+		nodeLock:       &sync.Mutex{},
+		closeCh:        make(chan struct{}),
+		portsCacheLock: &sync.RWMutex{},
 	}
 }
 
@@ -80,8 +90,22 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 	return c
 }
 
-func (c *Runner) Component() m.Component {
-	return c.component
+func (c *Runner) getPorts() []m.NodePort {
+	c.portsCacheLock.RLock()
+	defer c.portsCacheLock.RUnlock()
+
+	if c.portsCache != nil {
+		return c.portsCache
+	}
+	return c.component.Ports()
+}
+
+func (c *Runner) getUpdatePorts() []m.NodePort {
+	c.portsCacheLock.Lock()
+	defer c.portsCacheLock.Unlock()
+
+	c.portsCache = c.component.Ports()
+	return c.portsCache
 }
 
 // UpdateStatus apply status changes
@@ -89,7 +113,7 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 	var ports []m.NodePort
 	// trim system ports
-	for _, p := range c.component.Ports() {
+	for _, p := range c.getUpdatePorts() {
 		if p.Name == m.HttpPort {
 			continue
 		}
@@ -219,7 +243,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	}()
 
 	var nodePort *m.NodePort
-	for _, p := range c.component.Ports() {
+	for _, p := range c.getPorts() {
 		if p.Name == port {
 			nodePort = &p
 			break
@@ -234,18 +258,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	var (
 		portConfig = c.getPortConfig(msg.From, port)
 		portData   interface{}
-		data       []byte
 	)
-
-	ctx, span := c.tracer.Start(ctx, msg.EdgeID)
-
-	defer func() {
-		if err != nil {
-			span.RecordError(err, trace.WithStackTrace(true))
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-	}()
 
 	if portConfig != nil && len(portConfig.Configuration) > 0 {
 		// create config
@@ -274,46 +287,94 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		if err != nil {
 			return errors.Wrap(err, "eval port edge settings config")
 		}
-
 		// all good, we can say that's the data for incoming port
 		// adaptive
-		data, err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface())
-		if err != nil {
+		if err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface()); err != nil {
 			return errors.Wrap(err, "map decode from config map to port input type")
 		}
 		portData = portInputData.Interface()
 
 	} else {
-
-		data, err = json.Marshal(nodePort.Configuration)
-		if err != nil {
-			return fmt.Errorf("unable to encode nodeport configuration: %v", err)
-		}
 		portData = nodePort.Configuration
 	}
 
+	////
+	if port == m.SettingsPort {
+		if portData == c.previousSettings {
+			// check cache, we do not want to update settings if they did not change
+			return nil
+		}
+		c.previousSettings = portData
+	}
+
+	u, err := uuid.NewUUID()
+	if err != nil {
+		return err
+	}
+
+	ctx, inputSpan := c.tracer.Start(ctx, u.String(),
+		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
+		trace.WithAttributes(attribute.String("from", msg.From)),
+		trace.WithAttributes(attribute.String("flowID", c.flowID)),
+	)
+
+	defer func() {
+		if err != nil {
+			c.addSpanError(inputSpan, err)
+		}
+		inputSpan.End()
+	}()
+
 	// send span data only is tracker is on
-	if c.tracker.Active(c.Node().Labels[v1alpha1.FlowIDLabel]) {
-		span.AddEvent("data", trace.WithAttributes(attribute.String("payload", string(data))))
+	if c.tracker.Active(c.flowID) {
+		inputData, _ := json.Marshal(portData)
+		c.addSpanPortData(inputSpan, string(inputData))
 	}
 
 	err = errorpanic.Wrap(func() error {
 		// panic safe
 		c.log.Info("component call", "port", port, "node", c.name)
-		c.setGauge(1, msg.EdgeID, metrics.MetricEdgeBusy)
+		c.incCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
 
 		defer func() {
-			c.setGauge(0, msg.EdgeID, metrics.MetricEdgeBusy)
+			c.incCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgOut)
 		}()
 
-		return c.component.Handle(ctx, func(ctx context.Context, outputPort string, outputData interface{}) error {
+		return c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData interface{}) error {
 			c.log.Info("component callback handler", "port", outputPort, "node", c.name)
 
-			if err = c.outputHandler(ctx, outputPort, outputData, outputHandler); err != nil {
-				c.log.Error(err, "handler output error", "name", c.name)
+			if outputPort == m.ReconcilePort {
+				// system ports have no edges connected to it so send empty signal outside
+				return outputHandler(ctx, &Msg{
+					To: utils.GetPortFullName(c.name, outputPort),
+				})
+			}
+
+			u, err := uuid.NewUUID()
+			if err != nil {
 				return err
 			}
-			return err
+
+			outputCtx, outputSpan := c.tracer.Start(outputCtx, u.String(), trace.WithAttributes(attribute.String("port", utils.GetPortFullName(c.name, outputPort))))
+
+			outputSpan.SetAttributes(attribute.KeyValue{
+				Key:   "flowID",
+				Value: attribute.StringValue(c.flowID),
+			})
+
+			defer outputSpan.End()
+
+			// send span data only is tracker is on
+			if c.tracker.Active(c.flowID) {
+				outputDataBytes, _ := json.Marshal(outputData)
+				c.addSpanPortData(outputSpan, string(outputDataBytes))
+			}
+
+			// requests have app level context (not a request level)
+			if err = c.outputHandler(trace.ContextWithSpanContext(ctx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler); err != nil {
+				c.addSpanError(outputSpan, err)
+			}
+			return nil
 		}, port, portData)
 	})
 
@@ -330,7 +391,8 @@ func (c *Runner) Node() v1alpha1.TinyNode {
 func (c *Runner) SetNode(node v1alpha1.TinyNode) {
 	c.nodeLock.Lock()
 	defer c.nodeLock.Unlock()
-
+	//
+	c.flowID = node.Labels[v1alpha1.FlowIDLabel]
 	c.node = node
 }
 
@@ -340,13 +402,6 @@ func (c *Runner) Cancel() {
 }
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) error {
-
-	// system ports have no edges connected to it so send empty signal outside
-	if port == m.ReconcilePort {
-		return handler(ctx, &Msg{
-			To: utils.GetPortFullName(c.name, port),
-		})
-	}
 
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
@@ -389,12 +444,12 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	return wg.Wait()
 }
 
-func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) ([]byte, error) {
+func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 	b, err := json.Marshal(input)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return b, json.Unmarshal(b, output)
+	return json.Unmarshal(b, output)
 }
 
 //Int64UpDownCounter
@@ -407,22 +462,19 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 		metric.WithUnit("1"),
 	)
 
-	var (
-		r   metric.Registration
-		err error
-	)
-
-	if r, err = c.meter.RegisterCallback(
+	r, err := c.meter.RegisterCallback(
 		func(ctx context.Context, o metric.Observer) error {
 			o.ObserveInt64(gauge, val,
 				metric.WithAttributes(
 					attribute.String("element", name),
-					attribute.String("flowID", c.Node().Labels[v1alpha1.FlowIDLabel])),
-			)
+					attribute.String("flowID", c.flowID),
+				))
 			return nil
 		},
 		gauge,
-	); err != nil {
+	)
+
+	if err != nil {
 		c.log.Error(err, "metric gauge err")
 		return
 	}
@@ -433,7 +485,11 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 	}()
 }
 
-func (c *Runner) incCounter(ctx context.Context, val int64, port string, m metrics.Metric) {
+func (c *Runner) incCounter(ctx context.Context, val int64, element string, m metrics.Metric) {
+
+	if element == "" {
+		return
+	}
 
 	counter, err := c.meter.Int64Counter(
 		string(m),
@@ -446,10 +502,20 @@ func (c *Runner) incCounter(ctx context.Context, val int64, port string, m metri
 
 	var attrs = []metric.AddOption{
 		metric.WithAttributes(
-			attribute.String("element", c.name),
-			attribute.String("port", port),
-			attribute.String("flowID", c.Node().Labels[v1alpha1.FlowIDLabel]),
+			attribute.String("element", element),
+			attribute.String("flowID", c.flowID),
+			attribute.String("metric", string(m)),
 		),
 	}
 	counter.Add(ctx, val, attrs...)
+}
+
+func (c *Runner) addSpanError(span trace.Span, err error) {
+	span.RecordError(err, trace.WithStackTrace(true))
+	span.SetStatus(codes.Error, err.Error())
+}
+
+func (c *Runner) addSpanPortData(span trace.Span, data string) {
+	span.AddEvent("data",
+		trace.WithAttributes(attribute.String("payload", data)))
 }

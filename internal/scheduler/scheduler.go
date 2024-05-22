@@ -29,7 +29,7 @@ type Scheduler interface {
 	//Handle sync incoming call
 
 	Handle(ctx context.Context, msg *runner.Msg) error
-	//HandleInternal same as Handle but does not wait until port unblock and does not fallback msg outside
+	//HandleInternal same as Handle but does not wait until port unblock and does not fall back msg outside
 	HandleInternal(ctx context.Context, msg *runner.Msg) error
 	//Destroy stops the instance and deletes it
 	Destroy(name string) error
@@ -42,7 +42,6 @@ type Schedule struct {
 	// registered components map
 	componentsMap cmap.ConcurrentMap[string, module.Component]
 	//
-	//cancelFuncs cmap.ConcurrentMap[string, context.CancelFunc]
 	// instances map
 	instancesMap cmap.ConcurrentMap[string, *runner.Runner]
 
@@ -63,9 +62,8 @@ type Schedule struct {
 
 func New(outsideHandler runner.Handler) *Schedule {
 	return &Schedule{
-		instancesMap:  cmap.New[*runner.Runner](),
-		componentsMap: cmap.New[module.Component](),
-		//cancelFuncs:    cmap.New[context.CancelFunc](),
+		instancesMap:   cmap.New[*runner.Runner](),
+		componentsMap:  cmap.New[module.Component](),
 		errGroup:       &errgroup.Group{},
 		outsideHandler: outsideHandler,
 	}
@@ -179,7 +177,6 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	if !ok {
 		return fmt.Errorf("component %s is not registered", node.Spec.Component)
 	}
-
 	runnerInstance := s.instancesMap.Upsert(node.Name, nil, func(exist bool, runnerInstance *runner.Runner, _ *runner.Runner) *runner.Runner {
 		//
 		if exist {
@@ -209,13 +206,13 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	// update instance
 
 	runnerInstance.SetNode(*node.DeepCopy())
-
-	var err = new(atomic.Error)
+	var atomicErr = new(atomic.Error)
 
 	s.errGroup.Go(func() error {
-		err.Store(s.send(context.Background(), runnerInstance, &runner.Msg{
-			To:   utils.GetPortFullName(node.Name, module.SettingsPort),
-			Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config
+		atomicErr.Store(s.send(ctx, runnerInstance, &runner.Msg{
+			EdgeID: utils.GetPortFullName(node.Name, module.SettingsPort),
+			To:     utils.GetPortFullName(node.Name, module.SettingsPort),
+			Data:   []byte("{}"), // no external data sent to port, rely solely on a node's port config
 		}))
 		// configure port errors should not fail the entire error group
 		return nil
@@ -223,13 +220,18 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 
 	// give time to node update itself or fail
 	time.Sleep(time.Millisecond * 3 * 100)
-	if err.Load() != nil {
+
+	var err = runnerInstance.UpdateStatus(&node.Status)
+
+	if atomicErr.Load() != nil {
 		// set previous node state to the scheduler because configuration did not end well
 		runnerInstance.SetNode(nodeBackup)
-	}
 
+		node.Status.Status = atomicErr.Load().Error()
+		node.Status.Error = true
+	}
 	// do we need to rebuild status in case of rollback?
-	return runnerInstance.UpdateStatus(&node.Status)
+	return err
 }
 
 func (s *Schedule) initInstance(ctx context.Context, node *v1alpha1.TinyNode, componentInstance module.Component) error {
