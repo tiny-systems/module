@@ -39,6 +39,7 @@ func (t *manager) Deregister(name string) error {
 	for k, v := range t.trackers {
 		if name == v.Name {
 			t.trackers = utils.RemoveSliceElement(t.trackers, k)
+			break
 		}
 	}
 	return nil

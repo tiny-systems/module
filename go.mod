@@ -99,6 +99,7 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
+	github.com/bep/debounce v1.2.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/deepmap/oapi-codegen v1.15.0 // indirect
 	github.com/distribution/reference v0.5.0 // indirect
@@ -124,6 +125,7 @@ require (
 	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/swaggest/refl v1.3.0 // indirect
+	github.com/zmwangx/debounce v1.0.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	golang.org/x/tools v0.17.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20231106174013-bbf56f31fb17 // indirect

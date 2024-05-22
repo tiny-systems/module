@@ -100,6 +100,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// upsert in scheduler
+	// todo add app level context
 	err = r.Scheduler.Update(context.Background(), node)
 	if err != nil {
 		l.Error(err, "scheduler upsert error")
