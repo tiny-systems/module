@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/go-logr/logr"
 	"github.com/goccy/go-json"
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
@@ -300,7 +301,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	////
 	if port == m.SettingsPort {
-		if portData == c.previousSettings {
+		if cmp.Equal(portData, c.previousSettings) {
 			// check cache, we do not want to update settings if they did not change
 			return nil
 		}
