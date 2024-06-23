@@ -139,11 +139,13 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 	// build json path for each definition how it's related to node's root
 	definitionPaths := make(map[string]tagDefinition)
 
+	// keep the sorting order
 	defNames := make([]string, 0)
 	for k := range defs {
 		defNames = append(defNames, k)
 	}
 	slices.Sort(defNames)
+	//
 
 	for _, defName := range defNames {
 		schema := defs[defName]

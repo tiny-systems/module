@@ -43,7 +43,7 @@ func NewManager(c client.Client, log logr.Logger, ns string) *Manager {
 func (m Manager) CleanupExampleNodes(ctx context.Context, mod module.Info) error {
 	sel := labels.NewSelector()
 
-	req, err := labels.NewRequirement(v1alpha1.FlowIDLabel, selection.Equals, []string{""})
+	req, err := labels.NewRequirement(v1alpha1.ProjectIDLabel, selection.Equals, []string{""})
 	if err != nil {
 		return err
 	}
@@ -419,7 +419,7 @@ func (m Manager) RegisterExampleNode(ctx context.Context, c module.Component, mo
 			Namespace: m.namespace, // @todo make dynamic
 			Name:      module.GetNodeFullName("00000000", mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
 			Labels: map[string]string{
-				v1alpha1.FlowIDLabel:          "", //<-- empty flow means that's a node for palette
+				v1alpha1.ProjectIDLabel:       "", //<-- empty flow means that's a node for the component palette
 				v1alpha1.ModuleNameMajorLabel: mod.GetMajorNameSanitised(),
 				v1alpha1.ModuleVersionLabel:   mod.Version,
 			},

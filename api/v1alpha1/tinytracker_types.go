@@ -23,17 +23,8 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-type TinyTrackerPortDataWebhook struct {
-	FlowID string `json:"flowID"`
-
-	//Do not send data bigger than below
-	MaxDataSize int `json:"maxDataSize"`
-}
-
 // TinyTrackerSpec defines the desired state of Tracker
 type TinyTrackerSpec struct {
-	// +kubebuilder:validation:Optional
-	PortDataWebhook *TinyTrackerPortDataWebhook `json:"portDataWebhook"`
 }
 
 // TinyTrackerStatus defines the observed state of TinyTracker

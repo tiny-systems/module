@@ -33,18 +33,6 @@ spec:
             type: object
           spec:
             description: TinyTrackerSpec defines the desired state of Tracker
-            properties:
-              portDataWebhook:
-                properties:
-                  flowID:
-                    type: string
-                  maxDataSize:
-                    description: Do not send data bigger than below
-                    type: integer
-                required:
-                - flowID
-                - maxDataSize
-                type: object
             type: object
           status:
             description: TinyTrackerStatus defines the observed state of TinyTracker

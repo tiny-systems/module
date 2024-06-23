@@ -21,18 +21,25 @@ import (
 )
 
 const (
-	// flow ID label
+	//FlowIDLabel flow ID k8s label
 	FlowIDLabel = "tinysystems.io/flow-id"
-	// module major version label
+	//ProjectIDLabel project ID k8s label
+	ProjectIDLabel = "tinysystems.io/project-id"
+
+	//ModuleNameMajorLabel module major version label
 	ModuleNameMajorLabel = "tinysystems.io/module-version-major"
-	// module exact version label
+	//ModuleVersionLabel module exact version label
 	ModuleVersionLabel = "tinysystems.io/module-version"
+	DashboardLabel     = "tinysystems.io/dashboard"
 
 	// visual annotations used by platform
+
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
-	CustomLabel                = "tinysystems.io/custom-label"
+	LabelNodeAnnotation        = "tinysystems.io/node-label"
+
+	ExtrasFlowID = "flow-id"
 
 	SuggestedHttpPortAnnotation = "tinysystems.io/suggested-http-port"
 
@@ -79,6 +86,9 @@ type TinyNodeEdge struct {
 	// Other node's full port name
 	// +kubebuilder:validation:Required
 	To string `json:"to"`
+
+	// +kubebuilder:validation:Optional
+	Extras map[string]string `json:"extras,omitempty"`
 }
 
 type TinyNodePortStatus struct {
@@ -105,6 +115,9 @@ type TinyNodePortConfig struct {
 	// +kubebuilder:validation:Optional
 	//Configuration JSON data of the port's configuration
 	Configuration []byte `json:"configuration"`
+
+	// +kubebuilder:validation:Optional
+	Extras map[string]string `json:"extras,omitempty"`
 }
 
 type TinyNodeModuleStatus struct {
