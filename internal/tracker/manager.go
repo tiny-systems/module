@@ -56,10 +56,7 @@ func (t *manager) Active(flowID string) bool {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
 	for _, tt := range t.trackers {
-		if tt.Spec.PortDataWebhook == nil {
-			continue
-		}
-		if tt.Spec.PortDataWebhook.FlowID == flowID {
+		if tt.Labels[v1alpha1.FlowIDLabel] == flowID {
 			return true
 		}
 	}

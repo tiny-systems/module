@@ -41,6 +41,10 @@ spec:
                 description: Edges to send message next
                 items:
                   properties:
+                    extras:
+                      additionalProperties:
+                        type: string
+                      type: object
                     id:
                       description: Edge id
                       type: string
@@ -67,6 +71,10 @@ spec:
                       description: Configuration JSON data of the port's configuration
                       format: byte
                       type: string
+                    extras:
+                      additionalProperties:
+                        type: string
+                      type: object
                     from:
                       description: Settings depend on a sender
                       type: string

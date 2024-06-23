@@ -105,6 +105,10 @@ func (s *Schedule) Install(component module.Component) error {
 // HandleInternal only local and async
 func (s *Schedule) HandleInternal(ctx context.Context, msg *runner.Msg) error {
 	nodeName, _ := utils.ParseFullPortName(msg.To)
+	if nodeName == "" {
+		return fmt.Errorf("node name in `to` is empty")
+	}
+
 	instance, ok := s.instancesMap.Get(nodeName)
 	if !ok {
 		return fmt.Errorf("node %s not found", nodeName)
@@ -148,13 +152,14 @@ func (s *Schedule) send(ctx context.Context, instance *runner.Runner, msg *runne
 }
 
 func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner, outMsg *runner.Msg) error {
-	node := instance.Node()
 	// output
-	_, p := utils.ParseFullPortName(outMsg.To)
-
-	if p == module.ReconcilePort {
+	_, port := utils.ParseFullPortName(outMsg.To)
+	if port == "" {
+		return fmt.Errorf("empty port in handle output")
+	}
+	if port == module.ReconcilePort {
 		// create tiny signal instead which will trigger reconcile
-		if err := s.manager.CreateClusterNodeSignal(context.Background(), node, p, outMsg.Data); err != nil {
+		if err := s.manager.CreateClusterNodeSignal(context.Background(), instance.Node(), port, outMsg.Data); err != nil {
 			return fmt.Errorf("create signal error: %v", err)
 		}
 	}
@@ -177,6 +182,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	if !ok {
 		return fmt.Errorf("component %s is not registered", node.Spec.Component)
 	}
+
 	runnerInstance := s.instancesMap.Upsert(node.Name, nil, func(exist bool, runnerInstance *runner.Runner, _ *runner.Runner) *runner.Runner {
 		//
 		if exist {
@@ -209,6 +215,8 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	var atomicErr = new(atomic.Error)
 
 	s.errGroup.Go(func() error {
+
+		// @todo register instance inn the map only when its settings msg being processed
 		atomicErr.Store(s.send(ctx, runnerInstance, &runner.Msg{
 			EdgeID: utils.GetPortFullName(node.Name, module.SettingsPort),
 			To:     utils.GetPortFullName(node.Name, module.SettingsPort),
@@ -248,6 +256,7 @@ func (s *Schedule) initInstance(ctx context.Context, node *v1alpha1.TinyNode, co
 	return nil
 }
 
+// @todo move to the component
 func (s *Schedule) getAddressGetter(node *v1alpha1.TinyNode) module.ListenAddressGetter {
 
 	var (

@@ -18,11 +18,11 @@ func ParseFullPortName(name string) (node string, port string) {
 		return
 	}
 
-	if len(parts) > 0 {
-		node = parts[0]
-	}
 	if len(parts) > 1 {
 		port = parts[1]
+		node = parts[0]
+	} else if len(parts) > 0 {
+		port = parts[0]
 	}
 	return
 }

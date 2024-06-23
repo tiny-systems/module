@@ -147,6 +147,7 @@ _Appears in:_
 | `id` _string_ | Edge id |
 | `port` _string_ | Current node's port name<br /><br />Source port |
 | `to` _string_ | Other node's full port name |
+| `extras` _object (keys:string, values:string)_ |  |
 
 
 #### TinyNodeList
@@ -197,6 +198,7 @@ _Appears in:_
 | `port` _string_ |  |
 | `schema` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Schema JSON schema of the port |
 | `configuration` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Configuration JSON data of the port's configuration |
+| `extras` _object (keys:string, values:string)_ |  |
 
 
 #### TinyNodePortStatus
@@ -213,8 +215,6 @@ _Appears in:_
 | `name` _string_ |  |
 | `label` _string_ |  |
 | `position` _[Position](#position)_ |  |
-| `settings` _boolean_ |  |
-| `control` _boolean_ |  |
 | `source` _boolean_ |  |
 | `schema` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ |  |
 | `configuration` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ |  |
@@ -251,8 +251,8 @@ _Appears in:_
 | `module` _[TinyNodeModuleStatus](#tinynodemodulestatus)_ |  |
 | `component` _[TinyNodeComponentStatus](#tinynodecomponentstatus)_ |  |
 | `ports` _[TinyNodePortStatus](#tinynodeportstatus) array_ |  |
-| `error` _string_ |  |
 | `status` _string_ |  |
+| `error` _boolean_ |  |
 
 
 #### TinySignal
@@ -358,23 +358,6 @@ TinyTrackerList contains a list of TinyTracker
 | `items` _[TinyTracker](#tinytracker) array_ |  |
 
 
-#### TinyTrackerPortDataWebhook
-
-
-
-
-
-_Appears in:_
-- [TinyTrackerSpec](#tinytrackerspec)
-
-| Field | Description |
-| --- | --- |
-| `flowID` _string_ |  |
-| `url` _string_ | URL of the POST request |
-| `interval` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#duration-v1-meta)_ | Interval send requests not often than interval |
-| `maxDataSize` _integer_ | Do not send data bigger than below |
-
-
 #### TinyTrackerSpec
 
 
@@ -384,26 +367,6 @@ TinyTrackerSpec defines the desired state of Tracker
 _Appears in:_
 - [TinyTracker](#tinytracker)
 
-| Field | Description |
-| --- | --- |
-| `portDataWebhook` _[TinyTrackerPortDataWebhook](#tinytrackerportdatawebhook)_ |  |
-| `nodeStatisticsWebhook` _[TinyTrackerStatisticsWebhook](#tinytrackerstatisticswebhook)_ |  |
-
-
-#### TinyTrackerStatisticsWebhook
-
-
-
-
-
-_Appears in:_
-- [TinyTrackerSpec](#tinytrackerspec)
-
-| Field | Description |
-| --- | --- |
-| `flowID` _string_ |  |
-| `url` _string_ | URL of the POST request |
-| `interval` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#duration-v1-meta)_ | Interval send requests not often than interval |
 
 
 #### TinyTrackerStatus

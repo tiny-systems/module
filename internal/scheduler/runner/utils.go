@@ -37,15 +37,15 @@ func UpdateWithConfigurableDefinitions(original []byte, updateWith []byte, confi
 		if v == nil {
 			continue
 		}
-		if r, ok := configurableDefinitions[defKey]; ok {
+		if conf, ok := configurableDefinitions[defKey]; ok {
 			// replace this def with configurable one
 			// store important props before replace
 
-			_ = setStr("path", getStr("path", v), r)
-			_ = setBool("configurable", getBool("configurable", v), r)
-			_ = setInt("propertyOrder", getInt("propertyOrder", v), r)
+			_ = setStr("path", getStr("path", v), conf)
+			_ = setBool("configurable", getBool("configurable", v), conf)
+			_ = setInt("propertyOrder", getInt("propertyOrder", v), conf)
 
-			if err = v.SetNode(r); err != nil {
+			if err = v.SetNode(conf); err != nil {
 				return nil, err
 			}
 			continue
