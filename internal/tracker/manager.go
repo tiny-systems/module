@@ -52,11 +52,11 @@ func NewManager() *manager {
 	}
 }
 
-func (t *manager) Active(flowID string) bool {
+func (t *manager) Active(projectID string) bool {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
 	for _, tt := range t.trackers {
-		if tt.Labels[v1alpha1.FlowIDLabel] == flowID {
+		if tt.Labels[v1alpha1.ProjectIDLabel] == projectID {
 			return true
 		}
 	}

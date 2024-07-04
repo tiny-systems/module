@@ -48,7 +48,7 @@ type Runner struct {
 	node v1alpha1.TinyNode
 
 	//
-	portsCache     []m.NodePort
+	portsCache     []m.Port
 	portsCacheLock *sync.RWMutex
 
 	//
@@ -95,17 +95,20 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 	return c
 }
 
-func (c *Runner) getPorts() []m.NodePort {
+func (c *Runner) getPorts() []m.Port {
 	c.portsCacheLock.RLock()
-	defer c.portsCacheLock.RUnlock()
 
 	if c.portsCache != nil {
+		c.portsCacheLock.RUnlock()
 		return c.portsCache
 	}
-	return c.component.Ports()
+
+	c.portsCacheLock.RUnlock()
+
+	return c.getUpdatePorts()
 }
 
-func (c *Runner) getUpdatePorts() []m.NodePort {
+func (c *Runner) getUpdatePorts() []m.Port {
 	c.portsCacheLock.Lock()
 	defer c.portsCacheLock.Unlock()
 
@@ -116,10 +119,10 @@ func (c *Runner) getUpdatePorts() []m.NodePort {
 // UpdateStatus apply status changes
 func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
-	var ports []m.NodePort
+	var ports []m.Port
 	// trim system ports
 	for _, p := range c.getUpdatePorts() {
-		if p.Name == m.HttpPort {
+		if p.Name == m.NodePort || p.Name == m.ClientPort {
 			continue
 		}
 		ports = append(ports, p)
@@ -250,7 +253,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		<-c.closeCh
 	}()
 
-	var nodePort *m.NodePort
+	var nodePort *m.Port
 	for _, p := range c.getPorts() {
 		if p.Name == port {
 			nodePort = &p
@@ -348,7 +351,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	}()
 
 	// send span data only is tracker is on
-	if c.tracker.Active(c.flowID) {
+	if c.tracker.Active(c.projectID) {
 		inputData, _ := json.Marshal(portData)
 		c.addSpanPortData(inputSpan, string(inputData))
 	}
@@ -387,13 +390,12 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 				attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
 				attribute.String("flowID", c.flowID),
 				attribute.String("projectID", c.projectID),
-			),
-			)
+			))
 
 			defer outputSpan.End()
 
 			// send span data only is tracker is on
-			if c.tracker.Active(c.flowID) {
+			if c.tracker.Active(c.projectID) {
 				outputDataBytes, _ := json.Marshal(outputData)
 				c.addSpanPortData(outputSpan, string(outputDataBytes))
 			}

@@ -12,8 +12,11 @@ const (
 	ControlPort = "_control"
 	// SettingsPort settings page
 	SettingsPort = "_settings"
-	//HttpPort source port. Provides addressUpgrader
-	HttpPort = "_http"
+
+	//NodePort source port. Received tinynode object
+	NodePort = "_node"
+
+	ClientPort = "_client"
 )
 
 const (
@@ -23,7 +26,7 @@ const (
 	Left
 )
 
-type NodePort struct {
+type Port struct {
 	// if that's a source port, source means it accepts the data, the source of incoming data
 	Source bool
 	// which side of the node will have this port
