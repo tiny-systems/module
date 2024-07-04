@@ -15,8 +15,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -184,25 +182,21 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	}
 
 	runnerInstance := s.instancesMap.Upsert(node.Name, nil, func(exist bool, runnerInstance *runner.Runner, _ *runner.Runner) *runner.Runner {
-		//
 		if exist {
 			return runnerInstance
 		}
 		// new instance
-		cmpInstance := cmp.Instance()
+		instance := cmp.Instance()
 
-		runnerInstance = runner.NewRunner(node.Name, cmpInstance).
+		// init instance system ports
+		s.init(context.Background(), node, instance)
+
+		//configure || reconfigure
+		return runner.NewRunner(node.Name, instance).
 			SetLogger(s.log).
 			SetTracer(s.tracer).
 			SetTracker(s.tracker).
 			SetMeter(s.meter)
-
-		s.errGroup.Go(func() error {
-			return s.initInstance(context.Background(), node, cmpInstance)
-		})
-
-		//configure || reconfigure
-		return runnerInstance
 	})
 
 	var (
@@ -242,66 +236,15 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	return err
 }
 
-func (s *Schedule) initInstance(ctx context.Context, node *v1alpha1.TinyNode, componentInstance module.Component) error {
-	// init system ports
-	ctx, cancel := context.WithTimeout(ctx, time.Second*15)
-	defer cancel()
-	for _, p := range componentInstance.Ports() {
+func (s *Schedule) init(ctx context.Context, node *v1alpha1.TinyNode, instance module.Component) {
+	for _, p := range instance.Ports() {
 		// if node has http port then provide addressGetter
-		if p.Name == module.HttpPort {
+		switch p.Name {
+		case module.NodePort:
 			//module.ListenAddressGetter
-			_ = componentInstance.Handle(ctx, nil, module.HttpPort, s.getAddressGetter(node))
-		}
-	}
-	return nil
-}
-
-// @todo move to the component
-func (s *Schedule) getAddressGetter(node *v1alpha1.TinyNode) module.ListenAddressGetter {
-
-	var (
-		suggestedPortStr = node.Labels[v1alpha1.SuggestedHttpPortAnnotation]
-	)
-
-	return func() (suggestedPort int, upgrade module.AddressUpgrade) {
-
-		if annotationPort, err := strconv.Atoi(suggestedPortStr); err == nil {
-			suggestedPort = annotationPort
-		}
-
-		return suggestedPort, func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error) {
-			// limit exposing with a timeout
-			exposeCtx, cancel := context.WithTimeout(ctx, time.Second*10)
-			defer cancel()
-
-			var err error
-			// upgrade
-			// hostname it's a last part of the node name
-			var autoHostName string
-
-			if auto {
-				autoHostNameParts := strings.Split(node.Name, ".")
-				autoHostName = autoHostNameParts[len(autoHostNameParts)-1]
-			}
-
-			publicURLs, err := s.manager.ExposePort(exposeCtx, autoHostName, hostnames, actualLocalPort)
-			if err != nil {
-				return []string{}, err
-			}
-
-			s.errGroup.Go(func() error {
-				// listen when emit ctx ends to clean up
-				<-ctx.Done()
-				s.log.Info("cleaning up exposed port")
-
-				discloseCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-				defer cancel()
-				if err := s.manager.DisclosePort(discloseCtx, actualLocalPort); err != nil {
-					s.log.Error(err, "unable to disclose port", "port", actualLocalPort)
-				}
-				return nil
-			})
-			return publicURLs, err
+			_ = instance.Handle(ctx, nil, module.NodePort, *node)
+		case module.ClientPort:
+			_ = instance.Handle(ctx, nil, module.ClientPort, s.manager)
 		}
 	}
 }

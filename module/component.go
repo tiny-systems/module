@@ -21,12 +21,7 @@ type Component interface {
 	//Handle handles incoming requests
 	Handle(ctx context.Context, output Handler, port string, message interface{}) error
 	//Ports gets list of ports
-	Ports() []NodePort
+	Ports() []Port
 	//Instance creates new instance with default settings
 	Instance() Component
 }
-
-type AddressUpgrade func(ctx context.Context, auto bool, hostnames []string, actualLocalPort int) ([]string, error)
-
-// ListenAddressGetter gets listen port address
-type ListenAddressGetter func() (suggestedPort int, upgrade AddressUpgrade)

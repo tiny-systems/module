@@ -21,7 +21,7 @@ func TestSchemaConsistency(t *testing.T) {
 
 	sharedConfigurableSchemaDefinitions := make(map[string]jsonschema.Schema)
 
-	ports := []module.NodePort{
+	ports := []module.Port{
 		{
 			Configuration: ModifyInMessage{},
 		},
