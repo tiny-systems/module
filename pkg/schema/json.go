@@ -49,6 +49,7 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 		}),
 		jsonschema.DefinitionsPrefix("#/$defs/"),
 		jsonschema.CollectDefinitions(func(name string, schema jsonschema.Schema) {
+
 			defs[name] = schema
 		}),
 		jsonschema.InterceptProp(func(params jsonschema.InterceptPropParams) error {
@@ -90,6 +91,7 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 
 				if conf, ok := confDefs[defName]; ok {
 					// replacing with configurable schema
+
 					defs[defName] = conf
 					refOnly := jsonschema.Schema{}
 					ref := fmt.Sprintf("#/$defs/%s", defName)
@@ -116,12 +118,15 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 			//defID := strings.TrimPrefix(ref, "#/$defs/")
 
 			params.PropertySchema.Ref = nil
+
 			confDefs[defName] = *params.PropertySchema
 
 			refOnly := jsonschema.Schema{}
 			refOnly.Ref = &ref
 
 			refOnly.WithExtraPropertiesItem("propertyOrder", params.PropertySchema.ExtraProperties["propertyOrder"])
+			refOnly.WithExtraPropertiesItem("configurable", params.PropertySchema.ExtraProperties["configurable"])
+
 			*params.PropertySchema = refOnly
 			return nil
 
@@ -196,7 +201,7 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 			if schema.Type == nil {
 				schema.Type = c.Type
 			}
-			schema.WithExtraPropertiesItem("configurable", true)
+			//schema.WithExtraPropertiesItem("configurable", true)
 		}
 
 		path := strings.Join(reverse(append(getPath(defName, definitionPaths, []string{}), "$")), ".")

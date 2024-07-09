@@ -39,8 +39,6 @@ const (
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
 	LabelNodeAnnotation        = "tinysystems.io/node-label"
 
-	ExtrasFlowID = "flow-id"
-
 	SuggestedHttpPortAnnotation = "tinysystems.io/suggested-http-port"
 
 	// ingress annotations
@@ -87,8 +85,8 @@ type TinyNodeEdge struct {
 	// +kubebuilder:validation:Required
 	To string `json:"to"`
 
-	// +kubebuilder:validation:Optional
-	Extras map[string]string `json:"extras,omitempty"`
+	// +kubebuilder:validation:Required
+	FlowID string `json:"flowID"`
 }
 
 type TinyNodePortStatus struct {
@@ -117,7 +115,7 @@ type TinyNodePortConfig struct {
 	Configuration []byte `json:"configuration"`
 
 	// +kubebuilder:validation:Optional
-	Extras map[string]string `json:"extras,omitempty"`
+	FlowID string `json:"flowID,omitempty"`
 }
 
 type TinyNodeModuleStatus struct {

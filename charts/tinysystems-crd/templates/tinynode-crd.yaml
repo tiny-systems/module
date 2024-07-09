@@ -42,10 +42,8 @@ spec:
                 description: Edges to send message next
                 items:
                   properties:
-                    extras:
-                      additionalProperties:
-                        type: string
-                      type: object
+                    flowID:
+                      type: string
                     id:
                       description: Edge id
                       type: string
@@ -56,6 +54,7 @@ spec:
                       description: Other node's full port name
                       type: string
                   required:
+                  - flowID
                   - id
                   - port
                   - to
@@ -72,10 +71,8 @@ spec:
                       description: Configuration JSON data of the port's configuration
                       format: byte
                       type: string
-                    extras:
-                      additionalProperties:
-                        type: string
-                      type: object
+                    flowID:
+                      type: string
                     from:
                       description: Settings depend on a sender
                       type: string

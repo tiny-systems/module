@@ -41,9 +41,17 @@ func UpdateWithConfigurableDefinitions(original []byte, updateWith []byte, confi
 			// replace this def with configurable one
 			// store important props before replace
 
-			_ = setStr("path", getStr("path", v), conf)
-			_ = setBool("configurable", getBool("configurable", v), conf)
-			_ = setInt("propertyOrder", getInt("propertyOrder", v), conf)
+			if path, ok := getStr("path", v); ok {
+				_ = setStr("path", path, conf)
+			}
+
+			if configurable, ok := getBool("configurable", v); ok {
+				_ = setBool("configurable", configurable, conf)
+			}
+
+			if propertyOrder, ok := getInt("propertyOrder", v); ok {
+				_ = setInt("propertyOrder", propertyOrder, conf)
+			}
 
 			if err = v.SetNode(conf); err != nil {
 				return nil, err
@@ -51,7 +59,7 @@ func UpdateWithConfigurableDefinitions(original []byte, updateWith []byte, confi
 			continue
 		}
 
-		if !getBool("configurable", v) {
+		if configurable, _ := getBool("configurable", v); !configurable {
 			continue
 		}
 		updated, err := updateWithNodeDefs.GetKey(defKey)
@@ -89,32 +97,32 @@ func setInt(param string, val int, v *ajson.Node) error {
 	return v.AppendObject(param, ajson.NumericNode("", float64(val)))
 }
 
-func getStr(param string, v *ajson.Node) string {
+func getStr(param string, v *ajson.Node) (string, bool) {
 	c, _ := v.GetKey(param)
 	if c != nil {
 		// if node has override
 		b, _ := c.GetString()
-		return b
+		return b, true
 	}
-	return ""
+	return "", false
 }
 
-func getInt(param string, v *ajson.Node) int {
+func getInt(param string, v *ajson.Node) (int, bool) {
 	c, _ := v.GetKey(param)
 	if c != nil {
 		// if node has override
 		b, _ := c.GetNumeric()
-		return int(b)
+		return int(b), true
 	}
-	return 0
+	return 0, false
 }
 
-func getBool(param string, v *ajson.Node) bool {
+func getBool(param string, v *ajson.Node) (bool, bool) {
 	c, _ := v.GetKey(param)
 	if c != nil {
 		// if node has override
 		b, _ := c.GetBool()
-		return b
+		return b, true
 	}
-	return false
+	return false, false
 }
