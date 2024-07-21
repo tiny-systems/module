@@ -3,6 +3,8 @@ package schema
 import (
 	"fmt"
 	"github.com/goccy/go-json"
+	"github.com/pkg/errors"
+	"github.com/spyzhov/ajson"
 	"github.com/swaggest/jsonschema-go"
 	"golang.org/x/exp/slices"
 	"golang.org/x/text/cases"
@@ -29,13 +31,34 @@ func getDefinitionName(t reflect.Type) string {
 	return cases.Title(language.English).String(t.Name())
 }
 
-func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonschema.Schema, error) {
+func ParseSchema(s []byte, confDefs map[string]*ajson.Node) error {
+	realSchemaNode, err := ajson.Unmarshal(s)
+	if err != nil {
+		return errors.Wrap(err, "error reading original schema")
+	}
+	realSchemaNodeDefs, err := realSchemaNode.GetKey("$defs")
+	if err != nil {
+		return err
+	}
+	for _, defName := range realSchemaNodeDefs.Keys() {
+		def, err := realSchemaNodeDefs.GetKey(defName)
+		if err != nil || def == nil {
+			continue
+		}
+		configurable, _ := getBool("configurable", def)
+		if !configurable {
+			continue
+		}
+		confDefs[defName] = def
+
+	}
+	return nil
+}
+
+func CreateSchema(m interface{}) (jsonschema.Schema, error) {
+
 	r := jsonschema.Reflector{
 		DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
-	}
-
-	if confDefs == nil {
-		confDefs = make(map[string]jsonschema.Schema)
 	}
 
 	var (
@@ -44,12 +67,14 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 
 	sh, _ := r.Reflect(m,
 		jsonschema.RootRef,
-		jsonschema.InterceptDefName(func(t reflect.Type, defaultDefName string) string {
+		jsonschema.InterceptDefName(func(t reflect.Type, _ string) string {
 			return getDefinitionName(t)
 		}),
 		jsonschema.DefinitionsPrefix("#/$defs/"),
 		jsonschema.CollectDefinitions(func(name string, schema jsonschema.Schema) {
-
+			if _, ok := defs[name]; ok {
+				return
+			}
 			defs[name] = schema
 		}),
 		jsonschema.InterceptProp(func(params jsonschema.InterceptPropParams) error {
@@ -57,7 +82,7 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 				return nil
 			}
 
-			// looking for values  for certain properties
+			// make sure we do not ignore our custom props listed in scalarCustomProps
 			for _, cp := range scalarCustomProps {
 				if prop, ok := params.Field.Tag.Lookup(cp); ok {
 					var propVal interface{}
@@ -77,55 +102,32 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 				}
 			}
 
+			// make sure we do not ignore our custom props listed in
 			for _, cp := range arrayCustomProps {
 				if prop, ok := params.Field.Tag.Lookup(cp); ok {
 					params.PropertySchema.WithExtraPropertiesItem(cp, strings.Split(prop, ","))
 				}
 			}
 
-			defName := getDefinitionName(params.Field.Type)
+			// ensure each schema has it's definition
+			configurable := interfaceBool(params.PropertySchema.ExtraProperties["configurable"])
 
-			//
-			if b, ok := params.PropertySchema.ExtraProperties["configurable"]; !ok || b != true {
-				// not configurable; replace with configurable if any
-
-				if conf, ok := confDefs[defName]; ok {
-					// replacing with configurable schema
-
-					defs[defName] = conf
-					refOnly := jsonschema.Schema{}
-					ref := fmt.Sprintf("#/$defs/%s", defName)
-					refOnly.Ref = &ref
-					refOnly.WithExtraPropertiesItem("propertyOrder", params.PropertySchema.ExtraProperties["propertyOrder"])
-					refOnly.WithExtraPropertiesItem("configurable", false)
-					*params.PropertySchema = refOnly
-				}
-				// type is not configurable in here, but maybe be it is within the shared
+			if !configurable && !params.PropertySchema.HasType(jsonschema.Object) {
 				return nil
 			}
 
-			// we need to update definition with title and description, only info we know from tags
-			// problem here I solve is that tags affect on inline schema and not the one in $ref
-			// copy from inline to ref definition
-			//if propertySchema.Ref == nil {
-			//	return nil
-			//}
-			// make sure types with configurable tags always has own def
-			// update defs with everything except ref
+			defName := getDefinitionName(params.Field.Type)
 
-			//ref := *propertySchema.Ref
+			clone, _ := params.PropertySchema.JSONSchema() //
+			clone.Ref = nil
+			defs[defName] = clone
+
+			// register definitions without $ref
+
+			// place $ref instead
 			ref := fmt.Sprintf("#/$defs/%s", defName)
-			//defID := strings.TrimPrefix(ref, "#/$defs/")
-
-			params.PropertySchema.Ref = nil
-
-			confDefs[defName] = *params.PropertySchema
-
 			refOnly := jsonschema.Schema{}
 			refOnly.Ref = &ref
-
-			refOnly.WithExtraPropertiesItem("propertyOrder", params.PropertySchema.ExtraProperties["propertyOrder"])
-			refOnly.WithExtraPropertiesItem("configurable", params.PropertySchema.ExtraProperties["configurable"])
 
 			*params.PropertySchema = refOnly
 			return nil
@@ -134,13 +136,11 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 
 		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
 			// fires when something is null
-			if params.Type.Kind() == reflect.Array || params.Type.Kind() == reflect.Slice {
-				a := jsonschema.Array.Type()
-				params.Schema.Type = &a
-			}
+			params.Schema.RemoveType(jsonschema.Null)
 		}),
 	)
 
+	// calculate path
 	// build json path for each definition how it's related to node's root
 	definitionPaths := make(map[string]tagDefinition)
 
@@ -194,16 +194,7 @@ func CreateSchema(m interface{}, confDefs map[string]jsonschema.Schema) (jsonsch
 	for _, defName := range defNames {
 		schema := defs[defName]
 
-		if c, ok := confDefs[defName]; ok {
-			// definition is configurable
-			schema.Title = c.Title
-			schema.Description = c.Description
-			if schema.Type == nil {
-				schema.Type = c.Type
-			}
-			//schema.WithExtraPropertiesItem("configurable", true)
-		}
-
+		// update all definitions with path
 		path := strings.Join(reverse(append(getPath(defName, definitionPaths, []string{}), "$")), ".")
 		//	add json path to each definition
 		updated := schema.WithExtraPropertiesItem("path", path)
@@ -237,7 +228,7 @@ func CreateSchemaAndData(m interface{}) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	sh, err := CreateSchema(m, nil)
+	sh, err := CreateSchema(m)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -247,4 +238,11 @@ func CreateSchemaAndData(m interface{}) ([]byte, []byte, error) {
 	}
 
 	return confSchema, confData, nil
+}
+
+func interfaceBool(v interface{}) bool {
+	if value, ok := v.(bool); ok {
+		return value
+	}
+	return false
 }

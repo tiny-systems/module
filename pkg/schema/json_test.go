@@ -31,7 +31,7 @@ func TestSchemaConsistency(t *testing.T) {
 	}
 
 	for _, p := range ports {
-		_, err := CreateSchema(p.Configuration, sharedConfigurableSchemaDefinitions)
+		_, err := CreateSchema(p.Configuration)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -39,7 +39,7 @@ func TestSchemaConsistency(t *testing.T) {
 
 	t.Logf("shared configurable defs size: %d", len(sharedConfigurableSchemaDefinitions))
 
-	schema, err := CreateSchema(ports[0].Configuration, sharedConfigurableSchemaDefinitions)
+	schema, err := CreateSchema(ports[0].Configuration)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestSchemaConsistency(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	schema2, err := CreateSchema(ports[0].Configuration, sharedConfigurableSchemaDefinitions)
+	schema2, err := CreateSchema(ports[0].Configuration)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,6 +59,7 @@ func TestSchemaConsistency(t *testing.T) {
 	}
 
 	t.Log(string(schemaData))
+
 	diff := cmp.Diff(schemaData, schema2Data)
 	if diff != "" {
 		t.Errorf("not equal: %s", diff)
