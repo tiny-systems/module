@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
-	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/tracker"
@@ -104,7 +103,6 @@ func (c *Runner) getPorts() []m.Port {
 	}
 
 	c.portsCacheLock.RUnlock()
-
 	return c.getUpdatePorts()
 }
 
@@ -119,6 +117,10 @@ func (c *Runner) getUpdatePorts() []m.Port {
 // UpdateStatus apply status changes
 func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
+	status.Status = "OK"
+	status.Error = false
+	status.Ports = make([]v1alpha1.TinyNodePortStatus, 0)
+
 	var ports []m.Port
 	// trim system ports
 	for _, p := range c.getUpdatePorts() {
@@ -128,59 +130,13 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 		ports = append(ports, p)
 	}
 
-	status.Status = "OK"
-	status.Error = false
-	status.Ports = make([]v1alpha1.TinyNodePortStatus, 0)
-
 	// sort ports
 	sort.SliceStable(ports, func(i, j int) bool {
 		return ports[i].Name < ports[j].Name
 	})
 
-	var (
-		configurableDefinitions             = make(map[string]*ajson.Node)
-		sharedConfigurableSchemaDefinitions = make(map[string]jsonschema.Schema)
-	)
-
-	// populate shared definitions with configurable schemas first (settings port
-	for _, np := range ports {
-		if np.Name != m.SettingsPort {
-			continue
-		}
-		_, _ = schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
-		break
-	}
-
-	// source ports and not settings
-	for _, np := range ports {
-		if !np.Source || np.Name == m.SettingsPort {
-			continue
-		}
-		_, _ = schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
-	}
-
-	// populate shared definitions with configurable schemas first (target ports)
-	for _, np := range ports {
-		if np.Source {
-			continue
-		}
-		_, _ = schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
-	}
-	// sharedConfigurableSchemaDefinitions collected
-
 	// now do it again
 	for _, np := range ports {
-		// processing settings port first, then source, then target
-		var portSchema []byte //port schema settings
-
-		// find if we have port settings which might extend the json schema of the port with configurable definitions
-		for _, sp := range c.node.Spec.Ports {
-			// for own configs, from is empty
-			if np.Name == sp.Port || sp.From == "" { // exact port or just any internal port (not edge's one) @todo might need improvement
-				portSchema = sp.Schema
-				break
-			}
-		}
 
 		portStatus := v1alpha1.TinyNodePortStatus{
 			Name:     np.Name,
@@ -190,29 +146,19 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 		}
 
 		if np.Configuration != nil {
-			// define default schema and config using reflection
-			schemaConf, err := schema.CreateSchema(np.Configuration, sharedConfigurableSchemaDefinitions)
-
-			if err == nil {
+			// get real schema and config using reflection
+			schemaConf, err := schema.CreateSchema(np.Configuration)
+			if err != nil {
+				c.log.Error(err, "create schema error")
+			} else {
 				schemaData, _ := schemaConf.MarshalJSON()
 				portStatus.Schema = schemaData
-			} else {
-				c.log.Error(err, "create schema error")
 			}
-
+			// real port data
 			confData, _ := json.Marshal(np.Configuration)
 			portStatus.Configuration = confData
 		}
 
-		if len(portStatus.Schema) > 0 && len(portSchema) > 0 {
-			// our schema is original re-generated schema + updatable (configurable) definitions
-			updatedSchema, err := UpdateWithConfigurableDefinitions(portStatus.Schema, portSchema, configurableDefinitions)
-			if err != nil {
-				c.log.Error(err, "update schema")
-			} else {
-				portStatus.Schema = updatedSchema
-			}
-		}
 		status.Ports = append(status.Ports, portStatus)
 	}
 

@@ -75,7 +75,7 @@ require (
 	github.com/rogpeppe/go-internal v1.11.0
 	github.com/rs/zerolog v1.31.0
 	github.com/spf13/cobra v1.8.0
-	github.com/spyzhov/ajson v0.9.0
+	github.com/spyzhov/ajson v0.9.3
 	github.com/swaggest/jsonschema-go v0.3.70
 	github.com/tiny-systems/errorpanic v0.7.1
 	github.com/tiny-systems/platform-api v0.0.7
@@ -132,3 +132,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
 	gotest.tools/v3 v3.5.1 // indirect
 )
+
+replace github.com/spyzhov/ajson v0.9.3 => github.com/tiny-systems/ajson v0.1.1
