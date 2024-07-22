@@ -21,6 +21,7 @@ spec:
       {{- include "tinysystems-operator.selectorLabels" . | nindent 8 }}
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        rollme: {{ randAlphaNum 5 | quote }}
     spec:
       containers:
       - args: {{- toYaml .Values.controllerManager.kubeRbacProxy.args | nindent 8 }}
