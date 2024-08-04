@@ -189,7 +189,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 		instance := cmp.Instance()
 
 		// init instance system ports
-		s.init(context.Background(), node, instance)
+		s.init(ctx, node, instance)
 
 		//configure || reconfigure
 		return runner.NewRunner(node.Name, instance).
