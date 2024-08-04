@@ -400,7 +400,6 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	c.nodeLock.Unlock()
 
 	// get all edges to connected nodes
-
 	wg, ctx := errgroup.WithContext(ctx)
 
 	for _, e := range edges {
@@ -439,45 +438,11 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 	return json.Unmarshal(b, output)
 }
 
-//Int64UpDownCounter
-
-//func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
-//	if name == "" {
-//		return
-//	}
-//	gauge, _ := c.meter.Int64ObservableGauge(string(m),
-//		metric.WithUnit("1"),
-//	)
-//
-//	r, err := c.meter.RegisterCallback(
-//		func(ctx context.Context, o metric.Observer) error {
-//			o.ObserveInt64(gauge, val,
-//				metric.WithAttributes(
-//					attribute.String("element", name),
-//					attribute.String("flowID", c.flowID),
-//				))
-//			return nil
-//		},
-//		gauge,
-//	)
-//
-//	if err != nil {
-//		c.log.Error(err, "metric gauge err")
-//		return
-//	}
-//
-//	go func() {
-//		time.Sleep(time.Second)
-//		_ = r.Unregister()
-//	}()
-//}
-
 func (c *Runner) incCounter(ctx context.Context, val int64, element string, m metrics.Metric) {
 
 	if element == "" {
 		return
 	}
-
 	counter, err := c.meter.Int64Counter(
 		string(m),
 		metric.WithUnit("1"),
