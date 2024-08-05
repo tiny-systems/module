@@ -369,7 +369,11 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) {
 	defer c.nodeLock.Unlock()
 	//
 	c.reconciled.Store(true)
-	c.flowID = node.Labels[v1alpha1.FlowIDLabel]
+
+	if node.Labels[v1alpha1.GlobalLabel] != "true" {
+		// global nodes have no flow ID
+		c.flowID = node.Labels[v1alpha1.FlowIDLabel]
+	}
 	c.projectID = node.Labels[v1alpha1.ProjectIDLabel]
 	//
 	c.node = node
