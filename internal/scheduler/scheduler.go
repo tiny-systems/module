@@ -125,9 +125,11 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 		// system port; do nothing
 		return nil
 	}
+
 	instance, ok := s.instancesMap.Get(nodeName)
-	if !ok {
-		// instance is not registered currently
+
+	if !ok || (instance != nil && !instance.HasPort(port)) {
+		// instance is not registered currently or it's port is not yet available (setting did not enable it?)
 		// maybe reconcile call did not register it yet
 		// sleep and try again
 		t := time.NewTimer(time.Millisecond * 100)
@@ -202,11 +204,11 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	var (
 		// backup node instance had before
 		nodeBackup = runnerInstance.Node()
+		atomicErr  = new(atomic.Error)
 	)
 	// update instance
 
 	runnerInstance.SetNode(*node.DeepCopy())
-	var atomicErr = new(atomic.Error)
 
 	s.errGroup.Go(func() error {
 

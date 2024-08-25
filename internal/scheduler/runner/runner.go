@@ -30,7 +30,6 @@ import (
 
 type Runner struct {
 	// unique instance name
-
 	name string
 
 	flowID    string
@@ -43,8 +42,7 @@ type Runner struct {
 	// to control K8s resources
 
 	closeCh chan struct{}
-
-	node v1alpha1.TinyNode
+	node    v1alpha1.TinyNode
 
 	//
 	portsCache     []m.Port
@@ -56,11 +54,9 @@ type Runner struct {
 
 	meter metric.Meter
 	//
-	nodeLock *sync.Mutex
-
+	nodeLock         *sync.Mutex
 	previousSettings interface{}
-
-	reconciled *atomic.Bool
+	reconciled       *atomic.Bool
 }
 
 func NewRunner(name string, component m.Component) *Runner {
@@ -184,10 +180,20 @@ func (c *Runner) getPortConfig(from string, port string) *v1alpha1.TinyNodePortC
 	return nil
 }
 
+func (c *Runner) HasPort(port string) bool {
+	for _, p := range c.getPorts() {
+		if p.Name == port {
+			return true
+		}
+	}
+	return false
+}
+
 // Input processes input to the inherited component
 // applies port config for the given port if any
 func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (err error) {
 	_, port := utils.ParseFullPortName(msg.To)
+
 	if port == "" {
 		return fmt.Errorf("input port is empty")
 	}
@@ -304,7 +310,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	err = errorpanic.Wrap(func() error {
 		// panic safe
-		c.log.Info("component call", "port", port, "node", c.name)
+		//c.log.Info("component call", "port", port, "node", c.name)
 		c.incCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
 
 		defer func() {
@@ -312,7 +318,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		}()
 
 		return c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData interface{}) error {
-			c.log.Info("component callback handler", "port", outputPort, "node", c.name)
+			//c.log.Info("component callback handler", "port", outputPort, "node", c.name)
 
 			if outputPort == m.ReconcilePort {
 				if !c.reconciled.Load() {
@@ -399,8 +405,22 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		})
 	}
 
+	var (
+		uniqueTo = make(map[string]struct{})
+		edges    = make([]v1alpha1.TinyNodeEdge, 0)
+	)
+
 	c.nodeLock.Lock()
-	edges := c.node.Spec.Edges[:]
+	// unique destinations
+	// same nodes may have multiple edges togethers on a different flows
+	for _, e := range c.node.Spec.Edges[:] {
+		if _, ok := uniqueTo[e.To]; ok {
+			continue
+		}
+		uniqueTo[e.To] = struct{}{}
+		edges = append(edges, e)
+	}
+	// unique
 	c.nodeLock.Unlock()
 
 	// get all edges to connected nodes
@@ -417,7 +437,6 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			continue
 		}
 		fromPort := utils.GetPortFullName(c.name, port)
-
 		wg.Go(func() error {
 			// send to destination
 			// track how many messages component send
