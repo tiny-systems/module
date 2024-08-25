@@ -178,6 +178,7 @@ var runCmd = &cobra.Command{
 				// destination is the current module
 				return scheduler.Handle(ctx, msg)
 			}
+
 			// gRPC call
 			return pool.Handler(ctx, msg)
 		}).
