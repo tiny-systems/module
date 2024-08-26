@@ -26,6 +26,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Runner struct {
@@ -311,10 +312,16 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	err = errorpanic.Wrap(func() error {
 		// panic safe
 		//c.log.Info("component call", "port", port, "node", c.name)
-		c.incCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
+		c.incCounter(context.Background(), 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
+		c.setGauge(1, msg.EdgeID, metrics.MetricEdgeBusy)
 
 		defer func() {
-			c.incCounter(ctx, 1, msg.EdgeID, metrics.MetricEdgeMsgOut)
+			c.incCounter(context.Background(), 1, msg.EdgeID, metrics.MetricEdgeMsgOut)
+			go func() {
+				// give it time to animate
+				time.Sleep(time.Second * 5)
+				c.setGauge(0, msg.EdgeID, metrics.MetricEdgeBusy)
+			}()
 		}()
 
 		return c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData interface{}) error {
@@ -460,6 +467,38 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 		return err
 	}
 	return json.Unmarshal(b, output)
+}
+
+func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
+	if name == "" {
+		return
+	}
+	gauge, _ := c.meter.Int64ObservableGauge(string(m),
+		metric.WithUnit("1"),
+	)
+
+	r, err := c.meter.RegisterCallback(
+		func(ctx context.Context, o metric.Observer) error {
+			o.ObserveInt64(gauge, val,
+				metric.WithAttributes(
+					attribute.String("element", name),
+					attribute.String("flowID", c.flowID),
+					attribute.String("projectID", c.projectID),
+				))
+			return nil
+		},
+		gauge,
+	)
+
+	if err != nil {
+		c.log.Error(err, "metric gauge err")
+		return
+	}
+
+	go func() {
+		time.Sleep(time.Second * 5)
+		_ = r.Unregister()
+	}()
 }
 
 func (c *Runner) incCounter(ctx context.Context, val int64, element string, m metrics.Metric) {
