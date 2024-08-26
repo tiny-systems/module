@@ -414,12 +414,13 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	// unique destinations
 	// same nodes may have multiple edges togethers on a different flows
 	for _, e := range c.node.Spec.Edges[:] {
-		if _, ok := uniqueTo[e.To]; ok {
+		if _, ok := uniqueTo[e.Port+e.To]; ok {
 			continue
 		}
-		uniqueTo[e.To] = struct{}{}
+		uniqueTo[e.Port+e.To] = struct{}{}
 		edges = append(edges, e)
 	}
+
 	// unique
 	c.nodeLock.Unlock()
 
