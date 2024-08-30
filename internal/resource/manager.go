@@ -114,7 +114,7 @@ func (m Manager) getReleaseNameByPodName(ctx context.Context, podName string) (s
 }
 
 func (m Manager) ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error) {
-	m.log.Info("exposing port", "port", port, "hostnames", hostnames)
+	m.log.Info("expose port", "port", port, "hostnames", hostnames)
 
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
@@ -192,17 +192,21 @@ RULES:
 		}
 	}
 
-TLS:
-	for _, t := range tls {
+	for _, t := range ingress.Spec.TLS {
+
+		var found bool
 		for _, h := range t.Hosts {
 			for _, host := range deletedHostnames {
-				if host != h {
-					tls = append(tls, t)
-					continue
+				if h == host {
+					found = true
 				}
-				continue TLS
 			}
 		}
+		if found {
+			// found deleted host, this TLS going to be deleted (skipped from being saved)
+			continue
+		}
+		tls = append(tls, t)
 	}
 
 	ingress.Spec.TLS = tls
