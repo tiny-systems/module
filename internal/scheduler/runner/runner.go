@@ -105,6 +105,7 @@ func (c *Runner) getPorts() []m.Port {
 
 func (c *Runner) getUpdatePorts() []m.Port {
 	c.portsCacheLock.Lock()
+
 	defer c.portsCacheLock.Unlock()
 
 	c.portsCache = c.component.Ports()
@@ -171,6 +172,7 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 
 func (c *Runner) getPortConfig(from string, port string) *v1alpha1.TinyNodePortConfig {
 	c.nodeLock.Lock()
+
 	defer c.nodeLock.Unlock()
 	//
 	for _, pc := range c.node.Spec.Ports {
@@ -313,13 +315,18 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		// panic safe
 		//c.log.Info("component call", "port", port, "node", c.name)
 		c.incCounter(context.Background(), 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
+		c.incCounter(context.Background(), 1, msg.To, metrics.MetricPortMsgIn)
+
 		c.setGauge(1, msg.EdgeID, metrics.MetricEdgeBusy)
 
 		defer func() {
+
 			c.incCounter(context.Background(), 1, msg.EdgeID, metrics.MetricEdgeMsgOut)
+			c.incCounter(context.Background(), 1, msg.To, metrics.MetricPortMsgOut)
+
 			go func() {
 				// give it time to animate
-				time.Sleep(time.Second * 5)
+				time.Sleep(time.Second * 3)
 				c.setGauge(0, msg.EdgeID, metrics.MetricEdgeBusy)
 			}()
 		}()
@@ -329,6 +336,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 			if outputPort == m.ReconcilePort {
 				if !c.reconciled.Load() {
+					// reconciled already
 					return nil
 				}
 
@@ -340,7 +348,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 			}
 
-			u, err := uuid.NewUUID()
+			u, err = uuid.NewUUID()
 			if err != nil {
 				return err
 			}
@@ -372,13 +380,16 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 func (c *Runner) Node() v1alpha1.TinyNode {
 	c.nodeLock.Lock()
+
 	defer c.nodeLock.Unlock()
 	return c.node
 }
 
 // SetNode updates specs and decides do we need to restart which handles by Run method
 func (c *Runner) SetNode(node v1alpha1.TinyNode) {
+
 	c.nodeLock.Lock()
+
 	defer c.nodeLock.Unlock()
 	//
 	c.reconciled.Store(true)
@@ -402,6 +413,10 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
 		return err
+	}
+
+	if handler == nil {
+		return nil
 	}
 
 	if node, _ := utils.ParseFullPortName(port); node != "" {
@@ -441,14 +456,11 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			// edge is not configured for this port as source
 			continue
 		}
-		if handler == nil {
-			continue
-		}
+
 		fromPort := utils.GetPortFullName(c.name, port)
 		wg.Go(func() error {
 			// send to destination
 			// track how many messages component send
-
 			return handler(ctx, &Msg{
 				To:     edge.To,
 				From:   fromPort,
