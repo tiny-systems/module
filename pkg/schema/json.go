@@ -27,7 +27,7 @@ var arrayCustomProps = []string{
 	"enumTitles",
 }
 
-func getDefinitionName(t reflect.Type) string {
+func GetDefinitionName(t reflect.Type) string {
 	return cases.Title(language.English).String(t.Name())
 }
 
@@ -57,18 +57,17 @@ func ParseSchema(s []byte, confDefs map[string]*ajson.Node) error {
 
 func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 
-	r := jsonschema.Reflector{
-		DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
-	}
-
 	var (
+		r = jsonschema.Reflector{
+			DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
+		}
 		defs = make(map[string]jsonschema.Schema)
 	)
 
 	sh, _ := r.Reflect(m,
 		jsonschema.RootRef,
 		jsonschema.InterceptDefName(func(t reflect.Type, _ string) string {
-			return getDefinitionName(t)
+			return GetDefinitionName(t)
 		}),
 		jsonschema.DefinitionsPrefix("#/$defs/"),
 		jsonschema.CollectDefinitions(func(name string, schema jsonschema.Schema) {
@@ -116,7 +115,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 				return nil
 			}
 
-			defName := getDefinitionName(params.Field.Type)
+			defName := GetDefinitionName(params.Field.Type)
 
 			clone, _ := params.PropertySchema.JSONSchema() //
 			clone.Ref = nil
@@ -202,6 +201,12 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 	}
 
 	sh.WithExtraPropertiesItem("$defs", defs)
+
+	// schema post-processing hook
+	if processor, ok := m.(Processor); ok {
+		processor.Process(&sh)
+	}
+
 	return sh, nil
 }
 
@@ -245,4 +250,8 @@ func interfaceBool(v interface{}) bool {
 		return value
 	}
 	return false
+}
+
+type Processor interface {
+	Process(s *jsonschema.Schema)
 }
