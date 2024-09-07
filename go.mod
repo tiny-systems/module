@@ -1,6 +1,8 @@
 module github.com/tiny-systems/module
 
-go 1.20
+go 1.21
+
+toolchain go1.22.1
 
 require (
 	k8s.io/apimachinery v0.29.2

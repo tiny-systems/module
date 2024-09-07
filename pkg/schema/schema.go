@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
-	"golang.org/x/exp/slices"
 )
 
 func UpdateWithConfigurableDefinitions(realSchema []byte, configurableDefinitionNodes map[string]*ajson.Node) ([]byte, error) {
@@ -21,7 +20,6 @@ func UpdateWithConfigurableDefinitions(realSchema []byte, configurableDefinition
 	}
 
 	realSchemaNodeDefsKeys := realSchemaNodeDefs.Keys()
-	slices.Sort(realSchemaNodeDefsKeys)
 
 	// go through status definitions
 	for _, defKey := range realSchemaNodeDefsKeys {
@@ -45,10 +43,10 @@ func UpdateWithConfigurableDefinitions(realSchema []byte, configurableDefinition
 			if err = setBool("configurable", configurable, conf); err != nil {
 				return nil, fmt.Errorf("set bool error: %w", err)
 			}
-
-			if propertyOrder, ok := getInt("propertyOrder", realSchemaDef); ok {
-				_ = setInt("propertyOrder", propertyOrder, conf)
-			}
+			//
+			//if propertyOrder, ok := getInt("propertyOrder", realSchemaDef); ok {
+			//	_ = setInt("propertyOrder", propertyOrder, conf)
+			//}
 
 			// update real schema from configurable definitions but copy path,configurable,propertyOrder props from status real schema
 			if err = realSchemaDef.SetNode(conf); err != nil {
