@@ -6,7 +6,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spyzhov/ajson"
 	"github.com/swaggest/jsonschema-go"
-	"golang.org/x/exp/slices"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"reflect"
@@ -61,7 +60,10 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 		r = jsonschema.Reflector{
 			DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
 		}
-		defs = make(map[string]jsonschema.Schema)
+		defs       = make(map[string]jsonschema.Schema)
+		defNames   = make([]string, 0)
+		propsNames = make([]string, 0)
+		propIdx    = 0
 	)
 
 	sh, _ := r.Reflect(m,
@@ -74,12 +76,15 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			if _, ok := defs[name]; ok {
 				return
 			}
+			defNames = append(defNames, name)
 			defs[name] = schema
 		}),
 		jsonschema.InterceptProp(func(params jsonschema.InterceptPropParams) error {
 			if !params.Processed {
 				return nil
 			}
+			propsNames = append(propsNames, params.Name)
+			propIdx++
 
 			// make sure we do not ignore our custom props listed in scalarCustomProps
 			for _, cp := range scalarCustomProps {
@@ -111,6 +116,8 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			// ensure each schema has it's definition
 			configurable := interfaceBool(params.PropertySchema.ExtraProperties["configurable"])
 
+			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdx)
+
 			if !configurable && !params.PropertySchema.HasType(jsonschema.Object) {
 				return nil
 			}
@@ -129,6 +136,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			refOnly.Ref = &ref
 
 			*params.PropertySchema = refOnly
+			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdx)
 			return nil
 
 		}),
@@ -143,31 +151,22 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 	// build json path for each definition how it's related to node's root
 	definitionPaths := make(map[string]tagDefinition)
 
-	// keep the sorting order
-	defNames := make([]string, 0)
-	for k := range defs {
-		defNames = append(defNames, k)
-	}
-	slices.Sort(defNames)
 	//
 
 	for _, defName := range defNames {
 		schema := defs[defName]
 
-		propsNames := make([]string, 0)
-		for k := range schema.Properties {
-			propsNames = append(propsNames, k)
-		}
-
-		slices.Sort(propsNames)
-
 		for _, k := range propsNames {
-			v := schema.Properties[k]
+			v, ok := schema.Properties[k]
+			if !ok {
+				continue
+			}
 
 			var typ jsonschema.SimpleType
 			if v.TypeObject != nil && v.TypeObject.Type != nil && v.TypeObject.Type.SimpleTypes != nil {
 				typ = *v.TypeObject.Type.SimpleTypes
 			}
+
 			path := k
 			ref := v.TypeObject.Ref
 			if typ == jsonschema.Array {
