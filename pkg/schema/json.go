@@ -60,10 +60,8 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 		r = jsonschema.Reflector{
 			DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
 		}
-		defs       = make(map[string]jsonschema.Schema)
-		defNames   = make([]string, 0)
-		propsNames = make([]string, 0)
-		propIdx    = 0
+		defs    = make(map[string]jsonschema.Schema)
+		propIdx = 0
 	)
 
 	sh, _ := r.Reflect(m,
@@ -76,14 +74,12 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			if _, ok := defs[name]; ok {
 				return
 			}
-			defNames = append(defNames, name)
 			defs[name] = schema
 		}),
 		jsonschema.InterceptProp(func(params jsonschema.InterceptPropParams) error {
 			if !params.Processed {
 				return nil
 			}
-			propsNames = append(propsNames, params.Name)
 			propIdx++
 
 			// make sure we do not ignore our custom props listed in scalarCustomProps
@@ -115,7 +111,6 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 
 			// ensure each schema has it's definition
 			configurable := interfaceBool(params.PropertySchema.ExtraProperties["configurable"])
-
 			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdx)
 
 			if !configurable && !params.PropertySchema.HasType(jsonschema.Object) {
@@ -134,9 +129,9 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			ref := fmt.Sprintf("#/$defs/%s", defName)
 			refOnly := jsonschema.Schema{}
 			refOnly.Ref = &ref
+			refOnly.WithExtraPropertiesItem("propertyOrder", propIdx)
 
 			*params.PropertySchema = refOnly
-			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdx)
 			return nil
 
 		}),
@@ -153,20 +148,14 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 
 	//
 
-	for _, defName := range defNames {
-		schema := defs[defName]
+	for defName, schema := range defs {
 
-		for _, k := range propsNames {
-			v, ok := schema.Properties[k]
-			if !ok {
-				continue
-			}
+		for k, v := range schema.Properties {
 
 			var typ jsonschema.SimpleType
 			if v.TypeObject != nil && v.TypeObject.Type != nil && v.TypeObject.Type.SimpleTypes != nil {
 				typ = *v.TypeObject.Type.SimpleTypes
 			}
-
 			path := k
 			ref := v.TypeObject.Ref
 			if typ == jsonschema.Array {
@@ -189,8 +178,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 		}
 	}
 
-	for _, defName := range defNames {
-		schema := defs[defName]
+	for defName, schema := range defs {
 
 		// update all definitions with path
 		path := strings.Join(reverse(append(getPath(defName, definitionPaths, []string{}), "$")), ".")
