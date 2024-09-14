@@ -19,7 +19,7 @@ type tagDefinition struct {
 }
 
 var scalarCustomProps = []string{
-	"requiredWhen", "propertyOrder", "optionalWhen", "colSpan", "tab", "align", "configurable", "$ref", "type", "readonly", "format",
+	"requiredWhen", "propertyOrder", "optionalWhen", "colSpan", "tab", "align", "configurable", "shared", "$ref", "type", "readonly", "format",
 }
 
 var arrayCustomProps = []string{
@@ -30,7 +30,9 @@ func GetDefinitionName(t reflect.Type) string {
 	return cases.Title(language.English).String(t.Name())
 }
 
-func ParseSchema(s []byte, confDefs map[string]*ajson.Node) error {
+//CollectDefinitions finds all shared and configurable definitions
+
+func CollectDefinitions(s []byte, confDefs map[string]*ajson.Node) error {
 	realSchemaNode, err := ajson.Unmarshal(s)
 	if err != nil {
 		return errors.Wrap(err, "error reading original schema")
@@ -45,11 +47,12 @@ func ParseSchema(s []byte, confDefs map[string]*ajson.Node) error {
 			continue
 		}
 		configurable, _ := getBool("configurable", def)
-		if !configurable {
+		shared, _ := getBool("shared", def)
+
+		if !configurable && !shared {
 			continue
 		}
 		confDefs[defName] = def
-
 	}
 	return nil
 }
@@ -111,12 +114,16 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 
 			// ensure each schema has it's definition
 			configurable := interfaceBool(params.PropertySchema.ExtraProperties["configurable"])
+			shared := interfaceBool(params.PropertySchema.ExtraProperties["shared"])
+
+			// autoinc
 			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdx)
 
-			if !configurable && !params.PropertySchema.HasType(jsonschema.Object) {
+			if !configurable && !shared && !params.PropertySchema.HasType(jsonschema.Object) {
 				return nil
 			}
 
+			//
 			defName := GetDefinitionName(params.Field.Type)
 
 			clone, _ := params.PropertySchema.JSONSchema() //

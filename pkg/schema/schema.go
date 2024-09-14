@@ -6,7 +6,9 @@ import (
 	"github.com/spyzhov/ajson"
 )
 
-func UpdateWithConfigurableDefinitions(realSchema []byte, configurableDefinitionNodes map[string]*ajson.Node) ([]byte, error) {
+// UpdateWithDefinitions parses schema and update all definitions in it by using map of ajson.nodes
+// definitions replacing preserves path and configurable properties
+func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[string]*ajson.Node) ([]byte, error) {
 	// status
 
 	realSchemaNode, err := ajson.Unmarshal(realSchema)
@@ -19,10 +21,8 @@ func UpdateWithConfigurableDefinitions(realSchema []byte, configurableDefinition
 		return nil, err
 	}
 
-	realSchemaNodeDefsKeys := realSchemaNodeDefs.Keys()
-
 	// go through status definitions
-	for _, defKey := range realSchemaNodeDefsKeys {
+	for _, defKey := range realSchemaNodeDefs.Keys() {
 		realSchemaDef, err := realSchemaNodeDefs.GetKey(defKey)
 		if err != nil {
 			return nil, errors.Wrapf(err, "unable to get original key: %s", defKey)
@@ -30,29 +30,25 @@ func UpdateWithConfigurableDefinitions(realSchema []byte, configurableDefinition
 		if realSchemaDef == nil {
 			continue
 		}
+
 		if conf, ok := configurableDefinitionNodes[defKey]; ok {
 			// replace this real status def with configurable one
 			// copy important props before replace
+			confCopy := conf.Clone()
 
 			if path, ok := getStr("path", realSchemaDef); ok {
-				_ = setStr("path", path, conf)
+				_ = setStr("path", path, confCopy)
 			}
 
 			configurable, _ := getBool("configurable", realSchemaDef)
 
-			if err = setBool("configurable", configurable, conf); err != nil {
+			if err = setBool("configurable", configurable, confCopy); err != nil {
 				return nil, fmt.Errorf("set bool error: %w", err)
 			}
-			//
-			//if propertyOrder, ok := getInt("propertyOrder", realSchemaDef); ok {
-			//	_ = setInt("propertyOrder", propertyOrder, conf)
-			//}
-
 			// update real schema from configurable definitions but copy path,configurable,propertyOrder props from status real schema
-			if err = realSchemaDef.SetNode(conf); err != nil {
+			if err = realSchemaDef.SetNode(confCopy); err != nil {
 				return nil, err
 			}
-			continue
 		}
 	}
 	return ajson.Marshal(realSchemaNode)
@@ -68,8 +64,11 @@ func setStr(param string, val string, v *ajson.Node) error {
 func setBool(param string, val bool, v *ajson.Node) error {
 
 	if c, _ := v.GetKey(param); c != nil {
-		return c.SetBool(val)
+		if err := c.SetBool(val); err != nil {
+			return err
+		}
 	}
+
 	return v.AppendObject(param, ajson.BoolNode("", val))
 }
 
