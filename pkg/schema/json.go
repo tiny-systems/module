@@ -26,13 +26,25 @@ var arrayCustomProps = []string{
 	"enumTitles",
 }
 
+type FilterFunction func(node *ajson.Node) bool
+
+var FilterConfigurable FilterFunction = func(node *ajson.Node) bool {
+	configurable, _ := GetBool("configurable", node)
+	return configurable
+}
+
+var FilterShared FilterFunction = func(node *ajson.Node) bool {
+	configurable, _ := GetBool("shared", node)
+	return configurable
+}
+
 func GetDefinitionName(t reflect.Type) string {
 	return cases.Title(language.English).String(t.Name())
 }
 
 //CollectDefinitions finds all shared and configurable definitions
 
-func CollectDefinitions(s []byte, confDefs map[string]*ajson.Node) error {
+func CollectDefinitions(s []byte, confDefs map[string]*ajson.Node, filter FilterFunction) error {
 	realSchemaNode, err := ajson.Unmarshal(s)
 	if err != nil {
 		return errors.Wrap(err, "error reading original schema")
@@ -46,10 +58,8 @@ func CollectDefinitions(s []byte, confDefs map[string]*ajson.Node) error {
 		if err != nil || def == nil {
 			continue
 		}
-		configurable, _ := getBool("configurable", def)
-		shared, _ := getBool("shared", def)
 
-		if !configurable && !shared {
+		if filter != nil && !filter(def) {
 			continue
 		}
 		confDefs[defName] = def

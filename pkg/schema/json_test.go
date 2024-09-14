@@ -67,6 +67,7 @@ func TestCollectDefinitions(t *testing.T) {
 	type args struct {
 		s        []byte
 		confDefs map[string]*ajson.Node
+		filter   FilterFunction
 	}
 	tests := []struct {
 		name     string
@@ -79,6 +80,7 @@ func TestCollectDefinitions(t *testing.T) {
 			args: args{
 				s:        []byte(``),
 				confDefs: map[string]*ajson.Node{},
+				filter:   FilterConfigurable,
 			},
 			wantErr: true,
 		},
@@ -87,6 +89,7 @@ func TestCollectDefinitions(t *testing.T) {
 			args: args{
 				s:        []byte(``),
 				confDefs: map[string]*ajson.Node{},
+				filter:   FilterConfigurable,
 			},
 			wantErr: true,
 		},
@@ -95,6 +98,7 @@ func TestCollectDefinitions(t *testing.T) {
 			args: args{
 				s:        []byte(`{}`),
 				confDefs: map[string]*ajson.Node{},
+				filter:   FilterConfigurable,
 			},
 			wantErr: true,
 		},
@@ -108,6 +112,7 @@ func TestCollectDefinitions(t *testing.T) {
         }
         }`),
 				confDefs: map[string]*ajson.Node{},
+				filter:   FilterConfigurable,
 			},
 			wantErr: false,
 			checkMap: func(m map[string]*ajson.Node) error {
@@ -127,6 +132,12 @@ func TestCollectDefinitions(t *testing.T) {
         }
         }`),
 				confDefs: map[string]*ajson.Node{},
+				filter: func(node *ajson.Node) bool {
+					if FilterConfigurable(node) || FilterShared(node) {
+						return true
+					}
+					return false
+				},
 			},
 			wantErr: false,
 			checkMap: func(m map[string]*ajson.Node) error {
@@ -146,6 +157,7 @@ func TestCollectDefinitions(t *testing.T) {
           }
         }`),
 				confDefs: map[string]*ajson.Node{},
+				filter:   FilterConfigurable,
 			},
 			wantErr: false,
 			checkMap: func(m map[string]*ajson.Node) error {
@@ -153,7 +165,7 @@ func TestCollectDefinitions(t *testing.T) {
 				if !ok {
 					return fmt.Errorf("expected Test to exist")
 				}
-				if st, _ := getStr("type", def); st != "specialtype" {
+				if st, _ := GetStr("type", def); st != "specialtype" {
 					return fmt.Errorf("expected type")
 				}
 				return nil
@@ -162,7 +174,7 @@ func TestCollectDefinitions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := CollectDefinitions(tt.args.s, tt.args.confDefs); (err != nil) != tt.wantErr {
+			if err := CollectDefinitions(tt.args.s, tt.args.confDefs, tt.args.filter); (err != nil) != tt.wantErr {
 				t.Errorf("CollectDefinitions() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}

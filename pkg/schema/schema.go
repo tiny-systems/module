@@ -10,7 +10,6 @@ import (
 // definitions replacing preserves path and configurable properties
 func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[string]*ajson.Node) ([]byte, error) {
 	// status
-
 	realSchemaNode, err := ajson.Unmarshal(realSchema)
 	if err != nil {
 		return nil, errors.Wrap(err, "error reading original schema")
@@ -36,13 +35,13 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 			// copy important props before replace
 			confCopy := conf.Clone()
 
-			if path, ok := getStr("path", realSchemaDef); ok {
-				_ = setStr("path", path, confCopy)
+			if path, ok := GetStr("path", realSchemaDef); ok {
+				_ = SetStr("path", path, confCopy)
 			}
 
-			configurable, _ := getBool("configurable", realSchemaDef)
+			configurable, _ := GetBool("configurable", realSchemaDef)
 
-			if err = setBool("configurable", configurable, confCopy); err != nil {
+			if err = SetBool("configurable", configurable, confCopy); err != nil {
 				return nil, fmt.Errorf("set bool error: %w", err)
 			}
 			// update real schema from configurable definitions but copy path,configurable,propertyOrder props from status real schema
@@ -54,14 +53,14 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 	return ajson.Marshal(realSchemaNode)
 }
 
-func setStr(param string, val string, v *ajson.Node) error {
+func SetStr(param string, val string, v *ajson.Node) error {
 	if c, err := v.GetKey(param); err == nil {
 		return c.SetString(val)
 	}
 	return v.AppendObject(param, ajson.StringNode("", val))
 }
 
-func setBool(param string, val bool, v *ajson.Node) error {
+func SetBool(param string, val bool, v *ajson.Node) error {
 
 	if c, _ := v.GetKey(param); c != nil {
 		if err := c.SetBool(val); err != nil {
@@ -72,14 +71,14 @@ func setBool(param string, val bool, v *ajson.Node) error {
 	return v.AppendObject(param, ajson.BoolNode("", val))
 }
 
-func setInt(param string, val int, v *ajson.Node) error {
+func SetInt(param string, val int, v *ajson.Node) error {
 	if c, err := v.GetKey(param); err == nil {
 		return c.SetNumeric(float64(val))
 	}
 	return v.AppendObject(param, ajson.NumericNode("", float64(val)))
 }
 
-func getStr(param string, v *ajson.Node) (string, bool) {
+func GetStr(param string, v *ajson.Node) (string, bool) {
 	c, _ := v.GetKey(param)
 	if c != nil {
 		// if node has override
@@ -89,7 +88,7 @@ func getStr(param string, v *ajson.Node) (string, bool) {
 	return "", false
 }
 
-func getInt(param string, v *ajson.Node) (int, bool) {
+func GetInt(param string, v *ajson.Node) (int, bool) {
 	c, _ := v.GetKey(param)
 	if c != nil {
 		// if node has override
@@ -99,7 +98,7 @@ func getInt(param string, v *ajson.Node) (int, bool) {
 	return 0, false
 }
 
-func getBool(param string, v *ajson.Node) (bool, bool) {
+func GetBool(param string, v *ajson.Node) (bool, bool) {
 	c, _ := v.GetKey(param)
 	if c != nil {
 		// if node has override
