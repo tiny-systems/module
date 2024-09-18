@@ -1,7 +1,6 @@
 package evaluator
 
 import (
-	"encoding/base64"
 	"fmt"
 	"github.com/spyzhov/ajson"
 	"time"
@@ -106,23 +105,5 @@ func init() {
 			val = "unknown"
 		}
 		return ajson.StringNode("string", val), nil
-	})
-
-	ajson.AddFunction("b64encode", func(node *ajson.Node) (result *ajson.Node, err error) {
-		if !node.IsString() {
-			return nil, fmt.Errorf("not a string")
-		}
-		return ajson.StringNode("b64encode", base64.StdEncoding.EncodeToString([]byte(node.MustString()))), nil
-	})
-
-	ajson.AddFunction("b64decode", func(node *ajson.Node) (result *ajson.Node, err error) {
-		if !node.IsString() {
-			return nil, fmt.Errorf("not a string")
-		}
-		decodedStrAsByteSlice, err := base64.StdEncoding.DecodeString(node.String())
-		if err != nil {
-			return nil, fmt.Errorf("error decoding base64 string: %v", err)
-		}
-		return ajson.StringNode("b64decode", string(decodedStrAsByteSlice)), nil
 	})
 }

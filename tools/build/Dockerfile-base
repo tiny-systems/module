@@ -14,9 +14,4 @@ RUN go mod download
 RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-X github.com/tiny-systems/module/cli.versionID=${VERSION_ID}" -o /bin/manager #MAIN_PATH#
 
-# Step 3: Final
-FROM gcr.io/distroless/static:nonroot
-COPY --from=builder /bin/manager /manager
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-USER 65532:65532
-CMD ["/manager", "run"]
+
