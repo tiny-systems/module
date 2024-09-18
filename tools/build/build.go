@@ -20,13 +20,17 @@ import (
 )
 
 const (
+	dockerFile = "Dockerfile"
 	goModFile  = "go.mod"
 	replaceDir = "__replaces"
 )
 
 var (
-	//go:embed Dockerfile
-	dockerfile string
+	//go:embed Dockerfile-base
+	dockerfileBase string
+
+	//go:embed Dockerfile-final
+	dockerfileFinal string
 )
 
 func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) error {
@@ -83,7 +87,12 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 		copyCommands = "#COPY# = COPY __replaces /manager/__replaces"
 	}
 
-	dockerfile = replaceStringMap(dockerfile, map[string]string{
+	if userDockerFile, err := os.ReadFile(path.Join(cwd, dockerFile)); err == nil {
+		// replace final docker file with user's one
+		dockerfileFinal = string(userDockerFile)
+	}
+
+	dockerfileContent := replaceStringMap(fmt.Sprintf("%s\n%s", dockerfileBase, dockerfileFinal), map[string]string{
 		"#MAIN_PATH#":   pathToMain,
 		"#MOD_PREPARE#": strings.Join(prepare, "\n"),
 		"#COPY#":        copyCommands,
@@ -91,7 +100,7 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 
 	dockerFileName := fmt.Sprintf("Dockerfile.%s", u.String())
 
-	if err = appendFile(dockerFileName, []byte(dockerfile), tarWriter); err != nil {
+	if err = appendFile(dockerFileName, []byte(dockerfileContent), tarWriter); err != nil {
 		return err
 	}
 	if err := tarWriter.Close(); err != nil {

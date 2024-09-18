@@ -1,0 +1,5 @@
+FROM gcr.io/distroless/static:nonroot
+COPY --from=builder /bin/manager /manager
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+USER 65532:65532
+CMD ["/manager", "run"]
