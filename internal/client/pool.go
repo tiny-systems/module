@@ -25,6 +25,7 @@ type pool struct {
 	addressTable cmap.ConcurrentMap[string, string]
 	clients      cmap.ConcurrentMap[string, module.ModuleServiceClient]
 	errGroup     *errgroup.Group
+	runCtx       context.Context
 }
 
 func (p *pool) Register(moduleName, addr string) {
@@ -37,7 +38,9 @@ func (p *pool) Deregister(moduleName string) {
 
 func NewPool() *pool {
 	return &pool{
-		addressTable: cmap.New[string](), clients: cmap.New[module.ModuleServiceClient](), errGroup: &errgroup.Group{},
+		addressTable: cmap.New[string](),
+		clients:      cmap.New[module.ModuleServiceClient](),
+		errGroup:     &errgroup.Group{},
 	}
 }
 
@@ -73,8 +76,8 @@ func (p *pool) Handler(ctx context.Context, msg *runner.Msg) error {
 }
 
 func (p *pool) Start(ctx context.Context) error {
-
-	<-ctx.Done()
+	p.runCtx = ctx
+	<-p.runCtx.Done()
 	return p.errGroup.Wait()
 }
 
@@ -92,9 +95,10 @@ func (p *pool) getClient(ctx context.Context, addr string) (module.ModuleService
 	}
 
 	p.errGroup.Go(func() error {
-		<-ctx.Done()
-		p.log.Info("closing connection", "addr", addr)
-		conn.Close()
+		<-p.runCtx.Done()
+
+		p.log.Info("closing client connection", "addr", addr)
+		_ = conn.Close()
 		return nil
 	})
 
