@@ -54,7 +54,7 @@ func applyRunFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&kubeconfig, "kubeconfig", "k", filepath.Join(homedir.HomeDir(), ".kube", "config"), "(optional) absolute path to the kubeconfig file")
 	cmd.Flags().StringVarP(&metricsAddr, "metrics-bind-address", "m", ":0", "The address the metric endpoint binds to.")
 	cmd.Flags().StringVarP(&probeAddr, "health-probe-bind-address", "t", ":0", "The address the probe endpoint binds to.")
-	cmd.Flags().StringVarP(&grpcAddr, "grpc-server", "g", ":0", "gRPC server listen address")
+	cmd.Flags().StringVarP(&grpcAddr, "grpc-server-bind-address", "g", ":0", "The address the gRPC server binds to.")
 	cmd.Flags().BoolVarP(&enableLeaderElection, "leader-elect", "l", false, "Enable leader election for controller manager. "+
 		"Enabling this will ensure there is only one active controller manager.")
 
