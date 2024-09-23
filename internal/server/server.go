@@ -8,6 +8,7 @@ import (
 	modulepb "github.com/tiny-systems/module/internal/server/api/module-go"
 	"github.com/tiny-systems/module/internal/server/services/health"
 	"github.com/tiny-systems/module/internal/server/services/module"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -37,10 +38,11 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 
 	wg, ctx := errgroup.WithContext(ctx)
 
-	server := grpc.NewServer()
-	grpc_health_v1.RegisterHealthServer(server, health.NewChecker())
+	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+
+	grpc_health_v1.RegisterHealthServer(srv, health.NewChecker())
 	//
-	modulepb.RegisterModuleServiceServer(server, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
+	modulepb.RegisterModuleServiceServer(srv, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -54,7 +56,7 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 		return &modulepb.MessageResponse{}, err
 	}))
 
-	reflection.Register(server)
+	reflection.Register(srv)
 
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -66,12 +68,12 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 
 	wg.Go(func() error {
 		// run grpc server
-		return server.Serve(lis)
+		return srv.Serve(lis)
 	})
 
 	<-ctx.Done()
 	log.Info().Msg("graceful shutdown")
-	server.Stop()
+	srv.Stop()
 
 	return wg.Wait()
 }
