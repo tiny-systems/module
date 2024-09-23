@@ -39,6 +39,10 @@ spec:
       - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
         command:
         - /manager
+        ports:
+          - containerPort: 8443
+            name: grpc
+            protocol: TCP
         env:
           {{- if .Values.controllerManager.manager.extraEnv }}
             {{- toYaml .Values.controllerManager.manager.extraEnv | nindent 10 }}
@@ -46,7 +50,7 @@ spec:
           - name: KUBERNETES_CLUSTER_DOMAIN
             value: {{ quote .Values.kubernetesClusterDomain }}
           - name: SELF_SERVICE_HOST
-            value: {{ include "tinysystems-operator.fullname" . }}-manager-service
+            value: {{ include "tinysystems-operator.fullname" . }}-manager-service:8443
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}
         livenessProbe:

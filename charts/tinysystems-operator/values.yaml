@@ -59,7 +59,7 @@ managerService:
   - name: grpc
     port: 8483
     protocol: TCP
-    targetPort: http
+    targetPort: grpc
   type: ClusterIP
 metricsService:
   ports:
