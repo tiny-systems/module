@@ -431,7 +431,7 @@ func (m Manager) RegisterExampleNode(ctx context.Context, c module.Component, mo
 		},
 		Spec: v1alpha1.TinyNodeSpec{
 			Module:    mod.GetMajorNameSanitised(),
-			Component: utils.SanitizeResourceName(c.GetInfo().Name),
+			Component: utils.SanitizeResourceName(componentInfo.Name),
 		},
 	}
 
