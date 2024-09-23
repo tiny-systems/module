@@ -56,7 +56,7 @@ var runCmd = &cobra.Command{
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		metrics.ConfigureOpenTelemetry(
+		_ = metrics.ConfigureOpenTelemetry(
 			metrics.WithDSN(os.Getenv("OTLP_DSN")),
 		)
 
@@ -201,12 +201,23 @@ var runCmd = &cobra.Command{
 			}()
 			if err := serv.Start(ctx, scheduler.Handle, grpcAddr, func(addr net.Addr) {
 				// @todo check if inside of container
-				parts := strings.Split(addr.String(), ":")
-				if len(parts) > 0 {
-					listenAddr <- fmt.Sprintf("127.0.0.1:%s", parts[len(parts)-1])
+				l.Info("gRPC listens to address", "addr", addr.String())
+
+				//
+				if selfHost := os.Getenv("SELF_SERVICE_HOST"); selfHost != "" {
+					l.Info("gRPC address", "addr", selfHost)
+					listenAddr <- selfHost
 					return
 				}
-				l.Info("gRPC listen address", "addr", addr.String())
+
+				parts := strings.Split(addr.String(), ":")
+				if len(parts) > 0 {
+					localAddr := fmt.Sprintf("127.0.0.1:%s", parts[len(parts)-1])
+
+					l.Info("gRPC address", "localAddr", localAddr)
+					listenAddr <- localAddr
+					return
+				}
 				listenAddr <- addr.String()
 			}); err != nil {
 				l.Error(err, "problem starting gRPC server")

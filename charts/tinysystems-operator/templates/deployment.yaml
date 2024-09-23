@@ -45,6 +45,8 @@ spec:
           {{- end }}
           - name: KUBERNETES_CLUSTER_DOMAIN
             value: {{ quote .Values.kubernetesClusterDomain }}
+          - name: SELF_SERVICE_HOST
+            value: {{ include "tinysystems-operator.fullname" . }}-manager-service
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}
         livenessProbe:
