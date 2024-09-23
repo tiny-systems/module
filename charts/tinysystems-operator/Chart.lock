@@ -1,6 +1,0 @@
-dependencies:
-- name: tinysystems-crd
-  repository: https://tiny-systems.github.io/module
-  version: 0.1.21
-digest: sha256:f4e958da3ffb08fd37d17c5bef10ad99e239585b17cd0b07de2738b0ac3bedff
-generated: "2024-07-09T21:01:23.440837+01:00"
