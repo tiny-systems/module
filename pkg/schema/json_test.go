@@ -222,7 +222,7 @@ func TestCreateSchema(t *testing.T) {
 			getObj: func() interface{} {
 				return nil
 			},
-			want: (&jsonschema.Schema{}),
+			want: &jsonschema.Schema{},
 		},
 		//
 		{
@@ -294,6 +294,37 @@ func TestCreateSchema(t *testing.T) {
 						}).WithExtraProperties(map[string]interface{}{
 						"path":         "$.context", // JSON path of this definition related to the root object
 						"configurable": true,
+						// first property of it's level
+					}),
+					///
+					"Modifyinmessage": *((&jsonschema.Schema{}).WithType(jsonschema.Object.Type()).WithRequired("context").
+						WithProperties(map[string]jsonschema.SchemaOrBool{
+							"context": (&jsonschema.Schema{}).WithRef("#/$defs/Modifycontext").WithExtraProperties(map[string]interface{}{
+								"propertyOrder": 1, // first property of it's level
+							}).ToSchemaOrBool(),
+						}).WithExtraPropertiesItem("path", "$")), // root level
+					///
+				}),
+		},
+
+		{
+			name: "non configurable any presented as definition",
+			getObj: func() interface{} {
+
+				type ModifyContext any
+				type ModifyInMessage struct {
+					Context ModifyContext `json:"context" configurable:"false" required:"true" title:"Context" description:"Arbitrary message to be modified"`
+				}
+				return ModifyInMessage{}
+			},
+			//
+			want: (&jsonschema.Schema{}).
+				WithRef("#/$defs/Modifyinmessage"). // on a root level we only have reference to the definition
+				WithExtraPropertiesItem("$defs", map[string]jsonschema.Schema{
+					///
+					"Modifycontext": *(&jsonschema.Schema{}).WithTitle("Context").WithDescription("Arbitrary message to be modified").WithExtraProperties(map[string]interface{}{
+						"path":         "$.context", // JSON path of this definition related to the root object
+						"configurable": false,
 						// first property of it's level
 					}),
 					///
