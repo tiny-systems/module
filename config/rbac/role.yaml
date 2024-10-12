@@ -25,15 +25,6 @@ rules:
   - ""
   resources:
   - pods
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
   - services
   verbs:
   - get
@@ -55,6 +46,8 @@ rules:
   - operator.tinysystems.io
   resources:
   - tinymodules
+  - tinynodes
+  - tinytrackers
   verbs:
   - create
   - delete
@@ -68,39 +61,18 @@ rules:
   - operator.tinysystems.io
   resources:
   - tinymodules/finalizers
+  - tinynodes/finalizers
+  - tinysignals/finalizers
+  - tinytrackers/finalizers
   verbs:
   - update
 - apiGroups:
   - operator.tinysystems.io
   resources:
   - tinymodules/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinynodes
-  verbs:
-  - create
-  - delete
-  - deletecollection
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinynodes/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
   - tinynodes/status
+  - tinysignals/status
+  - tinytrackers/status
   verbs:
   - get
   - patch
@@ -117,44 +89,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinysignals/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinysignals/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinytrackers
-  verbs:
-  - create
-  - delete
-  - deletecollection
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinytrackers/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinytrackers/status
-  verbs:
-  - get
-  - patch
-  - update

@@ -72,6 +72,11 @@ func CollectDefinitions(s []byte, confDefs map[string]*ajson.Node, filter Filter
 }
 
 func CreateSchema(m interface{}) (jsonschema.Schema, error) {
+	if m == nil {
+		// empty object empty schema
+		return jsonschema.Schema{}, nil
+	}
+
 	var (
 		r = jsonschema.Reflector{
 			DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),

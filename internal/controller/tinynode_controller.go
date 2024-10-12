@@ -122,38 +122,25 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinyNode{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&operatorv1alpha1.TinySignal{}, &SignalEventHandler{}).
+		Watches(&operatorv1alpha1.TinySignal{}, handler.TypedFuncs[client.Object, reconcile.Request]{
+			DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				signal, ok := e.Object.(*operatorv1alpha1.TinySignal)
+				if !ok {
+					return
+				}
+				if signal.Spec.Port != module.ReconcilePort {
+					// do not reconcile if signal was used as a way to send data
+					return
+				}
+				q.Add(reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      signal.Spec.Node,
+						Namespace: signal.Namespace,
+					},
+				})
+			}}).
 		Complete(r)
-}
-
-var _ handler.EventHandler = &SignalEventHandler{}
-
-type SignalEventHandler struct{}
-
-func (s SignalEventHandler) Create(_ context.Context, _ event.CreateEvent, _ workqueue.RateLimitingInterface) {
-}
-func (s SignalEventHandler) Update(_ context.Context, _ event.UpdateEvent, _ workqueue.RateLimitingInterface) {
-}
-func (s SignalEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.RateLimitingInterface) {
-}
-
-func (s SignalEventHandler) Delete(ctx context.Context, event event.DeleteEvent, q workqueue.RateLimitingInterface) {
-	signal, ok := event.Object.(*operatorv1alpha1.TinySignal)
-	if !ok {
-		return
-	}
-
-	if signal.Spec.Port != module.ReconcilePort {
-		// do not reconcile if signal was used as a way to send data
-		return
-	}
-
-	q.Add(reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      signal.Spec.Node,
-			Namespace: signal.Namespace,
-		},
-	})
 }

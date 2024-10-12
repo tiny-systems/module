@@ -42,7 +42,7 @@ func ConfigureOpenTelemetry(opts ...Option) error {
 	}
 
 	if dsn.Token == "<token>" {
-		fmt.Errorf("dummy OTLP_DSN detected: %q (Opentelemetry is disabled)", conf.dsn)
+		return fmt.Errorf("dummy OTLP_DSN detected: %q (Opentelemetry is disabled)", conf.dsn)
 	}
 
 	if strings.HasSuffix(dsn.Host, ":14318") {
