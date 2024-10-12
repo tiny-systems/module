@@ -62,7 +62,6 @@ func (m Manager) CleanupExampleNodes(ctx context.Context, mod module.Info) error
 	return m.client.DeleteAllOf(ctx, &v1alpha1.TinyNode{}, client.InNamespace(m.namespace), client.MatchingLabelsSelector{
 		Selector: sel,
 	})
-	return nil
 }
 
 func (m Manager) RegisterModule(ctx context.Context, mod module.Info) error {

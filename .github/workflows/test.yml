@@ -12,5 +12,5 @@ jobs:
           go-version: '1.23.1'
       - name: Install dependencies
         run: go get .
-      - name: Test with the Go CLI
-        run: go test ./...
+      - name: Tun tests
+        run: make test

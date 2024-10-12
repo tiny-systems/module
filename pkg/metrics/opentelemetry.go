@@ -65,14 +65,4 @@ func otlpMetricClient(ctx context.Context, conf *config, dsn *DSN) (sdkmetric.Ex
 
 func preferDeltaTemporalitySelector(kind sdkmetric.InstrumentKind) metricdata.Temporality {
 	return metricdata.DeltaTemporality
-
-	switch kind {
-	case sdkmetric.InstrumentKindCounter,
-		sdkmetric.InstrumentKindObservableUpDownCounter,
-		sdkmetric.InstrumentKindObservableCounter,
-		sdkmetric.InstrumentKindHistogram:
-		return metricdata.DeltaTemporality
-	default:
-		return metricdata.CumulativeTemporality
-	}
 }

@@ -56,12 +56,10 @@ func configureTracing(ctx context.Context, client *client, conf *config) error {
 	if conf.prettyPrint {
 		exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 		if err != nil {
-			fmt.Errorf(err.Error())
-		} else {
-			provider.RegisterSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter))
+			return err
 		}
+		provider.RegisterSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter))
 	}
-
 	client.tp = provider
 
 	return nil
