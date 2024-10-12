@@ -141,9 +141,13 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			configurable := interfaceBool(params.PropertySchema.ExtraProperties["configurable"])
 			shared := interfaceBool(params.PropertySchema.ExtraProperties["shared"])
 
-			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) {
-				refOnly := replaceRoot(params.Field.Type, params.PropertySchema)
+			// when we have configurable == true
+			// or shared == true
+			// it is definitely object or type is unknown
+			// create a definition for that
+			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.Type == nil {
 
+				refOnly := replaceRoot(params.Field.Type, params.PropertySchema)
 				refOnly.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
 				*params.PropertySchema = refOnly
 				return nil
