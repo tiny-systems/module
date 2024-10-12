@@ -38,8 +38,12 @@ var FilterShared FilterFunction = func(node *ajson.Node) bool {
 	return configurable
 }
 
-func GetDefinitionName(t reflect.Type) string {
-	return cases.Title(language.English).String(t.Name())
+func getDefinitionName(t reflect.Type) string {
+	var n = t.Name()
+	if t.Kind() == reflect.Ptr {
+		n = t.Elem().Name()
+	}
+	return cases.Title(language.English).String(n)
 }
 
 //CollectDefinitions finds all shared and configurable definitions
@@ -68,33 +72,39 @@ func CollectDefinitions(s []byte, confDefs map[string]*ajson.Node, filter Filter
 }
 
 func CreateSchema(m interface{}) (jsonschema.Schema, error) {
-
 	var (
 		r = jsonschema.Reflector{
 			DefaultOptions: make([]func(ctx *jsonschema.ReflectContext), 0),
 		}
-		defs    = make(map[string]jsonschema.Schema)
-		propIdx = 0
+		defs = make(map[string]jsonschema.Schema)
 	)
+	propIdxMap := make(map[string]int)
 
-	sh, _ := r.Reflect(m,
-		jsonschema.RootRef,
-		jsonschema.InterceptDefName(func(t reflect.Type, _ string) string {
-			return GetDefinitionName(t)
-		}),
-		jsonschema.DefinitionsPrefix("#/$defs/"),
-		jsonschema.CollectDefinitions(func(name string, schema jsonschema.Schema) {
-			if _, ok := defs[name]; ok {
-				return
-			}
-			defs[name] = schema
-		}),
+	var replaceRoot = func(t reflect.Type, s *jsonschema.Schema) jsonschema.Schema {
+
+		defName := getDefinitionName(t)
+		if defName == "" {
+			return *s
+		}
+
+		clone, _ := s.JSONSchema() //
+		clone.Ref = nil
+		defs[defName] = clone
+
+		ref := fmt.Sprintf("#/$defs/%s", defName)
+		refOnly := jsonschema.Schema{}
+		refOnly.Ref = &ref
+		return refOnly
+	}
+
+	sh, err := r.Reflect(m,
+		jsonschema.InlineRefs,
 		jsonschema.InterceptProp(func(params jsonschema.InterceptPropParams) error {
 			if !params.Processed {
 				return nil
 			}
-			propIdx++
-
+			propPath := strings.Join(params.Path, "")
+			propIdxMap[propPath]++
 			// make sure we do not ignore our custom props listed in scalarCustomProps
 			for _, cp := range scalarCustomProps {
 				if prop, ok := params.Field.Tag.Lookup(cp); ok {
@@ -126,31 +136,17 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			configurable := interfaceBool(params.PropertySchema.ExtraProperties["configurable"])
 			shared := interfaceBool(params.PropertySchema.ExtraProperties["shared"])
 
-			// autoinc
-			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdx)
+			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) {
+				refOnly := replaceRoot(params.Field.Type, params.PropertySchema)
 
-			if !configurable && !shared && !params.PropertySchema.HasType(jsonschema.Object) {
+				refOnly.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
+				*params.PropertySchema = refOnly
 				return nil
 			}
 
-			//
-			defName := GetDefinitionName(params.Field.Type)
-
-			clone, _ := params.PropertySchema.JSONSchema() //
-			clone.Ref = nil
-			defs[defName] = clone
-
-			// register definitions without $ref
-
+			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
 			// place $ref instead
-			ref := fmt.Sprintf("#/$defs/%s", defName)
-			refOnly := jsonschema.Schema{}
-			refOnly.Ref = &ref
-			refOnly.WithExtraPropertiesItem("propertyOrder", propIdx)
-
-			*params.PropertySchema = refOnly
 			return nil
-
 		}),
 
 		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
@@ -158,6 +154,12 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			params.Schema.RemoveType(jsonschema.Null)
 		}),
 	)
+
+	if err != nil {
+		return jsonschema.Schema{}, err
+	}
+
+	sh = replaceRoot(reflect.TypeOf(m), &sh)
 
 	// calculate path
 	// build json path for each definition how it's related to node's root

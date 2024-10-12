@@ -222,7 +222,7 @@ func TestCreateSchema(t *testing.T) {
 			getObj: func() interface{} {
 				return nil
 			},
-			want: (&jsonschema.Schema{}).WithExtraPropertiesItem("$defs", map[string]jsonschema.Schema{}),
+			want: (&jsonschema.Schema{}),
 		},
 		//
 		{
@@ -249,10 +249,52 @@ func TestCreateSchema(t *testing.T) {
 				WithRef("#/$defs/Modifyinmessage"). // on a root level we only have reference to the definition
 				WithExtraPropertiesItem("$defs", map[string]jsonschema.Schema{
 					///
-					"Modifycontext": *((&jsonschema.Schema{}).WithTitle("Context").WithDescription("Arbitrary message to be modified")).WithExtraProperties(map[string]interface{}{
-						"configurable":  true,
-						"path":          "$.context", // JSON path of this definition related to the root object
-						"propertyOrder": 1,           // first property of it's level
+					"Modifycontext": *((&jsonschema.Schema{}).
+						WithTitle("Context").
+						WithDescription("Arbitrary message to be modified")).
+						WithExtraProperties(map[string]interface{}{
+							"configurable": true,
+							"path":         "$.context", // JSON path of this definition related to the root object
+						}),
+					///
+					"Modifyinmessage": *((&jsonschema.Schema{}).WithType(jsonschema.Object.Type()).WithRequired("context").
+						WithProperties(map[string]jsonschema.SchemaOrBool{
+							"context": (&jsonschema.Schema{}).WithRef("#/$defs/Modifycontext").WithExtraProperties(map[string]interface{}{
+								"propertyOrder": 1, // first property of it's level
+							}).ToSchemaOrBool(),
+						}).WithExtraPropertiesItem("path", "$")), // root level
+					///
+				}),
+		},
+		//
+		{
+			name: "configurable preserves structure",
+			getObj: func() interface{} {
+
+				type ModifyContext struct {
+					Name string `json:"name"`
+				} // no type
+
+				type ModifyInMessage struct {
+					Context ModifyContext `json:"context" configurable:"true" required:"true" title:"Context" description:"Arbitrary message to be modified"`
+				}
+				return ModifyInMessage{}
+			},
+			//
+			want: (&jsonschema.Schema{}).
+				WithRef("#/$defs/Modifyinmessage"). // on a root level we only have reference to the definition
+				WithExtraPropertiesItem("$defs", map[string]jsonschema.Schema{
+					///
+					"Modifycontext": *(&jsonschema.Schema{}).
+						WithType(jsonschema.Object.Type()).WithTitle("Context").WithDescription("Arbitrary message to be modified").
+						WithProperties(map[string]jsonschema.SchemaOrBool{
+							"name": (&jsonschema.Schema{}).WithType(jsonschema.String.Type()).WithExtraProperties(map[string]interface{}{
+								"propertyOrder": 1, // first property of it's level
+							}).ToSchemaOrBool(),
+						}).WithExtraProperties(map[string]interface{}{
+						"path":         "$.context", // JSON path of this definition related to the root object
+						"configurable": true,
+						// first property of it's level
 					}),
 					///
 					"Modifyinmessage": *((&jsonschema.Schema{}).WithType(jsonschema.Object.Type()).WithRequired("context").
@@ -285,6 +327,24 @@ func TestCreateSchema(t *testing.T) {
 							"propertyOrder": 1,
 						}).ToSchemaOrBool(),
 					}).
+						WithExtraProperties(map[string]interface{}{
+							"path": "$", // Request is root
+						})),
+				}),
+		},
+
+		{
+			name: "root context any (used in signal)",
+			getObj: func() interface{} {
+				type Context any
+				return new(Context)
+			},
+			//
+			want: (&jsonschema.Schema{}).
+				WithRef("#/$defs/Context"). // on a root level we only have reference to the definition
+				WithExtraPropertiesItem("$defs", map[string]jsonschema.Schema{
+					///
+					"Context": *((&jsonschema.Schema{}).
 						WithExtraProperties(map[string]interface{}{
 							"path": "$", // Request is root
 						})),
@@ -329,7 +389,7 @@ func TestCreateSchema(t *testing.T) {
 			w, _ := tt.want.MarshalJSON()
 
 			if d := cmp.Diff(string(g), string(w)); d != "" {
-				t.Errorf("expected schema mismatch: %s; expected: %s; got: %s", d, string(w), string(g))
+				t.Errorf("expected schema mismatch: %s; \nexpected:\n%s;\ngot:\n%s", d, string(w), string(g))
 			}
 		})
 	}
