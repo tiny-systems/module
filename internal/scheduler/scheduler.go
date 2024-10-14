@@ -129,13 +129,14 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 	instance, ok := s.instancesMap.Get(nodeName)
 
 	if !ok || (instance != nil && !instance.HasPort(port)) {
-		// instance is not registered currently or it's port is not yet available (setting did not enable it?)
+		// instance is not registered currently or it's port is not yet available (setting did not enable it yet?)
 		// maybe reconcile call did not register it yet
 		// sleep and try again
 		t := time.NewTimer(time.Millisecond * 100)
 		defer t.Stop()
 
 		select {
+		// what ever happens first
 		case <-ctx.Done():
 			return nil
 		case <-t.C:

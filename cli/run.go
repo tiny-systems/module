@@ -56,12 +56,14 @@ var runCmd = &cobra.Command{
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		_ = metrics.ConfigureOpenTelemetry(
-			metrics.WithDSN(os.Getenv("OTLP_DSN")),
-		)
-
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
+		err := metrics.ConfigureOpenTelemetry(
+			metrics.WithDSN(os.Getenv("OTLP_DSN")),
+		)
+		if err != nil {
+			l.Error(err, "configure opentelemetry error")
+		}
 
 		// Send buffered spans and free resources.
 		defer func() {
@@ -132,9 +134,6 @@ var runCmd = &cobra.Command{
 			Metrics: metricsserver.Options{
 				BindAddress: metricsAddr,
 			},
-			//WebhookServer: webhook.NewServer(webhook.Options{
-			//	Port: 9443,
-			//}),
 			Cache:                  cache.Options{},
 			HealthProbeBindAddress: probeAddr,
 			LeaderElection:         enableLeaderElection,

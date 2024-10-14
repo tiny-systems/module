@@ -57,7 +57,7 @@ type Runner struct {
 	//
 	nodeLock         *sync.Mutex
 	previousSettings interface{}
-	reconciled       *atomic.Bool
+	reconciling      *atomic.Bool
 }
 
 func NewRunner(name string, component m.Component) *Runner {
@@ -67,7 +67,7 @@ func NewRunner(name string, component m.Component) *Runner {
 		nodeLock:       &sync.Mutex{},
 		closeCh:        make(chan struct{}),
 		portsCacheLock: &sync.RWMutex{},
-		reconciled:     &atomic.Bool{},
+		reconciling:    &atomic.Bool{},
 	}
 }
 
@@ -335,12 +335,13 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 			//c.log.Info("component callback handler", "port", outputPort, "node", c.name)
 
 			if outputPort == m.ReconcilePort {
-				if !c.reconciled.Load() {
-					// reconciled already
+				if c.reconciling.Load() {
+					// reconciling already
 					return nil
 				}
 
-				c.reconciled.Store(false)
+				c.reconciling.Store(true)
+
 				// do not trace reconcile port
 				return outputHandler(ctx, &Msg{
 					To: utils.GetPortFullName(c.name, outputPort),
@@ -389,11 +390,9 @@ func (c *Runner) Node() v1alpha1.TinyNode {
 func (c *Runner) SetNode(node v1alpha1.TinyNode) {
 
 	c.nodeLock.Lock()
-
 	defer c.nodeLock.Unlock()
 	//
-	c.reconciled.Store(true)
-
+	c.reconciling.Store(false)
 	if node.Labels[v1alpha1.GlobalLabel] != "true" {
 		// global nodes have no flow ID
 		c.flowID = node.Labels[v1alpha1.FlowIDLabel]
