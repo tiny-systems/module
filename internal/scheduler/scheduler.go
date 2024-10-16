@@ -224,7 +224,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	})
 
 	// give time to node update itself or fail
-	time.Sleep(time.Millisecond * 3 * 100)
+	time.Sleep(time.Millisecond * 300)
 
 	var err = runnerInstance.UpdateStatus(&node.Status)
 

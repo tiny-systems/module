@@ -89,7 +89,8 @@ func (p *pool) getClient(ctx context.Context, addr string) (module.ModuleService
 		return client, nil
 	}
 
-	p.log.Info("creating new client", "addr", addr)
+	p.log.Info("creating a new gRPC client", "addr", addr)
+
 	conn, err := grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
 	if err != nil {
 		return nil, err

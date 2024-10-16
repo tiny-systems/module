@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"strings"
+	"sync"
 
 	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,6 +25,7 @@ type Manager struct {
 	client    client.Client
 	namespace string
 	log       logr.Logger
+	lock      *sync.Mutex
 }
 
 type ManagerInterface interface {
@@ -34,7 +36,7 @@ type ManagerInterface interface {
 }
 
 func NewManager(c client.Client, log logr.Logger, ns string) *Manager {
-	return &Manager{client: c, log: log, namespace: ns}
+	return &Manager{client: c, log: log, namespace: ns, lock: &sync.Mutex{}}
 }
 
 // CleanupExampleNodes  @todo deal with it later
@@ -131,6 +133,10 @@ func (m Manager) ExposePort(ctx context.Context, autoHostName string, hostnames 
 		return nil, fmt.Errorf("unable to find release name: %v", err)
 	}
 
+	m.lock.Lock()
+	// protect service and ingress from the concurrent update
+	defer m.lock.Unlock()
+
 	svc, err := m.getReleaseService(ctx, releaseName)
 	if err != nil {
 		return []string{}, fmt.Errorf("unable to get service: %v", err)
@@ -151,9 +157,7 @@ func (m Manager) ExposePort(ctx context.Context, autoHostName string, hostnames 
 	if prefix != "" && autoHostName != "" {
 		hostnames = append(hostnames, fmt.Sprintf("%s-%s%s", autoHostName, svc.Namespace, prefix))
 	}
-
 	//
-
 	return m.addRulesIngress(ctx, ingress, svc, hostnames, port)
 }
 
@@ -377,7 +381,8 @@ func (m Manager) DisclosePort(ctx context.Context, port int) error {
 
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
-		return fmt.Errorf("unable to determine the current pod's name")
+		m.log.Error(fmt.Errorf("unable to determine the current pod's name"), "HOSTNAME env is empty")
+		return nil
 	}
 
 	releaseName, err := m.getReleaseNameByPodName(ctx, currentPod)
@@ -385,6 +390,8 @@ func (m Manager) DisclosePort(ctx context.Context, port int) error {
 		return fmt.Errorf("unable to find release name: %v", err)
 	}
 
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	svc, err := m.getReleaseService(ctx, releaseName)
 	if err != nil {
 		return fmt.Errorf("unable to get service: %v", err)
