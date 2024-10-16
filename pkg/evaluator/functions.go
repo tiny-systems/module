@@ -87,6 +87,10 @@ func init() {
 		return ajson.NumericNode("sum", lNum+rNum), nil
 	})
 
+	ajson.AddFunction("now", func(_ *ajson.Node) (result *ajson.Node, err error) {
+		return ajson.NumericNode("now", float64(time.Now().Unix())), nil
+	})
+
 	ajson.AddFunction("string", func(node *ajson.Node) (result *ajson.Node, err error) {
 		var val string
 		switch {

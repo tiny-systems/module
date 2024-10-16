@@ -67,8 +67,6 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if m != r.Module.GetMajorNameSanitised() {
-		// not we are
-		l.Info("signal is not for the current module", "module", m, "current", r.Module.GetMajorNameSanitised())
 		return reconcile.Result{}, nil
 	}
 
