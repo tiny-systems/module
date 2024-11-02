@@ -407,6 +407,43 @@ func TestCreateSchema(t *testing.T) {
 						})),
 				}),
 		},
+		{
+			name: "array item (used in split)",
+			getObj: func() interface{} {
+				type Context any
+
+				type ItemContext any
+
+				type InMessage struct {
+					Context Context       `json:"context"`
+					Array   []ItemContext `json:"array"`
+				}
+				return InMessage{}
+			},
+			want: (&jsonschema.Schema{}).
+				WithRef("#/$defs/Inmessage"). // root ref
+				WithExtraPropertiesItem("$defs", map[string]jsonschema.Schema{
+					"Itemcontext": *((&jsonschema.Schema{}).
+						WithExtraPropertiesItem("path", "$.array[0]")),
+					"Context": *((&jsonschema.Schema{}).
+						WithExtraPropertiesItem("path", "$.context")),
+					"Inmessage": *((&jsonschema.Schema{}).WithType(jsonschema.Object.Type()).
+						WithProperties(map[string]jsonschema.SchemaOrBool{
+							"array": (&jsonschema.Schema{}).WithType(jsonschema.Array.Type()).WithItems(jsonschema.Items{
+								SchemaOrBool: &jsonschema.SchemaOrBool{
+									TypeObject: &jsonschema.Schema{
+										Ref: getStrPtr("#/$defs/Itemcontext"),
+									},
+								},
+							}).WithExtraProperties(map[string]interface{}{
+								"propertyOrder": 2, // first property of it's level
+							}).ToSchemaOrBool(),
+							"context": (&jsonschema.Schema{}).WithRef("#/$defs/Context").WithExtraProperties(map[string]interface{}{
+								"propertyOrder": 1, // first property of it's level
+							}).ToSchemaOrBool(),
+						}).WithExtraPropertiesItem("path", "$")),
+				}),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -424,4 +461,8 @@ func TestCreateSchema(t *testing.T) {
 			}
 		})
 	}
+}
+
+func getStrPtr(s string) *string {
+	return &s
 }

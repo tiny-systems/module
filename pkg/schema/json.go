@@ -40,7 +40,7 @@ var FilterShared FilterFunction = func(node *ajson.Node) bool {
 
 func getDefinitionName(t reflect.Type) string {
 	var n = t.Name()
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Ptr || t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
 		n = t.Elem().Name()
 	}
 	return cases.Title(language.English).String(n)
@@ -71,8 +71,8 @@ func CollectDefinitions(s []byte, confDefs map[string]*ajson.Node, filter Filter
 	return nil
 }
 
-func CreateSchema(m interface{}) (jsonschema.Schema, error) {
-	if m == nil {
+func CreateSchema(val interface{}) (jsonschema.Schema, error) {
+	if val == nil {
 		// empty object empty schema
 		return jsonschema.Schema{}, nil
 	}
@@ -83,10 +83,10 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 		}
 		defs = make(map[string]jsonschema.Schema)
 	)
+
 	propIdxMap := make(map[string]int)
 
 	var replaceRoot = func(t reflect.Type, s *jsonschema.Schema) jsonschema.Schema {
-
 		defName := getDefinitionName(t)
 		if defName == "" {
 			return *s
@@ -102,7 +102,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 		return refOnly
 	}
 
-	sh, err := r.Reflect(m,
+	sh, err := r.Reflect(val,
 		jsonschema.InlineRefs,
 		jsonschema.InterceptProp(func(params jsonschema.InterceptPropParams) error {
 			if !params.Processed {
@@ -145,12 +145,17 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 			// or shared == true
 			// it is definitely object or type is unknown
 			// create a definition for that
-			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.Type == nil {
 
+			if params.PropertySchema.Items != nil {
+				refOnly := replaceRoot(params.Field.Type, params.PropertySchema.Items.SchemaOrBool.TypeObject)
+				ts := refOnly.ToSchemaOrBool()
+				params.PropertySchema.Items.SchemaOrBool = &ts
+			}
+
+			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.Type == nil {
 				refOnly := replaceRoot(params.Field.Type, params.PropertySchema)
-				refOnly.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
+				//	refOnly.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
 				*params.PropertySchema = refOnly
-				return nil
 			}
 
 			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
@@ -159,7 +164,6 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 		}),
 
 		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
-			// fires when something is null
 			params.Schema.RemoveType(jsonschema.Null)
 		}),
 	)
@@ -168,12 +172,11 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 		return jsonschema.Schema{}, err
 	}
 
-	sh = replaceRoot(reflect.TypeOf(m), &sh)
+	sh = replaceRoot(reflect.TypeOf(val), &sh)
 
 	// calculate path
 	// build json path for each definition how it's related to node's root
 	definitionPaths := make(map[string]tagDefinition)
-
 	//
 
 	for defName, schema := range defs {
@@ -218,7 +221,7 @@ func CreateSchema(m interface{}) (jsonschema.Schema, error) {
 	sh.WithExtraPropertiesItem("$defs", defs)
 
 	// schema post-processing hook
-	if processor, ok := m.(Processor); ok {
+	if processor, ok := val.(Processor); ok {
 		processor.Process(&sh)
 	}
 
