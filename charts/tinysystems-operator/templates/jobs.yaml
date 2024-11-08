@@ -18,7 +18,7 @@ spec:
       containers:
         - name: pre-install-job
           image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
-          args: {{- toYaml .Values.controllerManager.manager.installArgs | nindent 8 }}
+          args: {{- toYaml .Values.controllerManager.manager.installArgs | nindent 12 }}
           command:
             - /manager pre-install
 ---
@@ -42,6 +42,6 @@ spec:
       containers:
         - name: pre-delete-job
           image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
-          args: {{- toYaml .Values.controllerManager.manager.deleteArgs | nindent 8 }}
+          args: {{- toYaml .Values.controllerManager.manager.deleteArgs | nindent 12 }}
           command:
             - /manager pre-delete
