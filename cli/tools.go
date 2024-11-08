@@ -5,14 +5,13 @@ import (
 )
 
 var (
-	devKey       string
-	serverApiURL string
+	devKey string
 )
 var toolsCmd = &cobra.Command{
 	Use:   "tools",
 	Short: "Developer tools",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
+		_ = cmd.Help()
 	},
 }

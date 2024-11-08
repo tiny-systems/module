@@ -24,6 +24,9 @@ func RegisterCommands(rootCmd *cobra.Command) {
 	applyBuildFlags(buildCmd)
 	toolsCmd.AddCommand(buildCmd)
 	toolsCmd.AddCommand(infoCmd)
+
+	rootCmd.AddCommand(preInstallCmd)
+	rootCmd.AddCommand(preDeleteCmd)
 }
 
 func applyCommonFlags(cmd *cobra.Command) {
@@ -42,9 +45,9 @@ func applyBuildFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&targetOs, "os", "o", "linux", "Target OS, change only if you are using custom Dockerfile with OS different than linux.")
 	cmd.Flags().StringVarP(&targetArch, "arch", "a", runtime.GOARCH, "Target architecture")
 
-	cmd.MarkFlagRequired("devkey")
-	cmd.MarkFlagRequired("version")
-	cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("devkey")
+	_ = cmd.MarkFlagRequired("version")
+	_ = cmd.MarkFlagRequired("name")
 }
 
 func applyRunFlags(cmd *cobra.Command) {
@@ -58,7 +61,6 @@ func applyRunFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVarP(&enableLeaderElection, "leader-elect", "l", false, "Enable leader election for controller manager. "+
 		"Enabling this will ensure there is only one active controller manager.")
 
-	cmd.MarkFlagRequired("version")
-	cmd.MarkFlagRequired("name")
-
+	_ = cmd.MarkFlagRequired("version")
+	_ = cmd.MarkFlagRequired("name")
 }
