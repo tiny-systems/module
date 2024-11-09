@@ -326,7 +326,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 			go func() {
 				// give it time to animate
-				time.Sleep(time.Second * 3)
+				time.Sleep(time.Second * 1)
 				c.setGauge(0, msg.EdgeID, metrics.MetricEdgeBusy)
 			}()
 		}()
