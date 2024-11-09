@@ -91,6 +91,16 @@ func init() {
 		return ajson.NumericNode("now", float64(time.Now().Unix())), nil
 	})
 
+	ajson.AddFunction("RFC3339", func(a *ajson.Node) (result *ajson.Node, err error) {
+		var ts int64
+		if a.IsNumeric() {
+			ts = int64(a.MustNumeric())
+		} else {
+			ts = time.Now().Unix()
+		}
+		return ajson.StringNode("RFC3339", time.Unix(ts, 0).Format(time.RFC3339)), nil
+	})
+
 	ajson.AddFunction("string", func(node *ajson.Node) (result *ajson.Node, err error) {
 		var val string
 		switch {
