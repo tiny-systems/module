@@ -162,10 +162,10 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 			// place $ref instead
 			return nil
 		}),
-
-		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
-			params.Schema.RemoveType(jsonschema.Null)
-		}),
+		//
+		//jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
+		//	params.Schema.RemoveType(jsonschema.Null)
+		//}),
 	)
 
 	if err != nil {
