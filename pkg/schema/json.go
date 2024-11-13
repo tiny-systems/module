@@ -154,7 +154,6 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 
 			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.Type == nil {
 				refOnly := replaceRoot(params.Field.Type, params.PropertySchema)
-				//	refOnly.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
 				*params.PropertySchema = refOnly
 			}
 
