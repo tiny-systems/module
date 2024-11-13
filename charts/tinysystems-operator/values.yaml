@@ -26,8 +26,10 @@ controllerManager:
     - --metrics-bind-address=127.0.0.1:8080
     - --leader-elect
     - --grpc-server-bind-address=:8483
-    deleteArgs: []
-    installArgs: []
+    deleteArgs:
+      - pre-delete
+    installArgs:
+      - pre-install
     extraEnv: []
     containerSecurityContext:
       allowPrivilegeEscalation: false
