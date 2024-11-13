@@ -164,6 +164,16 @@ entries:
   tinysystems-operator:
   - apiVersion: v2
     appVersion: 0.1.3
+    created: "2024-11-13T21:40:14.293140464Z"
+    description: Tiny Systems Operator Helm chart for Kubernetes
+    digest: f4ec79c08852f74deb7dbdb2d7d86442cac1ac4c0dd86e0c23828a1582be0fba
+    name: tinysystems-operator
+    type: application
+    urls:
+    - https://github.com/tiny-systems/module/releases/download/tinysystems-operator-0.1.48/tinysystems-operator-0.1.48.tgz
+    version: 0.1.48
+  - apiVersion: v2
+    appVersion: 0.1.3
     created: "2024-11-13T21:25:19.344075601Z"
     description: Tiny Systems Operator Helm chart for Kubernetes
     digest: 0038a4c8d134b33617b56dc872d99e0d30deedf703eb237e1f337892ea1ee959
@@ -686,4 +696,4 @@ entries:
     urls:
     - https://github.com/tiny-systems/module/releases/download/tinysystems-operator-0.1.5/tinysystems-operator-0.1.5.tgz
     version: 0.1.5
-generated: "2024-11-13T21:25:19.34439294Z"
+generated: "2024-11-13T21:40:14.293478854Z"
