@@ -14,7 +14,7 @@ var preInstallCmd = &cobra.Command{
 		log.Info().Msgf("check pre-install")
 
 		for _, c := range registry.Get() {
-			for _, p := range c.Ports() {
+			for _, p := range c.Instance().Ports() {
 				if p.Name != module.PreInstall {
 					continue
 				}
