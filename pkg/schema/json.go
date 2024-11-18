@@ -40,7 +40,15 @@ var FilterShared FilterFunction = func(node *ajson.Node) bool {
 
 func getDefinitionName(t reflect.Type) string {
 	var n = t.Name()
-	if t.Kind() == reflect.Ptr || t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+	if t.Kind() == reflect.Ptr {
+		n = t.Elem().Name()
+	}
+	return cases.Title(language.English).String(n)
+}
+
+func getDefinitionNameArray(t reflect.Type) string {
+	var n = t.Name()
+	if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
 		n = t.Elem().Name()
 	}
 	return cases.Title(language.English).String(n)
@@ -86,8 +94,7 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 
 	propIdxMap := make(map[string]int)
 
-	var replaceRoot = func(t reflect.Type, s *jsonschema.Schema) jsonschema.Schema {
-		defName := getDefinitionName(t)
+	var replaceRoot = func(defName string, s *jsonschema.Schema) jsonschema.Schema {
 		if defName == "" {
 			return *s
 		}
@@ -146,22 +153,38 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 			// it is definitely object or type is unknown
 			// create a definition for that
 
+			// schema says we have items
 			if params.PropertySchema.Items != nil {
-				refOnly := replaceRoot(params.Field.Type, params.PropertySchema.Items.SchemaOrBool.TypeObject)
+
+				// get defName from item
+				itemDefName := getDefinitionNameArray(params.Field.Type)
+				// we probably failed cause kind of array holder is an interface
+				if params.Field.Type.Kind() == reflect.Interface {
+					// in this case we don't want item definition be named as property
+					// add suffix
+					itemDefName = fmt.Sprintf("%s%s", getDefinitionName(params.Field.Type), "Item")
+				}
+
+				// register items schema under definition name
+				refOnly := replaceRoot(itemDefName, params.PropertySchema.Items.SchemaOrBool.TypeObject)
 				ts := refOnly.ToSchemaOrBool()
+				// replace property items with ref
 				params.PropertySchema.Items.SchemaOrBool = &ts
 			}
 
-			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.Type == nil {
-				refOnly := replaceRoot(params.Field.Type, params.PropertySchema)
+			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.HasType(jsonschema.Array) || params.PropertySchema.Type == nil {
+				// ensure we have definitions for configurables, shared, objects, arrays and empty schemes
+				refOnly := replaceRoot(getDefinitionName(params.Field.Type), params.PropertySchema)
 				*params.PropertySchema = refOnly
 			}
 
+			// add custom sorting mechanism
 			params.PropertySchema.WithExtraPropertiesItem("propertyOrder", propIdxMap[propPath])
 			// place $ref instead
 			return nil
 		}),
 
+		// all pointerss are nullable
 		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
 			if params.Type.Kind() == reflect.Ptr {
 				return
@@ -174,27 +197,40 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 		return jsonschema.Schema{}, err
 	}
 
-	sh = replaceRoot(reflect.TypeOf(val), &sh)
+	// root schema is ref too
+	sh = replaceRoot(getDefinitionName(reflect.TypeOf(val)), &sh)
 
-	// calculate path
+	// calculate paths
 	// build json path for each definition how it's related to node's root
 	definitionPaths := make(map[string]tagDefinition)
 	//
 
 	for defName, schema := range defs {
-
 		for k, v := range schema.Properties {
-
-			var typ jsonschema.SimpleType
-			if v.TypeObject != nil && v.TypeObject.Type != nil && v.TypeObject.Type.SimpleTypes != nil {
-				typ = *v.TypeObject.Type.SimpleTypes
-			}
 			path := k
+			//
 			ref := v.TypeObject.Ref
-			if typ == jsonschema.Array {
-				path = fmt.Sprintf("%s[0]", path)
-				ref = v.TypeObject.ItemsEns().SchemaOrBoolEns().TypeObjectEns().Ref
+			//
+
+			var refDefP *jsonschema.Schema
+			if ref != nil {
+				// something has ref, let's get definition for that red
+				if refDef, ok := defs[strings.TrimPrefix(*ref, "#/$defs/")]; ok {
+					refDefP = &refDef
+				}
 			}
+
+			// our prop is array or def which it references to is an array
+			if v.TypeObject.HasType(jsonschema.Array) || (refDefP != nil && refDefP.HasType(jsonschema.Array)) {
+				path = fmt.Sprintf("%s[0]", path)
+
+				if refDefP != nil && refDefP.Items != nil {
+					ref = refDefP.Items.SchemaOrBoolEns().TypeObjectEns().Ref
+				} else if v.TypeObject.Items != nil {
+					ref = v.TypeObject.Items.SchemaOrBoolEns().TypeObjectEns().Ref
+				}
+			}
+
 			if ref == nil {
 				continue
 			}

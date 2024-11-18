@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"github.com/goccy/go-json"
 	"github.com/google/go-cmp/cmp"
 	"github.com/spyzhov/ajson"
 	"github.com/swaggest/jsonschema-go"
@@ -440,6 +441,53 @@ func TestCreateSchema(t *testing.T) {
 							}).ToSchemaOrBool(),
 							"context": (&jsonschema.Schema{}).WithRef("#/$defs/Context").WithExtraProperties(map[string]interface{}{
 								"propertyOrder": 1, // first property of it's level
+							}).ToSchemaOrBool(),
+						}).WithExtraPropertiesItem("path", "$")),
+				}),
+		},
+		{
+			name: "signal context array bug",
+			getObj: func() interface{} {
+
+				type Context any
+
+				type Control struct {
+					Context Context `json:"context" required:"true" title:"Context"`
+					Send    bool    `json:"send" format:"button" title:"Send" required:"true"`
+				}
+				//{"context":[{"field_1_1":"dsds"},{"field_1_1":"sdds"}],"send":false}
+				var c Control
+				_ = json.Unmarshal([]byte(`{"context":[{"field_1_1":"dsds"},{"field_1_1":"sdds"}],"send":false}`), &c)
+				return c
+			},
+			want: (&jsonschema.Schema{}).
+				WithRef("#/$defs/Control"). // root ref
+				WithExtraPropertiesItem("$defs", map[string]jsonschema.Schema{
+					"Context": *((&jsonschema.Schema{}).
+						WithTitle("Context").
+						WithType(jsonschema.Array.Type()).
+						WithItems(jsonschema.Items{
+							SchemaOrBool: &jsonschema.SchemaOrBool{
+								TypeObject: &jsonschema.Schema{
+									Ref: getStrPtr("#/$defs/ContextItem"),
+								},
+							},
+						}).
+						WithExtraPropertiesItem("path", "$")),
+					"ContextItem": *((&jsonschema.Schema{}).
+						WithType(jsonschema.Object.Type()).
+						WithAdditionalProperties((&jsonschema.Schema{}).WithType(jsonschema.String.Type()).ToSchemaOrBool()).
+						WithExtraPropertiesItem("path", "$.context[0]")),
+					"Control": *((&jsonschema.Schema{}).WithType(jsonschema.Object.Type()).
+						WithRequired("context", "send").
+						WithProperties(map[string]jsonschema.SchemaOrBool{
+							"context": (&jsonschema.Schema{}).WithRef("#/$defs/Context").
+								WithExtraProperties(map[string]interface{}{
+									"propertyOrder": 1, // first property of it's level
+								}).ToSchemaOrBool(),
+							"send": (&jsonschema.Schema{}).WithTitle("Send").WithType(jsonschema.Boolean.Type()).WithExtraProperties(map[string]interface{}{
+								"propertyOrder": 2, // first property of it's level
+								"format":        "button",
 							}).ToSchemaOrBool(),
 						}).WithExtraPropertiesItem("path", "$")),
 				}),
