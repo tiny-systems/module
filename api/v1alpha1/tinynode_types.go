@@ -26,7 +26,7 @@ const (
 	//ProjectIDLabel project ID k8s label
 	ProjectIDLabel = "tinysystems.io/project-id"
 
-	GlobalLabel = "tinysystems.io/global"
+	SharedWithFlowsLabel = "tinysystems.io/shared-with-flows"
 
 	//ModuleNameMajorLabel module major version label
 	ModuleNameMajorLabel = "tinysystems.io/module-version-major"
