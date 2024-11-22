@@ -26,13 +26,13 @@ const (
 	//ProjectIDLabel project ID k8s label
 	ProjectIDLabel = "tinysystems.io/project-id"
 
-	SharedWithFlowsLabel = "tinysystems.io/shared-with-flows"
-
 	//ModuleNameMajorLabel module major version label
 	ModuleNameMajorLabel = "tinysystems.io/module-version-major"
 	//ModuleVersionLabel module exact version label
 	ModuleVersionLabel = "tinysystems.io/module-version"
 	DashboardLabel     = "tinysystems.io/dashboard"
+
+	SharedWithFlowsAnnotation = "tinysystems.io/shared-with-flows"
 
 	// visual annotations used by platform
 
