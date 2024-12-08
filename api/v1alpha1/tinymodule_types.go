@@ -36,7 +36,17 @@ type TinyModuleSpec struct {
 type TinyModuleStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Addr string `json:"addr"`
+	Addr       string                      `json:"addr"`
+	Name       string                      `json:"name"`
+	Version    string                      `json:"version"`
+	Components []TinyModuleComponentStatus `json:"components"`
+}
+
+type TinyModuleComponentStatus struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Info        string   `json:"info"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 //+kubebuilder:object:root=true

@@ -18,10 +18,6 @@ const (
 
 	//ClientPort receives a client wrapper to work with cluster resources
 	ClientPort = "_client"
-
-	//PreInstall port receives settings
-	PreInstall = "_module_pre_install"
-	PreDelete  = "_module_pre_delete"
 )
 
 const (

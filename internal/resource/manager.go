@@ -6,13 +6,10 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
-	"github.com/tiny-systems/module/pkg/utils"
 	v1core "k8s.io/api/core/v1"
 	v1ingress "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"strings"
 	"sync"
@@ -29,41 +26,12 @@ type Manager struct {
 }
 
 type ManagerInterface interface {
-	CleanupExampleNodes(ctx context.Context, mod module.Info) error
 	RegisterModule(ctx context.Context, mod module.Info) error
-	RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error
 	CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error
 }
 
 func NewManager(c client.Client, log logr.Logger, ns string) *Manager {
 	return &Manager{client: c, log: log, namespace: ns, lock: &sync.Mutex{}}
-}
-
-// CleanupExampleNodes  @todo deal with it later
-func (m Manager) CleanupExampleNodes(ctx context.Context, mod module.Info) error {
-	sel := labels.NewSelector()
-
-	req, err := labels.NewRequirement(v1alpha1.ProjectIDLabel, selection.Equals, []string{""})
-	if err != nil {
-		return err
-	}
-	sel = sel.Add(*req)
-
-	req, err = labels.NewRequirement(v1alpha1.ModuleNameMajorLabel, selection.Equals, []string{mod.GetMajorNameSanitised()})
-	if err != nil {
-		return err
-	}
-	sel = sel.Add(*req)
-
-	req, err = labels.NewRequirement(v1alpha1.ModuleVersionLabel, selection.NotEquals, []string{mod.Version})
-	if err != nil {
-		return err
-	}
-	sel = sel.Add(*req)
-
-	return m.client.DeleteAllOf(ctx, &v1alpha1.TinyNode{}, client.InNamespace(m.namespace), client.MatchingLabelsSelector{
-		Selector: sel,
-	})
 }
 
 func (m Manager) RegisterModule(ctx context.Context, mod module.Info) error {
@@ -74,11 +42,9 @@ func (m Manager) RegisterModule(ctx context.Context, mod module.Info) error {
 
 	node := &v1alpha1.TinyModule{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: m.namespace, // @todo make dynamic
-			Name:      mod.GetMajorNameSanitised(),
-			Labels:    map[string]string{
-				//	v1alpha1.ModuleNameLabel: mod.Name,
-			},
+			Namespace:   m.namespace, // @todo make dynamic
+			Name:        mod.GetMajorNameSanitised(),
+			Labels:      map[string]string{},
 			Annotations: map[string]string{},
 		},
 		Spec: spec,
@@ -420,32 +386,6 @@ func (m Manager) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.Tiny
 	signal.Namespace = node.Namespace
 	signal.GenerateName = fmt.Sprintf("%s-%s-", node.Name, strings.ReplaceAll(port, "_", ""))
 	return m.client.Create(ctx, signal)
-}
-
-func (m Manager) RegisterExampleNode(ctx context.Context, c module.Component, mod module.Info) error {
-
-	componentInfo := c.GetInfo()
-	node := &v1alpha1.TinyNode{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: m.namespace, // @todo make dynamic
-			Name:      module.GetNodeFullName("00000000", mod.GetMajorNameSanitised(), componentInfo.GetResourceName()),
-			Labels: map[string]string{
-				v1alpha1.ProjectIDLabel:       "", //<-- empty flow means that's a node for the component palette
-				v1alpha1.ModuleNameMajorLabel: mod.GetMajorNameSanitised(),
-				v1alpha1.ModuleVersionLabel:   mod.Version,
-			},
-		},
-		Spec: v1alpha1.TinyNodeSpec{
-			Module:    mod.GetMajorNameSanitised(),
-			Component: utils.SanitizeResourceName(componentInfo.Name),
-		},
-	}
-
-	err := m.client.Create(ctx, node)
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
 }
 
 func (m Manager) Start(ctx context.Context) error {

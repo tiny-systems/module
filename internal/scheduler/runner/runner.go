@@ -8,6 +8,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 	"github.com/spyzhov/ajson"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -55,9 +56,10 @@ type Runner struct {
 
 	meter metric.Meter
 	//
-	nodeLock         *sync.Mutex
-	previousSettings interface{}
-	reconciling      *atomic.Bool
+	nodeLock            *sync.Mutex
+	previousSettings    interface{}
+	previousSettingsErr error
+	reconciling         *atomic.Bool
 }
 
 func NewRunner(name string, component m.Component) *Runner {
@@ -153,8 +155,13 @@ func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
 				portStatus.Schema = schemaData
 			}
 			// real port data
-			confData, _ := json.Marshal(np.Configuration)
+			confData, err := json.Marshal(np.Configuration)
+			if err != nil {
+				c.log.Error(err, "encode port configuration error")
+			}
 			portStatus.Configuration = confData
+		} else {
+			log.Warn().Str("port", np.Name).Str("node", c.name).Msg("configuration is nil")
 		}
 
 		status.Ports = append(status.Ports, portStatus)
@@ -281,7 +288,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	if port == m.SettingsPort {
 		if cmp.Equal(portData, c.previousSettings) {
 			// check cache, we do not want to update settings if they did not change
-			return nil
+			return c.previousSettingsErr
 		}
 		c.previousSettings = portData
 	}
@@ -376,6 +383,9 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		}, port, portData)
 	})
 
+	if port == m.SettingsPort {
+		c.previousSettingsErr = err
+	}
 	return err
 }
 
