@@ -20,6 +20,8 @@ import (
 	"context"
 	clientpool "github.com/tiny-systems/module/internal/client"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
+	"github.com/tiny-systems/module/registry"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -73,6 +75,22 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	} else {
 
 		instance.Status.Addr = r.Module.Addr
+		instance.Status.Version = r.Module.Version
+		instance.Status.Name = r.Module.Name
+
+		components := registry.Get()
+		statusComponents := make([]operatorv1alpha1.TinyModuleComponentStatus, len(components))
+		for i, cmp := range components {
+			info := cmp.GetInfo()
+			statusComponents[i] = operatorv1alpha1.TinyModuleComponentStatus{
+				Name:        utils.SanitizeResourceName(info.Name),
+				Description: info.Description,
+				Info:        info.Info,
+				Tags:        info.Tags,
+			}
+		}
+		instance.Status.Components = statusComponents
+
 		err = r.Status().Update(context.Background(), instance)
 		if err != nil {
 			l.Error(err, "status update error")

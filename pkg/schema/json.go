@@ -173,7 +173,7 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 			}
 
 			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.HasType(jsonschema.Array) || params.PropertySchema.Type == nil {
-				// ensure we have definitions for configurables, shared, objects, arrays and empty schemes
+				// ensure we have definitions for configurable, shared, objects, arrays and empty schemes
 				refOnly := replaceRoot(getDefinitionName(params.Field.Type), params.PropertySchema)
 				*params.PropertySchema = refOnly
 			}
@@ -184,7 +184,7 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 			return nil
 		}),
 
-		// all pointerss are nullable
+		// all pointers are nullable
 		jsonschema.InterceptNullability(func(params jsonschema.InterceptNullabilityParams) {
 			if params.Type.Kind() == reflect.Ptr {
 				return

@@ -285,12 +285,6 @@ var runCmd = &cobra.Command{
 		}
 		l.Info("installing components", "versionID", versionID)
 
-		// uninstall palette resources from previous versions
-		if err = resourceManager.CleanupExampleNodes(ctx, moduleInfo); err != nil {
-			l.Error(err, "unable to cleanup previous versions components")
-			return
-		}
-
 		l.Info("registering", "module", moduleInfo.GetMajorName())
 
 		if err = resourceManager.RegisterModule(ctx, moduleInfo); err != nil {
@@ -301,9 +295,6 @@ var runCmd = &cobra.Command{
 		for _, cmp := range registry.Get() {
 			l.Info("registering", "component", cmp.GetInfo().Name)
 
-			if err = resourceManager.RegisterExampleNode(ctx, cmp, moduleInfo); err != nil {
-				l.Error(err, "unable to register", "component", cmp.GetInfo().Name)
-			}
 			if err := scheduler.Install(cmp); err != nil {
 				l.Error(err, "unable to install", "component", cmp.GetInfo().Name)
 			}
