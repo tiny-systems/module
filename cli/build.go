@@ -94,11 +94,11 @@ var buildCmd = &cobra.Command{
 			VersionID:  publishResponse.Module.Id,
 		}
 
-		// @todo build failure ignored
 		if err := build.Build(ctx, cwd, pathToMain, buildOpts); err != nil {
 			fmt.Fprintf(os.Stderr, "unable to build: %v\n", err)
 			return
 		}
+
 		image := fmt.Sprintf("%s:%s", publishResponse.Options.Repo, publishResponse.Options.Tag)
 
 		if err = build.Push(ctx, build.PushOpts{
