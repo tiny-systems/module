@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/goccy/go-json"
 	"io"
@@ -34,6 +35,18 @@ func Push(ctx context.Context, opts PushOpts) error {
 	if err != nil {
 		return err
 	}
+
+	// check image locally before push
+	summary, err := dockerClient.ImageList(ctx, types.ImageListOptions{
+		Filters: filters.NewArgs(filters.Arg("reference", opts.Image)),
+	})
+	if err != nil {
+		return fmt.Errorf("unable to list local images: %w", err)
+	}
+	if len(summary) == 0 {
+		return fmt.Errorf("image %s not found locally", opts.Image)
+	}
+
 	imgOpts := types.ImagePushOptions{
 		RegistryAuth: base64.URLEncoding.EncodeToString(authBytes),
 	}
