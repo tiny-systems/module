@@ -66,7 +66,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return reconcile.Result{}, err
 	}
 
-	if m != r.Module.GetMajorNameSanitised() {
+	if m != r.Module.GetNameSanitised() {
 		return reconcile.Result{}, nil
 	}
 

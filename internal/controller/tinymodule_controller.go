@@ -68,7 +68,7 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return reconcile.Result{}, err
 	}
 
-	if req.Name != r.Module.Name {
+	if req.Name != r.Module.GetNameSanitised() {
 		// not us, put into table
 		r.ClientPool.Register(req.Name, instance.Status.Addr)
 	} else {
