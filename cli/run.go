@@ -173,7 +173,7 @@ var runCmd = &cobra.Command{
 				return fmt.Errorf("parse destination error: %v", err)
 			}
 
-			if m == moduleInfo.GetMajorNameSanitised() {
+			if m == moduleInfo.GetNameSanitised() {
 				// destination is the current module
 				return scheduler.Handle(ctx, msg)
 			}
@@ -285,7 +285,7 @@ var runCmd = &cobra.Command{
 		}
 		l.Info("installing components", "versionID", versionID)
 
-		l.Info("registering", "module", moduleInfo.GetMajorName())
+		l.Info("registering", "module", moduleInfo.Name)
 
 		if err = resourceManager.RegisterModule(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to register a module")

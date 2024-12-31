@@ -43,7 +43,7 @@ func (m Manager) RegisterModule(ctx context.Context, mod module.Info) error {
 	node := &v1alpha1.TinyModule{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:   m.namespace, // @todo make dynamic
-			Name:        mod.GetMajorNameSanitised(),
+			Name:        mod.GetNameSanitised(),
 			Labels:      map[string]string{},
 			Annotations: map[string]string{},
 		},

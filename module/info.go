@@ -33,6 +33,10 @@ func (i Info) GetMajorNameSanitised() string {
 	return utils.SanitizeResourceName(i.GetMajorName())
 }
 
+func (i Info) GetNameSanitised() string {
+	return utils.SanitizeResourceName(i.Name)
+}
+
 func GetNodeFullName(prefix string, module string, component string) string {
 	return fmt.Sprintf("%s%s%s%s%s", prefix, nameSeparator, module, nameSeparator, component)
 }
