@@ -26,7 +26,7 @@ func (i Info) GetMajorName() string {
 	if v == nil {
 		return i.GetNameAndVersion()
 	}
-	return fmt.Sprintf("%s:%d", i.Name, v.Major())
+	return fmt.Sprintf("%s:v%d", i.Name, v.Major())
 }
 
 func (i Info) GetMajorNameSanitised() string {
