@@ -2,7 +2,6 @@ package module
 
 import (
 	"context"
-	"github.com/tiny-systems/module/pkg/utils"
 )
 
 type ComponentInfo struct {
@@ -10,10 +9,6 @@ type ComponentInfo struct {
 	Description string
 	Info        string
 	Tags        []string
-}
-
-func (c ComponentInfo) GetResourceName() string {
-	return utils.SanitizeResourceName(c.Name)
 }
 
 type Component interface {
