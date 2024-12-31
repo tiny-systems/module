@@ -20,7 +20,6 @@ import (
 	"context"
 	clientpool "github.com/tiny-systems/module/internal/client"
 	"github.com/tiny-systems/module/module"
-	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -83,7 +82,7 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		for i, cmp := range components {
 			info := cmp.GetInfo()
 			statusComponents[i] = operatorv1alpha1.TinyModuleComponentStatus{
-				Name:        utils.SanitizeResourceName(info.Name),
+				Name:        info.Name,
 				Description: info.Description,
 				Info:        info.Info,
 				Tags:        info.Tags,

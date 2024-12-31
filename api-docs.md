@@ -51,6 +51,23 @@ _Appears in:_
 | `status` _[TinyModuleStatus](#tinymodulestatus)_ |  |
 
 
+#### TinyModuleComponentStatus
+
+
+
+
+
+_Appears in:_
+- [TinyModuleStatus](#tinymodulestatus)
+
+| Field | Description |
+| --- | --- |
+| `name` _string_ |  |
+| `description` _string_ |  |
+| `info` _string_ |  |
+| `tags` _string array_ |  |
+
+
 #### TinyModuleList
 
 
@@ -95,6 +112,9 @@ _Appears in:_
 | Field | Description |
 | --- | --- |
 | `addr` _string_ | INSERT ADDITIONAL STATUS FIELD - define observed state of cluster<br /><br />Important: Run "make" to regenerate code after modifying this file |
+| `name` _string_ |  |
+| `version` _string_ |  |
+| `components` _[TinyModuleComponentStatus](#tinymodulecomponentstatus) array_ |  |
 
 
 #### TinyNode
@@ -147,7 +167,7 @@ _Appears in:_
 | `id` _string_ | Edge id |
 | `port` _string_ | Current node's port name<br /><br />Source port |
 | `to` _string_ | Other node's full port name |
-| `extras` _object (keys:string, values:string)_ |  |
+| `flowID` _string_ |  |
 
 
 #### TinyNodeList
@@ -198,7 +218,7 @@ _Appears in:_
 | `port` _string_ |  |
 | `schema` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Schema JSON schema of the port |
 | `configuration` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Configuration JSON data of the port's configuration |
-| `extras` _object (keys:string, values:string)_ |  |
+| `flowID` _string_ |  |
 
 
 #### TinyNodePortStatus
