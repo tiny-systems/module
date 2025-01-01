@@ -29,6 +29,7 @@ jobs:
         uses: jaywcjlove/markdown-to-html-cli@main
         with:
           source: README.md
+          github-corners: https://github.com/jaywcjlove/markdown-to-html-cli
           output: dist/index.html
 
       - name: Deploy 🚀
