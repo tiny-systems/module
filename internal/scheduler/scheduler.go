@@ -21,11 +21,9 @@ import (
 type Scheduler interface {
 	//Install makes component available to run instances
 	Install(component module.Component) error
-
 	//Update creates a new instance by using unique name, if instance exists - updates one
 	Update(ctx context.Context, node *v1alpha1.TinyNode) error
 	//Handle sync incoming call
-
 	Handle(ctx context.Context, msg *runner.Msg) error
 	//HandleInternal same as Handle but does not wait until port unblock and does not fall back msg outside
 	HandleInternal(ctx context.Context, msg *runner.Msg) error
@@ -226,7 +224,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	// give time to node update itself or fail
 	time.Sleep(time.Millisecond * 300)
 
-	var err = runnerInstance.UpdateStatus(&node.Status)
+	var err = runnerInstance.ReadStatus(&node.Status)
 
 	if atomicErr.Load() != nil {
 		// set previous node state to the scheduler because configuration did not end well

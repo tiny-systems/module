@@ -54,11 +54,10 @@ type TinyTrackerReconciler struct {
 func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
 	l := log.FromContext(ctx)
-	//l.Info("reconcile", "tinytracker", req.Name)
 
-	tracker := &operatorv1alpha1.TinyTracker{}
+	t := &operatorv1alpha1.TinyTracker{}
 
-	err := r.Get(context.Background(), req.NamespacedName, tracker)
+	err := r.Get(context.Background(), req.NamespacedName, t)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
@@ -71,12 +70,12 @@ func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	ago := v1.NewTime(time.Now().Add(-time.Minute * 60))
 
-	if tracker.CreationTimestamp.Before(&ago) {
-		_ = r.Delete(ctx, tracker)
+	if t.CreationTimestamp.Before(&ago) {
+		_ = r.Delete(ctx, t)
 		return reconcile.Result{Requeue: true}, nil
 	}
 
-	err = r.Manager.Register(*tracker)
+	err = r.Manager.Register(*t)
 	if err != nil {
 		// create event maybe?
 		//r.Recorder.Event(instance, "Error", "test", "Configuration")
