@@ -26,10 +26,9 @@ jobs:
         run: mkdir -p dist
 
       - name: Converts Markdown to HTML
-        uses: jaywcjlove/markdown-to-html-cli@main
+        uses: jaywcjlove/markdown-to-html-cli@v4.0.3
         with:
           source: README.md
-          github-corners: https://github.com/jaywcjlove/markdown-to-html-cli
           output: dist/index.html
 
       - name: Deploy 🚀
