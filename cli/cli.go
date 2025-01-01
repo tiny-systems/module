@@ -55,6 +55,7 @@ func applyBuildFlags(cmd *cobra.Command) {
 func applyHookFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&name, "name", "n", "main", "Name of the module. Container image repo usually.")
 	cmd.Flags().StringVarP(&namespace, "namespace", "", "tinysystems", "Namespace where the module installed in.")
+	cmd.Flags().StringVarP(&kubeconfig, "kubeconfig", "k", filepath.Join(homedir.HomeDir(), ".kube", "config"), "(optional) absolute path to the kubeconfig file")
 	_ = cmd.MarkFlagRequired("name")
 }
 
