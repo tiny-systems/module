@@ -99,6 +99,9 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		Name:    r.Module.Name,
 	}
 
+	status.Error = false
+	status.Status = ""
+
 	// upsert in scheduler
 	// todo add app level context
 	err = r.Scheduler.Update(context.Background(), node)
