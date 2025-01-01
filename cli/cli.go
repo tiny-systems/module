@@ -25,7 +25,9 @@ func RegisterCommands(rootCmd *cobra.Command) {
 	toolsCmd.AddCommand(buildCmd)
 	toolsCmd.AddCommand(infoCmd)
 
+	applyHookFlags(preInstallCmd)
 	rootCmd.AddCommand(preInstallCmd)
+	applyHookFlags(preDeleteCmd)
 	rootCmd.AddCommand(preDeleteCmd)
 }
 
@@ -47,6 +49,12 @@ func applyBuildFlags(cmd *cobra.Command) {
 
 	_ = cmd.MarkFlagRequired("devkey")
 	_ = cmd.MarkFlagRequired("version")
+	_ = cmd.MarkFlagRequired("name")
+}
+
+func applyHookFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&name, "name", "n", "main", "Name of the module. Container image repo usually.")
+	cmd.Flags().StringVarP(&namespace, "namespace", "", "tinysystems", "Namespace where the module installed in.")
 	_ = cmd.MarkFlagRequired("name")
 }
 

@@ -9,6 +9,7 @@ var preDeleteCmd = &cobra.Command{
 	Use:   "pre-delete",
 	Short: "pre-delete module",
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Info().Msgf("check pre-delete")
+
+		log.Info().Msgf("pre-delete module name: %s namespace: %s", name, namespace)
 	},
 }

@@ -112,7 +112,6 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	node.Status = *status
-	//	l.Info("update status", "node", node.Name)
 
 	err = r.Status().Update(context.Background(), node)
 	if err != nil {

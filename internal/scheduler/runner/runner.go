@@ -114,8 +114,8 @@ func (c *Runner) getUpdatePorts() []m.Port {
 	return c.portsCache
 }
 
-// UpdateStatus apply status changes
-func (c *Runner) UpdateStatus(status *v1alpha1.TinyNodeStatus) error {
+// ReadStatus reads status
+func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 
 	status.Status = "OK"
 	status.Error = false
@@ -233,11 +233,12 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		portData   interface{}
 	)
 
+	portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
+
 	// @todo add const
 	if msg.From == "signal" {
 		// from signal controller (outside)
 
-		portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
 		if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
 			return err
 		}
@@ -245,8 +246,6 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
 		// we have edge config
-
-		portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
 
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
@@ -286,6 +285,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	////
 	if port == m.SettingsPort {
+		// we do not sed settings if they are no changed to prevent work disruptions
 		if cmp.Equal(portData, c.previousSettings) {
 			// check cache, we do not want to update settings if they did not change
 			return c.previousSettingsErr
