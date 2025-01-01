@@ -96,7 +96,7 @@ func (s *Schedule) Install(component module.Component) error {
 	if component.GetInfo().Name == "" {
 		return fmt.Errorf("component name is invalid")
 	}
-	s.componentsMap.Set(utils.SanitizeResourceName(component.GetInfo().Name), component)
+	s.componentsMap.Set(component.GetInfo().Name, component)
 	return nil
 }
 
