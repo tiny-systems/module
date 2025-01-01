@@ -74,6 +74,6 @@ var preDeleteCmd = &cobra.Command{
 			l.Error(err, "unable to delete tinymodule")
 			return
 		}
-		l.Info("tinymodule deleted", "name", name, "namespace", namespace)
+		l.Info("tinymodule deleted", "name", module.Name, "namespace", namespace)
 	},
 }
