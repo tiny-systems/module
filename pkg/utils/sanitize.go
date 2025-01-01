@@ -6,6 +6,7 @@ import (
 )
 
 func SanitizeResourceName(in string) string {
+	in = strings.ReplaceAll(in, "/", "-s-")
 	reg, err := regexp.Compile("[^A-Za-z0-9]+")
 	if err != nil {
 		return ""
