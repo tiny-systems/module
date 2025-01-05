@@ -163,7 +163,7 @@ var runCmd = &cobra.Command{
 		var (
 			resourceManager = resource.NewManager(mgr.GetClient(), l, namespace)
 			trackManager    = tracker.NewManager().SetLogger(l)
-			scheduler       sch.Scheduler
+			scheduler       *sch.Schedule
 		)
 
 		//
