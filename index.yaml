@@ -3,6 +3,16 @@ entries:
   tinysystems-crd:
   - apiVersion: v2
     appVersion: 0.1.1
+    created: "2025-01-05T13:34:26.728546557Z"
+    description: Tiny Systems CRD Helm chart
+    digest: 2258482303da105caff0cb543df7edeb8146fbbed7627a97b1c3cdad56a48126
+    name: tinysystems-crd
+    type: application
+    urls:
+    - https://github.com/tiny-systems/module/releases/download/tinysystems-crd-0.1.24/tinysystems-crd-0.1.24.tgz
+    version: 0.1.24
+  - apiVersion: v2
+    appVersion: 0.1.1
     created: "2024-12-08T10:14:11.860640568Z"
     description: Tiny Systems CRD Helm chart
     digest: 07f46913d4cd87a1f0692e54c76fcb058bbaf87af6fab3cfee0a587c18b04fe3
@@ -766,4 +776,4 @@ entries:
     urls:
     - https://github.com/tiny-systems/module/releases/download/tinysystems-operator-0.1.5/tinysystems-operator-0.1.5.tgz
     version: 0.1.5
-generated: "2025-01-01T22:45:27.177151517Z"
+generated: "2025-01-05T13:34:26.728783709Z"
