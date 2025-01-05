@@ -63,6 +63,11 @@ type TinyNodeSpec struct {
 	// +kubebuilder:validation:Required
 	Module string `json:"module"`
 
+	// Module version semver v2 compatible (without v prefix)
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default="1.0.0"
+	ModuleVersion string `json:"module_version"`
+
 	// Component name within a module
 	// +kubebuilder:validation:Required
 	Component string `json:"component"`

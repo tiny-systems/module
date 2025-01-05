@@ -252,6 +252,7 @@ _Appears in:_
 | Field | Description |
 | --- | --- |
 | `module` _string_ | Module name - container image repo + tag |
+| `module_version` _string_ | Module version semver v2 compatible (without v prefix) |
 | `component` _string_ | Component name within a module |
 | `ports` _[TinyNodePortConfig](#tinynodeportconfig) array_ | Port configurations |
 | `edges` _[TinyNodeEdge](#tinynodeedge) array_ | Edges to send message next |
