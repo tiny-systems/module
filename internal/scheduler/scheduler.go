@@ -29,8 +29,6 @@ type Scheduler interface {
 	HandleInternal(ctx context.Context, msg *runner.Msg) error
 	//Destroy stops the instance and deletes it
 	Destroy(name string) error
-	//Start starts scheduler
-	Start(ctx context.Context) error
 }
 
 type Schedule struct {
