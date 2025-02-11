@@ -44,9 +44,7 @@ const (
 
 	SuggestedHttpPortAnnotation = "tinysystems.io/suggested-http-port"
 
-	// ingress annotations
-	IngressHostNameSuffixAnnotation      = "tinysystems.io/ingress-hostname-suffix"
-	IngressWildcardCertificateAnnotation = "tinysystems.io/ingress-wildcard-certificate"
+	IngressHostNameSuffixAnnotation = "tinysystems.io/ingress-hostname-suffix"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -159,6 +157,10 @@ type TinyNodeStatus struct {
 
 	//+kubebuilder:validation:Optional
 	Error bool `json:"error,omitempty"`
+
+	//+kubebuilder:validation:Format:date-time
+	//+kubebuilder:validation:Optional
+	LastUpdateTime *metav1.Time `json:"lastUpdateTime,omitempty"`
 }
 
 //+kubebuilder:object:root=true

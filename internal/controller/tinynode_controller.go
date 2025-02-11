@@ -22,6 +22,7 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
 	"k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"time"
 )
 
 // TinyNodeReconciler reconciles a TinyNode object
@@ -102,6 +104,9 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	status.Error = false
 	status.Status = ""
 
+	t := v1.NewTime(time.Now())
+
+	status.LastUpdateTime = &t
 	// upsert in scheduler
 	// todo add app level context
 	err = r.Scheduler.Update(context.Background(), node)
@@ -119,7 +124,9 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{
+		RequeueAfter: time.Minute * 15,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

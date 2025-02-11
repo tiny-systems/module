@@ -120,6 +120,9 @@ spec:
                 type: object
               error:
                 type: boolean
+              lastUpdateTime:
+                format: date-time
+                type: string
               module:
                 properties:
                   name:
