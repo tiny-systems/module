@@ -71,7 +71,7 @@ spec:
                 description: Module name - container image repo + tag
                 type: string
               module_version:
-                default: '''1.0.0'''
+                default: 1.0.0
                 description: Module version semver v2 compatible (without v prefix)
                 type: string
               ports:
@@ -121,6 +121,9 @@ spec:
                 type: object
               error:
                 type: boolean
+              lastUpdateTime:
+                format: date-time
+                type: string
               module:
                 properties:
                   name:

@@ -274,6 +274,7 @@ _Appears in:_
 | `ports` _[TinyNodePortStatus](#tinynodeportstatus) array_ |  |
 | `status` _string_ |  |
 | `error` _boolean_ |  |
+| `lastUpdateTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#time-v1-meta)_ |  |
 
 
 #### TinySignal
