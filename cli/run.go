@@ -134,7 +134,11 @@ var runCmd = &cobra.Command{
 			Metrics: metricsserver.Options{
 				BindAddress: metricsAddr,
 			},
-			Cache:                  cache.Options{},
+			Cache: cache.Options{
+				DefaultNamespaces: map[string]cache.Config{
+					namespace: {},
+				},
+			},
 			HealthProbeBindAddress: probeAddr,
 			LeaderElection:         enableLeaderElection,
 			LeaderElectionID:       fmt.Sprintf("%s.tinysystems.io", name),
@@ -369,7 +373,7 @@ var runCmd = &cobra.Command{
 		})
 
 		l.Info("waiting...")
-		wg.Wait()
+		_ = wg.Wait()
 
 		l.Info("all done")
 	},

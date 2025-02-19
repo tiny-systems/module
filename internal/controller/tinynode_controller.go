@@ -125,7 +125,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	return ctrl.Result{
-		RequeueAfter: time.Minute * 15,
+		RequeueAfter: time.Minute * 5,
 	}, nil
 }
 

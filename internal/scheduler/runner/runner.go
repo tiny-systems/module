@@ -320,20 +320,12 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	err = errorpanic.Wrap(func() error {
 		// panic safe
-		//c.log.Info("component call", "port", port, "node", c.name)
-		c.incCounter(context.Background(), 1, msg.EdgeID, metrics.MetricEdgeMsgIn)
-		c.incCounter(context.Background(), 1, msg.To, metrics.MetricPortMsgIn)
-
 		c.setGauge(1, msg.EdgeID, metrics.MetricEdgeBusy)
 
 		defer func() {
-
-			c.incCounter(context.Background(), 1, msg.EdgeID, metrics.MetricEdgeMsgOut)
-			c.incCounter(context.Background(), 1, msg.To, metrics.MetricPortMsgOut)
-
 			go func() {
 				// give it time to animate
-				time.Sleep(time.Second * 1)
+				time.Sleep(time.Millisecond * 1500)
 				c.setGauge(0, msg.EdgeID, metrics.MetricEdgeBusy)
 			}()
 		}()
@@ -353,7 +345,6 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 				return outputHandler(ctx, &Msg{
 					To: utils.GetPortFullName(c.name, outputPort),
 				})
-
 			}
 
 			u, err = uuid.NewUUID()
@@ -499,6 +490,7 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 		func(ctx context.Context, o metric.Observer) error {
 			o.ObserveInt64(gauge, val,
 				metric.WithAttributes(
+					// element could be nodeID or edgeID
 					attribute.String("element", name),
 					attribute.String("flowID", c.flowID),
 					attribute.String("projectID", c.projectID),
@@ -514,6 +506,7 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 	}
 
 	go func() {
+		// deregister sending gauges
 		time.Sleep(time.Second * 5)
 		_ = r.Unregister()
 	}()
