@@ -15,11 +15,7 @@ import (
 type Metric string
 
 const (
-	MetricPortMsgIn  Metric = "tiny_node_msg_in"
-	MetricPortMsgOut        = "tiny_node_msg_out"
-	MetricEdgeMsgIn         = "tiny_edge_msg_in"
-	MetricEdgeMsgOut        = "tiny_edge_msg_out"
-	MetricEdgeBusy          = "tiny_edge_busy"
+	MetricEdgeBusy = "tiny_edge_busy"
 )
 
 // ConfigureOpenTelemetry configures OpenTelemetry.
