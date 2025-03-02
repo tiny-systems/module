@@ -19,7 +19,6 @@ spec:
       labels:
         control-plane: controller-manager
       {{- include "tinysystems-operator.selectorLabels" . | nindent 8 }}
-      {{- include "tinysystems-operator.labels" . | nindent 8 }}
       annotations:
         kubectl.kubernetes.io/default-container: manager
         rollme: {{ randAlphaNum 5 | quote }}
