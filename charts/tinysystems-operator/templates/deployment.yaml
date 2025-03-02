@@ -19,55 +19,56 @@ spec:
       labels:
         control-plane: controller-manager
       {{- include "tinysystems-operator.selectorLabels" . | nindent 8 }}
+      {{- include "tinysystems-operator.labels" . | nindent 8 }}
       annotations:
         kubectl.kubernetes.io/default-container: manager
         rollme: {{ randAlphaNum 5 | quote }}
     spec:
       containers:
-      - args: {{- toYaml .Values.controllerManager.kubeRbacProxy.args | nindent 8 }}
-        env:
-        - name: KUBERNETES_CLUSTER_DOMAIN
-          value: {{ quote .Values.kubernetesClusterDomain }}
-        image: {{ .Values.controllerManager.kubeRbacProxy.image.repository }}:{{ .Values.controllerManager.kubeRbacProxy.image.tag | default .Chart.AppVersion }}
-        name: kube-rbac-proxy
-        ports:
-        - containerPort: 8443
-          name: https
-          protocol: TCP
-        resources: {{- toYaml .Values.controllerManager.kubeRbacProxy.resources | nindent  10 }}
-        securityContext: {{- toYaml .Values.controllerManager.kubeRbacProxy.containerSecurityContext | nindent 10 }}
-      - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
-        command:
-        - /manager
-        ports:
-          - containerPort: 8483
-            name: grpc
-            protocol: TCP
-        env:
+        - args: {{- toYaml .Values.controllerManager.kubeRbacProxy.args | nindent 8 }}
+          env:
+            - name: KUBERNETES_CLUSTER_DOMAIN
+              value: {{ quote .Values.kubernetesClusterDomain }}
+          image: {{ .Values.controllerManager.kubeRbacProxy.image.repository }}:{{ .Values.controllerManager.kubeRbacProxy.image.tag | default .Chart.AppVersion }}
+          name: kube-rbac-proxy
+          ports:
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          resources: {{- toYaml .Values.controllerManager.kubeRbacProxy.resources | nindent  10 }}
+          securityContext: {{- toYaml .Values.controllerManager.kubeRbacProxy.containerSecurityContext | nindent 10 }}
+        - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
+          command:
+            - /manager
+          ports:
+            - containerPort: 8483
+              name: grpc
+              protocol: TCP
+          env:
           {{- if .Values.controllerManager.manager.extraEnv }}
             {{- toYaml .Values.controllerManager.manager.extraEnv | nindent 10 }}
           {{- end }}
-          - name: KUBERNETES_CLUSTER_DOMAIN
-            value: {{ quote .Values.kubernetesClusterDomain }}
-          - name: SELF_SERVICE_HOST
-            value: {{ include "tinysystems-operator.fullname" . }}-manager-service:8483
-        image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
-        imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8081
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        name: manager
-        readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 8081
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        resources: {{- toYaml .Values.controllerManager.manager.resources | nindent 10 }}
-        securityContext: {{- toYaml .Values.controllerManager.manager.containerSecurityContext | nindent 10 }}
+            - name: KUBERNETES_CLUSTER_DOMAIN
+              value: {{ quote .Values.kubernetesClusterDomain }}
+            - name: SELF_SERVICE_HOST
+              value: {{ include "tinysystems-operator.fullname" . }}-manager-service:8483
+          image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          name: manager
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.controllerManager.manager.resources | nindent 10 }}
+          securityContext: {{- toYaml .Values.controllerManager.manager.containerSecurityContext | nindent 10 }}
       imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
       securityContext:
         fsGroup: 65532
