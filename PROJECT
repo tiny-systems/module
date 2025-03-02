@@ -60,20 +60,4 @@ resources:
   kind: TinyProject
   path: github.com/tiny-systems/module/api/v1alpha1
   version: v1alpha1
-- api:
-    crdVersion: v1
-    namespaced: true
-  domain: tinysystems.io
-  group: operator
-  kind: TinyPage
-  path: github.com/tiny-systems/module/api/v1alpha1
-  version: v1alpha1
-- api:
-    crdVersion: v1
-    namespaced: true
-  domain: tinysystems.io
-  group: operator
-  kind: TinyWidget
-  path: github.com/tiny-systems/module/api/v1alpha1
-  version: v1alpha1
 version: "3"
