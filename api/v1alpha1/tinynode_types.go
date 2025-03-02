@@ -36,12 +36,19 @@ const (
 
 	// visual annotations used by platform
 
+	ProjectNameAnnotation = "tinysystems.io/project-name"
+	ServerIDAnnotation    = "tinysystems.io/server-id"
+
+	FlowNameAnnotation = "tinysystems.io/flow-name"
+
+	PageNameAnnotation = "tinysystems.io/page-name"
+
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
-	NodeLabelAnnotation        = "tinysystems.io/node-label"
-	NodeCommentAnnotation      = "tinysystems.io/node-comment"
 
+	NodeLabelAnnotation         = "tinysystems.io/node-label"
+	NodeCommentAnnotation       = "tinysystems.io/node-comment"
 	SuggestedHttpPortAnnotation = "tinysystems.io/suggested-http-port"
 
 	IngressHostNameSuffixAnnotation = "tinysystems.io/ingress-hostname-suffix"
