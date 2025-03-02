@@ -35,13 +35,13 @@ var buildCmd = &cobra.Command{
 
 		info, err := build.GetReadme(cwd)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unable to get README.md by path %s: %v\n", cwd, err)
+			fmt.Fprintf(os.Stderr, "unable to get README.md by path %s: %v\n", cwd, err)
 			return
 		}
 
 		platformClient, err := api.NewClientWithResponses(platformApiURL)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unable to create API client: %v\n", err)
+			fmt.Fprintf(os.Stderr, "unable to create API client: %v\n", err)
 			return
 		}
 
@@ -51,12 +51,12 @@ var buildCmd = &cobra.Command{
 		}
 
 		if len(componentsApi) == 0 {
-			_, _ = fmt.Fprintf(os.Stderr, "component registry is empty\n")
+			fmt.Fprintf(os.Stderr, "component registry is empty\n")
 			return
 		}
 
 		if !semver.IsValid(version) {
-			_, _ = fmt.Fprintf(os.Stderr, "version is invalid semver v2 version\n")
+			fmt.Fprintf(os.Stderr, "version is invalid semver v2 version\n")
 			return
 		}
 
@@ -72,17 +72,17 @@ var buildCmd = &cobra.Command{
 		})
 
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unable to publish module: %v\n", err)
+			fmt.Fprintf(os.Stderr, "unable to publish module: %v\n", err)
 			return
 		}
 		if resp.JSON200 == nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unknown server error: %s\n", string(resp.Body))
+			fmt.Fprintf(os.Stderr, "unknown server error: %s\n", string(resp.Body))
 			return
 		}
 
 		publishResponse := resp.JSON200
 		if publishResponse.Module == nil || publishResponse.Options == nil {
-			_, _ = fmt.Fprintf(os.Stderr, "invalid server response\n")
+			fmt.Fprintf(os.Stderr, "invalid server response\n")
 			return
 		}
 
@@ -95,7 +95,7 @@ var buildCmd = &cobra.Command{
 		}
 
 		if err := build.Build(ctx, cwd, pathToMain, buildOpts); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unable to build: %v\n", err)
+			fmt.Fprintf(os.Stderr, "unable to build: %v\n", err)
 			return
 		}
 
@@ -108,7 +108,7 @@ var buildCmd = &cobra.Command{
 			Username:   publishResponse.Options.Username,
 			Password:   publishResponse.Options.Password,
 		}); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unable to push: image %s; error: %v\n", image, err)
+			fmt.Fprintf(os.Stderr, "unable to push: image %s; error: %v\n", image, err)
 			return
 		}
 		_, err = platformClient.UpdateModuleVersion(ctx, api.UpdateModuleVersionRequest{
@@ -120,7 +120,7 @@ var buildCmd = &cobra.Command{
 			return nil
 		})
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "unable to update version with image %s; error: %v\n", image, err)
+			fmt.Fprintf(os.Stderr, "unable to update version with image %s; error: %v\n", image, err)
 			return
 		}
 
