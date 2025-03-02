@@ -106,7 +106,7 @@ var runCmd = &cobra.Command{
 
 		scheme := runtime.NewScheme()
 
-		// register standard and custom schemas
+		// register standard and custom schemes
 		_ = clientgoscheme.AddToScheme(scheme)
 		_ = v1alpha1.AddToScheme(scheme)
 

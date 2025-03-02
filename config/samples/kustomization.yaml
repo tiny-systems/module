@@ -6,4 +6,6 @@ resources:
 - operator_v1alpha1_tinysignal.yaml
 - operator_v1alpha1_tinyflow.yaml
 - operator_v1alpha1_tinyproject.yaml
+- operator_v1alpha1_tinypage.yaml
+- operator_v1alpha1_tinywidget.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
