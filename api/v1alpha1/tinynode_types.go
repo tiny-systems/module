@@ -41,6 +41,16 @@ const (
 
 	FlowNameAnnotation = "tinysystems.io/flow-name"
 
+	LastAppliedNodeConfigurationAnnotation = "tinysystems.io/last-applied-node-configuration"
+
+	WidgetSchemaAnnotation = "tinysystems.io/widget-schema"
+	WidgetPortAnnotation   = "tinysystems.io/widget-port"
+	WidgetTitleAnnotation  = "tinysystems.io/widget-title"
+	WidgetGridXAnnotation  = "tinysystems.io/grid-x"
+	WidgetGridYAnnotation  = "tinysystems.io/grid-y"
+	WidgetGridWAnnotation  = "tinysystems.io/grid-w"
+	WidgetGridHAnnotation  = "tinysystems.io/grid-h"
+
 	PageNameAnnotation = "tinysystems.io/page-name"
 
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
