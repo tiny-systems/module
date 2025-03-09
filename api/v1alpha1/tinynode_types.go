@@ -39,9 +39,8 @@ const (
 	ProjectNameAnnotation = "tinysystems.io/project-name"
 	ServerIDAnnotation    = "tinysystems.io/server-id"
 
-	FlowNameAnnotation = "tinysystems.io/flow-name"
-
-	LastAppliedNodeConfigurationAnnotation = "tinysystems.io/last-applied-node-configuration"
+	NodeSetupAnnotation = "tinysystems.io/node-setup"
+	FlowNameAnnotation  = "tinysystems.io/flow-name"
 
 	WidgetSchemaAnnotation = "tinysystems.io/widget-schema"
 	WidgetPortAnnotation   = "tinysystems.io/widget-port"
