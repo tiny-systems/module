@@ -39,8 +39,8 @@ const (
 	ProjectNameAnnotation = "tinysystems.io/project-name"
 	ServerIDAnnotation    = "tinysystems.io/server-id"
 
-	NodeSetupAnnotation = "tinysystems.io/node-setup"
-	FlowNameAnnotation  = "tinysystems.io/flow-name"
+	NodeHandlesAnnotation = "tinysystems.io/node-handles"
+	FlowNameAnnotation    = "tinysystems.io/flow-name"
 
 	WidgetSchemaAnnotation = "tinysystems.io/widget-schema"
 	WidgetPortAnnotation   = "tinysystems.io/widget-port"
@@ -52,9 +52,10 @@ const (
 
 	PageNameAnnotation = "tinysystems.io/page-name"
 
-	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
-	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
-	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
+	ComponentPosXAnnotation        = "tinysystems.io/component-pos-x"
+	ComponentPosYAnnotation        = "tinysystems.io/component-pos-y"
+	ComponentPosSpinAnnotation     = "tinysystems.io/component-pos-spin"
+	ComponentDescriptionAnnotation = "tinysystems.io/component-description"
 
 	NodeLabelAnnotation         = "tinysystems.io/node-label"
 	NodeCommentAnnotation       = "tinysystems.io/node-comment"
