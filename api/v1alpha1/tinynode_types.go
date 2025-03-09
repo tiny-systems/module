@@ -52,10 +52,9 @@ const (
 
 	PageNameAnnotation = "tinysystems.io/page-name"
 
-	ComponentPosXAnnotation        = "tinysystems.io/component-pos-x"
-	ComponentPosYAnnotation        = "tinysystems.io/component-pos-y"
-	ComponentPosSpinAnnotation     = "tinysystems.io/component-pos-spin"
-	ComponentDescriptionAnnotation = "tinysystems.io/component-description"
+	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
+	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
+	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
 
 	NodeLabelAnnotation         = "tinysystems.io/node-label"
 	NodeCommentAnnotation       = "tinysystems.io/node-comment"
