@@ -106,7 +106,7 @@ var runCmd = &cobra.Command{
 
 		scheme := runtime.NewScheme()
 
-		// register standard and custom schemas
+		// register standard and custom schemes
 		_ = clientgoscheme.AddToScheme(scheme)
 		_ = v1alpha1.AddToScheme(scheme)
 
@@ -134,7 +134,11 @@ var runCmd = &cobra.Command{
 			Metrics: metricsserver.Options{
 				BindAddress: metricsAddr,
 			},
-			Cache:                  cache.Options{},
+			Cache: cache.Options{
+				DefaultNamespaces: map[string]cache.Config{
+					namespace: {},
+				},
+			},
 			HealthProbeBindAddress: probeAddr,
 			LeaderElection:         enableLeaderElection,
 			LeaderElectionID:       fmt.Sprintf("%s.tinysystems.io", name),
@@ -369,7 +373,7 @@ var runCmd = &cobra.Command{
 		})
 
 		l.Info("waiting...")
-		wg.Wait()
+		_ = wg.Wait()
 
 		l.Info("all done")
 	},

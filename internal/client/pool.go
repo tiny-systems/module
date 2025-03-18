@@ -21,7 +21,7 @@ type Pool interface {
 // DefaultStoreTTL for how long we keep grpc client in a pool, default 1h
 const DefaultStoreTTL = 60 * 60
 
-type pool struct {
+type AddressPool struct {
 	log          logr.Logger
 	addressTable cmap.ConcurrentMap[string, string]
 	clients      cmap.ConcurrentMap[string, module.ModuleServiceClient]
@@ -29,28 +29,28 @@ type pool struct {
 	runCtx       context.Context
 }
 
-func (p *pool) Register(moduleName, addr string) {
+func (p *AddressPool) Register(moduleName, addr string) {
 	p.addressTable.Set(moduleName, addr)
 }
 
-func (p *pool) Deregister(moduleName string) {
+func (p *AddressPool) Deregister(moduleName string) {
 	p.addressTable.Remove(moduleName)
 }
 
-func NewPool() *pool {
-	return &pool{
+func NewPool() *AddressPool {
+	return &AddressPool{
 		addressTable: cmap.New[string](),
 		clients:      cmap.New[module.ModuleServiceClient](),
 		errGroup:     &errgroup.Group{},
 	}
 }
 
-func (p *pool) SetLogger(l logr.Logger) *pool {
+func (p *AddressPool) SetLogger(l logr.Logger) *AddressPool {
 	p.log = l
 	return p
 }
 
-func (p *pool) Handler(ctx context.Context, msg *runner.Msg) error {
+func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) error {
 	moduleName, _, err := module2.ParseFullName(msg.To)
 	if err != nil {
 		return err
@@ -76,13 +76,13 @@ func (p *pool) Handler(ctx context.Context, msg *runner.Msg) error {
 	return err
 }
 
-func (p *pool) Start(ctx context.Context) error {
+func (p *AddressPool) Start(ctx context.Context) error {
 	p.runCtx = ctx
 	<-p.runCtx.Done()
 	return p.errGroup.Wait()
 }
 
-func (p *pool) getClient(ctx context.Context, addr string) (module.ModuleServiceClient, error) {
+func (p *AddressPool) getClient(_ context.Context, addr string) (module.ModuleServiceClient, error) {
 
 	client, ok := p.clients.Get(addr)
 	if ok {
@@ -91,7 +91,7 @@ func (p *pool) getClient(ctx context.Context, addr string) (module.ModuleService
 
 	p.log.Info("creating a new gRPC client", "addr", addr)
 
-	conn, err := grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
 	if err != nil {
 		return nil, err
 	}

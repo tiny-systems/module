@@ -121,7 +121,7 @@ func (m Manager) ExposePort(ctx context.Context, autoHostName string, hostnames 
 	prefix := m.getIngressAutoHostnamePrefix(ctx, ingress)
 
 	if prefix != "" && autoHostName != "" {
-		hostnames = append(hostnames, fmt.Sprintf("%s-%s%s", autoHostName, svc.Namespace, prefix))
+		hostnames = append(hostnames, fmt.Sprintf("%s-%s", autoHostName, prefix))
 	}
 	//
 	return m.addRulesIngress(ctx, ingress, svc, hostnames, port)
