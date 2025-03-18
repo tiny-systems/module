@@ -9,14 +9,10 @@
 Package v1alpha1 contains API Schema definitions for the operator v1alpha1 API group
 
 ### Resource Types
-- [TinyFlow](#tinyflow)
-- [TinyFlowList](#tinyflowlist)
 - [TinyModule](#tinymodule)
 - [TinyModuleList](#tinymodulelist)
 - [TinyNode](#tinynode)
 - [TinyNodeList](#tinynodelist)
-- [TinyProject](#tinyproject)
-- [TinyProjectList](#tinyprojectlist)
 - [TinySignal](#tinysignal)
 - [TinySignalList](#tinysignallist)
 - [TinyTracker](#tinytracker)
@@ -32,66 +28,6 @@ _Underlying type:_ _integer_
 
 _Appears in:_
 - [TinyNodePortStatus](#tinynodeportstatus)
-
-
-
-#### TinyFlow
-
-
-
-TinyFlow is the Schema for the tinyflows API
-
-_Appears in:_
-- [TinyFlowList](#tinyflowlist)
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinyFlow`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `spec` _[TinyFlowSpec](#tinyflowspec)_ |  |
-| `status` _[TinyFlowStatus](#tinyflowstatus)_ |  |
-
-
-#### TinyFlowList
-
-
-
-TinyFlowList contains a list of TinyFlow
-
-
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinyFlowList`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `items` _[TinyFlow](#tinyflow) array_ |  |
-
-
-#### TinyFlowSpec
-
-
-
-TinyFlowSpec defines the desired state of TinyFlow
-
-_Appears in:_
-- [TinyFlow](#tinyflow)
-
-
-
-#### TinyFlowStatus
-
-
-
-TinyFlowStatus defines the observed state of TinyFlow
-
-_Appears in:_
-- [TinyFlow](#tinyflow)
 
 
 
@@ -339,66 +275,6 @@ _Appears in:_
 | `status` _string_ |  |
 | `error` _boolean_ |  |
 | `lastUpdateTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#time-v1-meta)_ |  |
-
-
-#### TinyProject
-
-
-
-TinyProject is the Schema for the tinyprojects API
-
-_Appears in:_
-- [TinyProjectList](#tinyprojectlist)
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinyProject`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `spec` _[TinyProjectSpec](#tinyprojectspec)_ |  |
-| `status` _[TinyProjectStatus](#tinyprojectstatus)_ |  |
-
-
-#### TinyProjectList
-
-
-
-TinyProjectList contains a list of TinyProject
-
-
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinyProjectList`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `items` _[TinyProject](#tinyproject) array_ |  |
-
-
-#### TinyProjectSpec
-
-
-
-TinyProjectSpec defines the desired state of TinyProject
-
-_Appears in:_
-- [TinyProject](#tinyproject)
-
-
-
-#### TinyProjectStatus
-
-
-
-TinyProjectStatus defines the observed state of TinyProject
-
-_Appears in:_
-- [TinyProject](#tinyproject)
-
 
 
 #### TinySignal
