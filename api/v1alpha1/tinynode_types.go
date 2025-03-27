@@ -34,24 +34,6 @@ const (
 
 	SharedWithFlowsAnnotation = "tinysystems.io/shared-with-flows"
 
-	// visual annotations used by platform
-
-	ProjectNameAnnotation = "tinysystems.io/project-name"
-	ServerIDAnnotation    = "tinysystems.io/server-id"
-
-	NodeHandlesAnnotation = "tinysystems.io/node-handles"
-	FlowNameAnnotation    = "tinysystems.io/flow-name"
-
-	WidgetSchemaAnnotation = "tinysystems.io/widget-schema"
-	WidgetPortAnnotation   = "tinysystems.io/widget-port"
-	WidgetTitleAnnotation  = "tinysystems.io/widget-title"
-	WidgetGridXAnnotation  = "tinysystems.io/grid-x"
-	WidgetGridYAnnotation  = "tinysystems.io/grid-y"
-	WidgetGridWAnnotation  = "tinysystems.io/grid-w"
-	WidgetGridHAnnotation  = "tinysystems.io/grid-h"
-
-	PageNameAnnotation = "tinysystems.io/page-name"
-
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
