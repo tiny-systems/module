@@ -32,6 +32,8 @@ const (
 	ModuleVersionLabel = "tinysystems.io/module-version"
 	DashboardLabel     = "tinysystems.io/dashboard"
 
+	NodeHandlesAnnotation = "tinysystems.io/node-handles"
+
 	SharedWithFlowsAnnotation = "tinysystems.io/shared-with-flows"
 
 	ComponentPosXAnnotation    = "tinysystems.io/component-pos-x"
