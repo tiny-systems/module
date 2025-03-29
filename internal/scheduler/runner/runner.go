@@ -366,8 +366,9 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 				c.addSpanPortData(outputSpan, string(outputDataBytes))
 			}
 
-			// all handler calls have app level context (not a request level one)
-			if err = c.outputHandler(trace.ContextWithSpanContext(ctx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler); err != nil {
+			// all handler calls have app level context (not a request level one) but why?
+			// @reverted to request level ctx
+			if err = c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler); err != nil {
 				return err
 			}
 			return nil

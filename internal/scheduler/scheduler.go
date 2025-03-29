@@ -128,7 +128,7 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 		// instance is not registered currently or it's port is not yet available (setting did not enable it yet?)
 		// maybe reconcile call did not register it yet
 		// sleep and try again
-		t := time.NewTimer(time.Millisecond * 100)
+		t := time.NewTimer(time.Millisecond * 500)
 		defer t.Stop()
 
 		select {
