@@ -114,6 +114,7 @@ func (s *Schedule) HandleInternal(ctx context.Context, msg *runner.Msg) error {
 }
 
 // Handle could be external and synchronous
+// @todo use retry with backoff here
 func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 	nodeName, port := utils.ParseFullPortName(msg.To)
 
@@ -128,16 +129,7 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 		// instance is not registered currently or it's port is not yet available (setting did not enable it yet?)
 		// maybe reconcile call did not register it yet
 		// sleep and try again
-		t := time.NewTimer(time.Millisecond * 500)
-		defer t.Stop()
-
-		select {
-		// what ever happens first
-		case <-ctx.Done():
-			return nil
-		case <-t.C:
-			return s.outsideHandler(ctx, msg)
-		}
+		return fmt.Errorf("port %s:%s is not ready", nodeName, port)
 	}
 	return s.send(ctx, instance, msg)
 }
@@ -164,7 +156,7 @@ func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner,
 }
 
 func (s *Schedule) Destroy(name string) error {
-	s.log.Info("destroy", "node", name)
+	s.log.Info("destroy node", "node", name)
 	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
 		// remove from map first so no one can access it
 		s.instancesMap.Remove(name)
