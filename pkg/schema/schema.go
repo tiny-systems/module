@@ -44,6 +44,11 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 			if err = SetBool("configurable", configurable, confCopy); err != nil {
 				return nil, fmt.Errorf("set bool error: %w", err)
 			}
+
+			if readonly, _ := GetBool("readonly", realSchemaDef); readonly {
+				_ = SetBool("readonly", readonly, confCopy)
+			}
+
 			// update real schema from configurable definitions but copy path,configurable,propertyOrder props from status real schema
 			if err = realSchemaDef.SetNode(confCopy); err != nil {
 				return nil, err
