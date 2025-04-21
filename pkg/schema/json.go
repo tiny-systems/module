@@ -19,7 +19,7 @@ type tagDefinition struct {
 }
 
 var scalarCustomProps = []string{
-	"requiredWhen", "propertyOrder", "optionalWhen", "colSpan", "tab", "align", "configurable", "shared", "$ref", "type", "readonly", "format",
+	"requiredWhen", "propertyOrder", "optionalWhen", "colSpan", "tab", "align", "configurable", "shared", "$ref", "type", "readonly", "format", "language",
 }
 
 var arrayCustomProps = []string{
