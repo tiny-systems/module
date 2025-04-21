@@ -143,6 +143,9 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 		if output.Error != "" {
 			return errors.New(output.Error)
 		}
+		if output.Stream == "" {
+			continue
+		}
 		fmt.Printf("%s\n", output.Stream)
 	}
 	return scanner.Err()
