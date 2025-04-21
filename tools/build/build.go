@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
+	"github.com/goccy/go-json"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/mod/modfile"
@@ -32,6 +33,11 @@ var (
 	//go:embed Dockerfile-final
 	dockerfileFinal string
 )
+
+type ScannerOutput struct {
+	Stream string `json:"stream"`
+	Error  string `json:"error"`
+}
 
 func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) error {
 
@@ -130,7 +136,14 @@ func Build(ctx context.Context, cwd string, pathToMain string, bOpts Options) er
 	}
 	scanner := bufio.NewScanner(res.Body)
 	for scanner.Scan() {
-		fmt.Printf("%s\n", scanner.Text())
+		var output ScannerOutput
+		if err = json.Unmarshal(scanner.Bytes(), &output); err != nil {
+			continue
+		}
+		if output.Error != "" {
+			return errors.New(output.Error)
+		}
+		fmt.Printf("%s\n", output.Stream)
 	}
 	return scanner.Err()
 }
