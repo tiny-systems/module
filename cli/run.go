@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/zerologr"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -182,8 +183,12 @@ var runCmd = &cobra.Command{
 				return scheduler.Handle(ctx, msg)
 			}
 
-			// gRPC call
-			return pool.Handler(ctx, msg)
+			// gRPC call with retries
+
+			return backoff.Retry(func() error {
+				return pool.Handler(ctx, msg)
+			}, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
+
 		}).
 			SetLogger(l).
 			SetMeter(meter).

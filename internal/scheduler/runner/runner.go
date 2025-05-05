@@ -56,11 +56,14 @@ type Runner struct {
 
 	meter metric.Meter
 	//
-	nodeLock            *sync.Mutex
-	previousSettings    interface{}
-	previousSettingsErr error
-	reconciling         *atomic.Bool
+	nodeLock *sync.Mutex
+
+	portMsg     map[string]*Msg
+	portErr     map[string]error
+	reconciling *atomic.Bool
 }
+
+const FromSignal = "signal"
 
 func NewRunner(name string, component m.Component) *Runner {
 	return &Runner{
@@ -70,6 +73,8 @@ func NewRunner(name string, component m.Component) *Runner {
 		closeCh:        make(chan struct{}),
 		portsCacheLock: &sync.RWMutex{},
 		reconciling:    &atomic.Bool{},
+		portMsg:        make(map[string]*Msg),
+		portErr:        make(map[string]error),
 	}
 }
 
@@ -235,8 +240,14 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
 
-	// @todo add const
-	if msg.From == "signal" {
+	// we do not send data from signals if they are not changed to prevent work disruptions due to reconciliations each 5min
+	if (msg.From == FromSignal || port == m.SettingsPort) && cmp.Equal(msg, c.portMsg[port]) {
+		return c.portErr[port]
+	}
+
+	c.portMsg[port] = msg
+
+	if msg.From == FromSignal {
 		// from signal controller (outside)
 
 		if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
@@ -283,15 +294,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		portData = nodePort.Configuration
 	}
 
-	////
-	if port == m.SettingsPort {
-		// we do not sed settings if they are no changed to prevent work disruptions
-		if cmp.Equal(portData, c.previousSettings) {
-			// check cache, we do not want to update settings if they did not change
-			return c.previousSettingsErr
-		}
-		c.previousSettings = portData
-	}
+	c.log.Info("exec component handler", "msg", msg)
 
 	u, err := uuid.NewUUID()
 	if err != nil {
@@ -366,8 +369,6 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 				c.addSpanPortData(outputSpan, string(outputDataBytes))
 			}
 
-			// all handler calls have app level context (not a request level one) but why?
-			// @reverted to request level ctx
 			if err = c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler); err != nil {
 				return err
 			}
@@ -375,9 +376,8 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		}, port, portData)
 	})
 
-	if port == m.SettingsPort {
-		c.previousSettingsErr = err
-	}
+	c.portErr[port] = err
+
 	return err
 }
 

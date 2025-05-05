@@ -76,12 +76,14 @@ make manifests
 ### Create new api
 ```shell
 kubebuilder create api --group operator --version v1alpha1 --kind TinySignal
-
 ```
 
 **NOTE:** Run `make --help` for more information on all potential `make` targets
 
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+
+### Module development
+tbd
 
 ## License
 
