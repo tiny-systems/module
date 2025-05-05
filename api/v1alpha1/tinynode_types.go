@@ -26,6 +26,8 @@ const (
 	//ProjectIDLabel project ID k8s label
 	ProjectIDLabel = "tinysystems.io/project-id"
 
+	NodeNameLabel = "tinysystems.io/node-name"
+
 	//ModuleNameMajorLabel module major version label
 	ModuleNameMajorLabel = "tinysystems.io/module-version-major"
 	//ModuleVersionLabel module exact version label
@@ -40,6 +42,7 @@ const (
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
 
+	SignalNonceAnnotation       = "tinysystems.io/signal-nonce"
 	NodeLabelAnnotation         = "tinysystems.io/node-label"
 	NodeCommentAnnotation       = "tinysystems.io/node-comment"
 	SuggestedHttpPortAnnotation = "tinysystems.io/suggested-http-port"
