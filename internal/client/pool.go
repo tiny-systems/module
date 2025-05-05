@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
@@ -58,8 +59,7 @@ func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) error {
 
 	addr, ok := p.addressTable.Get(moduleName)
 	if !ok {
-		p.log.Error(err, "module address is unknown", "name", moduleName)
-		return err
+		return fmt.Errorf("%s module address is unknown", moduleName)
 	}
 	client, err := p.getClient(ctx, addr)
 	if err != nil {
@@ -73,6 +73,7 @@ func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) error {
 		EdgeID:  msg.EdgeID,
 		To:      msg.To,
 	})
+
 	return err
 }
 

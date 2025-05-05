@@ -376,16 +376,43 @@ func (m Manager) DisclosePort(ctx context.Context, port int) error {
 }
 
 func (m Manager) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error {
-	signal := &v1alpha1.TinySignal{
-		Spec: v1alpha1.TinySignalSpec{
-			Node: node.Name,
-			Port: port,
-			Data: data,
-		},
+
+	signal := &v1alpha1.TinySignal{}
+	name := fmt.Sprintf("%s-%s", node.Name, strings.ReplaceAll(port, "_", ""))
+
+	err := m.client.Get(ctx, client.ObjectKey{Namespace: node.Namespace, Name: name}, signal)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
 	}
-	signal.Namespace = node.Namespace
-	signal.GenerateName = fmt.Sprintf("%s-%s-", node.Name, strings.ReplaceAll(port, "_", ""))
-	return m.client.Create(ctx, signal)
+
+	newSignal := signal.DeepCopy()
+
+	newSignal.Namespace = node.Namespace
+	newSignal.Name = name
+
+	newSignal.Labels = map[string]string{
+		v1alpha1.NodeNameLabel: node.Name,
+	}
+
+	newSignal.Spec = v1alpha1.TinySignalSpec{
+		Node: node.Name,
+		Port: port,
+		Data: data,
+	}
+
+	if errors.IsNotFound(err) {
+		if err := m.client.Create(ctx, newSignal); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	err = m.client.Patch(ctx, newSignal, client.MergeFrom(signal))
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
 }
 
 func (m Manager) Start(ctx context.Context) error {

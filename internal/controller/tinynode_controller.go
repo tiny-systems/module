@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
@@ -64,7 +65,6 @@ type TinyNodeReconciler struct {
 func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	//l.Info("reconcile", "tinynode", req.Name)
 	m, _, err := module.ParseFullName(req.Name)
 	if err != nil {
 		l.Error(err, "node has invalid name", "name", req.Name)
@@ -76,6 +76,8 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, nil
 	}
 
+	l.Info("reconcile", "tinynode", req.Name)
+
 	node := &operatorv1alpha1.TinyNode{}
 
 	if err = r.Get(context.Background(), req.NamespacedName, node); err != nil {
@@ -83,14 +85,39 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if errors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
 			// For additional cleanup logic use finalizers.
+			// delete signals
+
+			_ = r.DeleteAllOf(context.Background(), &operatorv1alpha1.TinySignal{}, client.InNamespace(req.Namespace), client.MatchingLabels{
+				operatorv1alpha1.NodeNameLabel: req.Name,
+			})
+
 			if err = r.Scheduler.Destroy(req.Name); err != nil {
-				l.Error(err, "destroy error")
 				return reconcile.Result{}, err
 			}
 			return reconcile.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
+	}
+	originNode := node.DeepCopy()
+
+	// select all signals for this node
+
+	signalList := &operatorv1alpha1.TinySignalList{}
+
+	selector, err := v1.LabelSelectorAsSelector(&v1.LabelSelector{
+		MatchLabels: map[string]string{
+			operatorv1alpha1.NodeNameLabel: node.Name,
+		},
+	})
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("build signal selector error: %s", err)
+	}
+
+	if err = r.List(ctx, signalList, client.MatchingLabelsSelector{
+		Selector: selector,
+	}, client.InNamespace(node.Namespace)); err != nil {
+		return reconcile.Result{}, fmt.Errorf("signal list error: %v", err)
 	}
 
 	status := &node.Status
@@ -109,7 +136,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	status.LastUpdateTime = &t
 	// upsert in scheduler
 	// todo add app level context
-	err = r.Scheduler.Update(context.Background(), node)
+	err = r.Scheduler.Update(context.Background(), node, signalList)
 	if err != nil {
 		l.Error(err, "scheduler upsert error")
 		status.Error = true
@@ -118,7 +145,8 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	node.Status = *status
 
-	err = r.Status().Update(context.Background(), node)
+	err = r.Status().Patch(context.Background(), node, client.MergeFrom(originNode))
+	//err = r.Status().Update(context.Background(), node)
 	if err != nil {
 		l.Error(err, "status update error")
 		return reconcile.Result{}, err
@@ -135,15 +163,43 @@ func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinyNode{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&operatorv1alpha1.TinySignal{}, handler.TypedFuncs[client.Object, reconcile.Request]{
+
+			CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				signal, ok := e.Object.(*operatorv1alpha1.TinySignal)
+				if !ok {
+					return
+				}
+				if signal.Spec.Port == module.ReconcilePort {
+					// reconcile by signal only applies after deletion of the signal
+					return
+				}
+				q.Add(reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      signal.Spec.Node,
+						Namespace: signal.Namespace,
+					},
+				})
+			},
+			UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				signal, ok := e.ObjectNew.(*operatorv1alpha1.TinySignal)
+				if !ok {
+					return
+				}
+				// we do not update reconcile signals, only data ports
+				q.Add(reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      signal.Spec.Node,
+						Namespace: signal.Namespace,
+					},
+				})
+			},
+			// when tinySignal deleted signal with reconcile port - reconcile
 			DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 				signal, ok := e.Object.(*operatorv1alpha1.TinySignal)
 				if !ok {
 					return
 				}
-				if signal.Spec.Port != module.ReconcilePort {
-					// do not reconcile if signal was used as a way to send data
-					return
-				}
+				// we reconcile if any relates signal deleted
 				q.Add(reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      signal.Spec.Node,

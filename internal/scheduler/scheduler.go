@@ -21,12 +21,11 @@ import (
 type Scheduler interface {
 	//Install makes component available to run instances
 	Install(component module.Component) error
-	//Update creates a new instance by using unique name, if instance exists - updates one
-	Update(ctx context.Context, node *v1alpha1.TinyNode) error
+	//Update creates a new instance by using unique name, if instance exists - updates one using its specs and signals
+	Update(ctx context.Context, node *v1alpha1.TinyNode, signals *v1alpha1.TinySignalList) error
 	//Handle sync incoming call
 	Handle(ctx context.Context, msg *runner.Msg) error
-	//HandleInternal same as Handle but does not wait until port unblock and does not fall back msg outside
-	HandleInternal(ctx context.Context, msg *runner.Msg) error
+
 	//Destroy stops the instance and deletes it
 	Destroy(name string) error
 }
@@ -96,28 +95,11 @@ func (s *Schedule) Install(component module.Component) error {
 	return nil
 }
 
-// HandleInternal only local and async
-func (s *Schedule) HandleInternal(ctx context.Context, msg *runner.Msg) error {
-	nodeName, _ := utils.ParseFullPortName(msg.To)
-	if nodeName == "" {
-		return fmt.Errorf("node name in `to` is empty")
-	}
-
-	instance, ok := s.instancesMap.Get(nodeName)
-	if !ok {
-		return fmt.Errorf("node %s not found", nodeName)
-	}
-	s.errGroup.Go(func() error {
-		return s.send(ctx, instance, msg)
-	})
-	return nil
-}
-
 // Handle could be external and synchronous
 // @todo use retry with backoff here
 func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
-	nodeName, port := utils.ParseFullPortName(msg.To)
 
+	nodeName, port := utils.ParseFullPortName(msg.To)
 	if port == module.ReconcilePort {
 		// system port; do nothing
 		return nil
@@ -157,7 +139,7 @@ func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner,
 	}
 	if port == module.ReconcilePort {
 		// create tiny signal instead which will trigger reconcile
-		if err := s.manager.CreateClusterNodeSignal(context.Background(), instance.Node(), port, outMsg.Data); err != nil {
+		if err := s.manager.CreateClusterNodeSignal(context.Background(), instance.Node(), port, nil); err != nil {
 			return fmt.Errorf("create signal error: %v", err)
 		}
 	}
@@ -165,7 +147,6 @@ func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner,
 }
 
 func (s *Schedule) Destroy(name string) error {
-	s.log.Info("destroy node", "node", name)
 	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
 		// remove from map first so no one can access it
 		s.instancesMap.Remove(name)
@@ -175,7 +156,8 @@ func (s *Schedule) Destroy(name string) error {
 }
 
 // Update updates node instance or creates one
-func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
+func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals *v1alpha1.TinySignalList) error {
+
 	cmp, ok := s.componentsMap.Get(node.Spec.Component)
 	if !ok {
 		return fmt.Errorf("component %s is not registered", node.Spec.Component)
@@ -210,18 +192,38 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 
 	s.errGroup.Go(func() error {
 
-		// @todo register instance inn the map only when its settings msg being processed
-		atomicErr.Store(s.send(ctx, runnerInstance, &runner.Msg{
-			EdgeID: utils.GetPortFullName(node.Name, module.SettingsPort),
-			To:     utils.GetPortFullName(node.Name, module.SettingsPort),
-			Data:   []byte("{}"), // no external data sent to port, rely solely on a node's port config
-		}))
+		// send signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
+		if err := s.send(ctx, runnerInstance, &runner.Msg{
+			To:   utils.GetPortFullName(node.Name, module.SettingsPort),
+			Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config
+		}); err != nil {
+			atomicErr.Store(err)
+			return nil
+		}
+
+		if signals == nil {
+			return nil
+		}
+
+		for _, signal := range signals.Items {
+			//
+			if err := s.send(ctx, runnerInstance, &runner.Msg{
+				From:  runner.FromSignal, // @todo use const
+				To:    utils.GetPortFullName(node.Name, signal.Spec.Port),
+				Data:  signal.Spec.Data,
+				Nonce: signal.Annotations[v1alpha1.SignalNonceAnnotation],
+			}); err != nil {
+				atomicErr.Store(err)
+				return nil
+			}
+		}
+
 		// configure port errors should not fail the entire error group
 		return nil
 	})
 
 	// give time to node update itself or fail
-	time.Sleep(time.Millisecond * 300)
+	time.Sleep(time.Second)
 
 	var err = runnerInstance.ReadStatus(&node.Status)
 

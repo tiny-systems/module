@@ -19,11 +19,10 @@ package controller
 import (
 	"context"
 	"github.com/tiny-systems/module/internal/scheduler"
-	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
-	"github.com/tiny-systems/module/pkg/utils"
-	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -56,7 +55,6 @@ type TinySignalReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
-	l.Info("reconcile", "tinysignal", req.Name)
 	// tiny signal names after name of node it's signaling to
 
 	// to avoid making many queries to Kubernetes API we check name itself against current module
@@ -70,35 +68,21 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return reconcile.Result{}, nil
 	}
 
-	signal := &operatorv1alpha1.TinySignal{}
-	err = r.Get(context.Background(), req.NamespacedName, signal)
-
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// delete signal if related node not found
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, err
+	// @todo const
+	if !strings.HasSuffix(req.Name, "-reconcile") {
+		return reconcile.Result{}, nil
 	}
 
-	if signal.Spec.Port == module.ReconcilePort {
-		// we do not use signals to reconcile directly
-		_ = r.Delete(ctx, signal)
-		return ctrl.Result{}, nil
-	}
-
-	// todo add app level context
-	if err = r.Scheduler.HandleInternal(context.Background(), &runner.Msg{
-		EdgeID: utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
-		To:     utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
-		From:   "signal",
-		Data:   signal.Spec.Data,
-	}); err != nil {
-		l.Error(err, "invoke error")
+	signal := &operatorv1alpha1.TinySignal{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.Name,
+			Namespace: req.Namespace,
+		},
 	}
 
 	_ = r.Delete(ctx, signal)
 	return ctrl.Result{}, nil
+
 }
 
 // SetupWithManager sets up the controller with the Manager.

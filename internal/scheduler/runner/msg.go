@@ -9,4 +9,6 @@ type Msg struct {
 	// recipient of this message in a format node:port
 	To   string `json:"to"`
 	Data []byte `json:"data"`
+
+	Nonce string `json:"nonce"`
 }

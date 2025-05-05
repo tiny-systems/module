@@ -44,6 +44,8 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 	//
 	modulepb.RegisterModuleServiceServer(srv, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
+		s.log.Info("incoming grpc request")
+
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
