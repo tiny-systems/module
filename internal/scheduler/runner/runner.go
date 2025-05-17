@@ -58,8 +58,10 @@ type Runner struct {
 	//
 	nodeLock *sync.Mutex
 
-	portMsg     map[string]*Msg
-	portErr     map[string]error
+	portMsg   map[string]interface{}
+	portErr   map[string]error
+	portNonce map[string]string
+	//
 	reconciling *atomic.Bool
 }
 
@@ -73,8 +75,9 @@ func NewRunner(name string, component m.Component) *Runner {
 		closeCh:        make(chan struct{}),
 		portsCacheLock: &sync.RWMutex{},
 		reconciling:    &atomic.Bool{},
-		portMsg:        make(map[string]*Msg),
+		portMsg:        make(map[string]interface{}),
 		portErr:        make(map[string]error),
+		portNonce:      make(map[string]string),
 	}
 }
 
@@ -240,13 +243,6 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
 
-	// we do not send data from signals if they are not changed to prevent work disruptions due to reconciliations each 5min
-	if (msg.From == FromSignal || port == m.SettingsPort) && cmp.Equal(msg, c.portMsg[port]) {
-		return c.portErr[port]
-	}
-
-	c.portMsg[port] = msg
-
 	if msg.From == FromSignal {
 		// from signal controller (outside)
 
@@ -292,6 +288,15 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	} else {
 		// default is the state of a port's config
 		portData = nodePort.Configuration
+	}
+
+	// we do not send data from signals if they are not changed to prevent work disruptions due to reconciliations each 5min
+	if msg.From == FromSignal || port == m.SettingsPort {
+		if cmp.Equal(portData, c.portMsg[port]) && msg.Nonce == c.portNonce[port] {
+			return c.portErr[port]
+		}
+		c.portMsg[port] = portData
+		c.portNonce[port] = msg.Nonce
 	}
 
 	c.log.Info("exec component handler", "msg", msg)
@@ -377,7 +382,6 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	})
 
 	c.portErr[port] = err
-
 	return err
 }
 
