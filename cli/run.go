@@ -35,15 +35,14 @@ import (
 
 // override by ldflags
 var (
-	namespace            string
-	kubeconfig           string
-	version              string
-	name                 string
-	versionID            string // ldflags
-	metricsAddr          string
-	grpcAddr             string
-	enableLeaderElection bool
-	probeAddr            string
+	namespace   string
+	kubeconfig  string
+	version     string
+	name        string
+	versionID   string // ldflags
+	metricsAddr string
+	grpcAddr    string
+	probeAddr   string
 )
 
 var (
@@ -141,8 +140,7 @@ var runCmd = &cobra.Command{
 				},
 			},
 			HealthProbeBindAddress: probeAddr,
-			LeaderElection:         enableLeaderElection,
-			LeaderElectionID:       fmt.Sprintf("%s.tinysystems.io", name),
+			LeaderElection:         false,
 		})
 		if err != nil {
 			l.Error(err, "unable to create manager")
@@ -241,7 +239,6 @@ var runCmd = &cobra.Command{
 			Client:    mgr.GetClient(),
 			Scheme:    mgr.GetScheme(),
 			Scheduler: scheduler,
-			Recorder:  mgr.GetEventRecorderFor("tiny-controller"),
 			Module:    moduleInfo,
 		}
 
