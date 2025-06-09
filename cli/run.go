@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/zerologr"
+	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -21,16 +23,22 @@ import (
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"net"
 	"os"
+	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // override by ldflags
@@ -63,6 +71,7 @@ var runCmd = &cobra.Command{
 		)
 		if err != nil {
 			l.Error(err, "configure opentelemetry error")
+			os.Exit(1)
 		}
 
 		// Send buffered spans and free resources.
@@ -86,15 +95,18 @@ var runCmd = &cobra.Command{
 
 		if name == "" {
 			l.Error(ErrInvalidModuleName, "module name is empty")
+			os.Exit(1)
 			return
 		}
 		if version == "" {
 			l.Error(ErrInvalidModuleVersion, "module name is empty")
+			os.Exit(1)
 			return
 		}
 
 		if strings.HasPrefix(version, "v") {
 			l.Error(ErrInvalidModuleVersion, "version should not start with v prefix")
+			os.Exit(1)
 			return
 		}
 
@@ -119,11 +131,13 @@ var runCmd = &cobra.Command{
 			config, err = rest.InClusterConfig()
 			if err != nil {
 				l.Error(err, "unable to get kubeconfig")
+				os.Exit(1)
 				return
 			}
 		}
 		if config == nil {
 			l.Error(fmt.Errorf("config is nil"), "unable to create kubeconfig")
+			os.Exit(1)
 			return
 		}
 
@@ -144,14 +158,124 @@ var runCmd = &cobra.Command{
 		})
 		if err != nil {
 			l.Error(err, "unable to create manager")
+			os.Exit(1)
 			return
 		}
 
-		// run all systems
+		// custom leader elector
+		coreClient, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			l.Error(err, "unable to create core kubernetes client for leader election")
+			os.Exit(1)
+		}
+
+		podName := os.Getenv("HOSTNAME")
+		if podName == "" {
+			l.Error(err, "HOSTNAME environment variable not set, required for leader identity")
+			os.Exit(1)
+		}
+
+		isLeader := &atomic.Bool{}
+		isLeader.Store(false)
+
+		lock, err := resourcelock.New(
+			resourcelock.LeasesResourceLock,
+			namespace,
+			fmt.Sprintf("%s-lock", name),
+			nil,
+			coreClient.CoordinationV1(), // Event recorder
+			resourcelock.ResourceLockConfig{
+				Identity: podName,
+			},
+		)
+		if err != nil {
+			l.Error(err, "unable to create resource lock for custom leader election")
+			os.Exit(1)
+		}
+
+		leaderElected := make(chan struct{})
+
+		leaderCallbacks := leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				l.Info("became leader for status updates")
+				isLeader.Store(true)
+			},
+			OnStoppedLeading: func() {
+				l.Info("stopped leading for status updates")
+				isLeader.Store(false)
+			},
+			OnNewLeader: func(identity string) {
+				l.Info("new leader elected for status updates", "leader", identity)
+				if isClosed(leaderElected) {
+					return
+				}
+				close(leaderElected)
+			},
+		}
+
+		elector, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
+			Lock:            lock,
+			LeaseDuration:   5 * time.Second,
+			RenewDeadline:   3 * time.Second,
+			RetryPeriod:     2 * time.Second,
+			Callbacks:       leaderCallbacks,
+			ReleaseOnCancel: true,
+			Name:            fmt.Sprintf("%s-leader-elector", name),
+		})
+		if err != nil {
+			l.Error(err, "unable to create leader elector for status updates")
+			os.Exit(1)
+		}
+
 		cmdCtx, cancel := context.WithCancelCause(cmd.Context())
 		defer cancel(nil)
 
 		wg, ctx := errgroup.WithContext(cmdCtx)
+
+		// Start the custom leader elector in a goroutine
+
+		wg.Go(func() error {
+
+			leLogger := l.WithName("custom-leader-elector-loop")
+
+			backoffDuration := 5 * time.Second    // Initial backoff duration
+			maxBackoffDuration := 5 * time.Minute // Maximum backoff duration
+
+			for {
+				leLogger.Info("starting custom leader election process")
+
+				elector.Run(ctx)
+				// If we reach here, elector.Run() has exited.
+
+				select {
+				case <-ctx.Done():
+					leLogger.Info("context cancelled, will not retry leader election", "reason", context.Cause(ctx))
+
+					if err := context.Cause(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+						return err
+					}
+					return nil
+				default:
+					// The context is not done, so elector.Run() likely exited due to losing the lease
+					// or an unrecoverable error during renewal (like the API being unreachable).
+					leLogger.Error(nil, "custom leader election ended unexpectedly, will retry after backoff", "current_backoff", backoffDuration)
+
+					// Wait for the backoff period, but also listen for context cancellation.
+					select {
+					case <-time.After(backoffDuration):
+						// Exponential backoff
+						backoffDuration *= 2
+						if backoffDuration > maxBackoffDuration {
+							backoffDuration = maxBackoffDuration
+						}
+					case <-ctx.Done():
+						leLogger.Info("context cancelled during backoff, stopping leader election retries", "reason", context.Cause(ctx))
+						return nil
+					}
+				}
+			}
+
+		})
 
 		listenAddr := make(chan string)
 		defer close(listenAddr)
@@ -170,10 +294,10 @@ var runCmd = &cobra.Command{
 		)
 
 		//
-		scheduler = sch.New(func(ctx context.Context, msg *runner.Msg) error {
+		scheduler = sch.New(func(ctx context.Context, msg *runner.Msg) (any, error) {
 			m, _, err := m.ParseFullName(msg.To)
 			if err != nil {
-				return fmt.Errorf("parse destination error: %v", err)
+				return nil, fmt.Errorf("parse destination error: %v", err)
 			}
 
 			if m == moduleInfo.GetNameSanitised() {
@@ -182,11 +306,26 @@ var runCmd = &cobra.Command{
 			}
 
 			// gRPC call with retries
+			var resp []byte
 
-			return backoff.Retry(func() error {
-				return pool.Handler(ctx, msg)
+			err = backoff.Retry(func() error {
+				resp, err = pool.Handler(ctx, msg)
+				return err
+
 			}, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
+			if err != nil {
+				return nil, err
+			}
 
+			if msg.Resp == nil {
+				return resp, nil
+			}
+
+			respData := reflect.New(reflect.TypeOf(msg.Resp)).Elem()
+			if err = json.Unmarshal(resp, respData.Addr().Interface()); err != nil {
+				return nil, err
+			}
+			return respData.Interface(), err
 		}).
 			SetLogger(l).
 			SetMeter(meter).
@@ -240,6 +379,7 @@ var runCmd = &cobra.Command{
 			Scheme:    mgr.GetScheme(),
 			Scheduler: scheduler,
 			Module:    moduleInfo,
+			IsLeader:  isLeader,
 		}
 
 		if err = nodeController.SetupWithManager(mgr); err != nil {
@@ -252,6 +392,7 @@ var runCmd = &cobra.Command{
 			Scheme:     mgr.GetScheme(),
 			Module:     moduleInfo,
 			ClientPool: pool,
+			IsLeader:   isLeader,
 		}
 
 		if err = moduleController.SetupWithManager(mgr); err != nil {
@@ -260,9 +401,10 @@ var runCmd = &cobra.Command{
 		}
 
 		if err = (&controller.TinyTrackerReconciler{
-			Client:  mgr.GetClient(),
-			Scheme:  mgr.GetScheme(),
-			Manager: trackManager,
+			Client:   mgr.GetClient(),
+			Scheme:   mgr.GetScheme(),
+			Manager:  trackManager,
+			IsLeader: isLeader,
 			//
 		}).SetupWithManager(mgr); err != nil {
 			l.Error(err, "unable to create tinytracker controller")
@@ -274,6 +416,7 @@ var runCmd = &cobra.Command{
 			Scheme:    mgr.GetScheme(),
 			Scheduler: scheduler,
 			Module:    moduleInfo,
+			IsLeader:  isLeader,
 		}).SetupWithManager(mgr); err != nil {
 			l.Error(err, "unable to create tinysignal controller")
 			return
@@ -319,9 +462,10 @@ var runCmd = &cobra.Command{
 			return nil
 		})
 
-		// kubebuilder start
-
 		wg.Go(func() error {
+			<-leaderElected
+
+			// start manager
 			l.Info("starting kubebuilder operator")
 			defer func() {
 				l.Info("kubebuilder operator stopped")
@@ -333,7 +477,7 @@ var runCmd = &cobra.Command{
 			return nil
 		})
 
-		// grpc client start
+		// start grpc client pool
 
 		wg.Go(func() error {
 			l.Info("starting gRPC client pool")
@@ -379,4 +523,13 @@ var runCmd = &cobra.Command{
 
 		l.Info("all done")
 	},
+}
+
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+	}
+	return false
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/tiny-systems/module/registry"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sync/atomic"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,6 +39,7 @@ type TinyModuleReconciler struct {
 	Scheme     *runtime.Scheme
 	Module     module.Info
 	ClientPool clientpool.Pool
+	IsLeader   *atomic.Bool
 }
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinymodules,verbs=get;list;watch;create;update;patch;delete;deletecollection
@@ -54,6 +56,11 @@ type TinyModuleReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	if !r.IsLeader.Load() {
+		return reconcile.Result{}, nil
+	}
+	// only leaders update
 	l := log.FromContext(ctx)
 
 	instance := &operatorv1alpha1.TinyModule{}

@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"strings"
+	"sync/atomic"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,6 +39,7 @@ type TinySignalReconciler struct {
 	Scheme    *runtime.Scheme
 	Scheduler scheduler.Scheduler
 	Module    module.Info
+	IsLeader  *atomic.Bool
 }
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals,verbs=get;list;watch;create;update;patch;delete
@@ -56,6 +58,11 @@ type TinySignalReconciler struct {
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	// tiny signal names after name of node it's signaling to
+
+	if !r.IsLeader.Load() {
+		return reconcile.Result{}, nil
+	}
+	// only leaders process signals
 
 	// to avoid making many queries to Kubernetes API we check name itself against current module
 	m, _, err := module.ParseFullName(req.Name)

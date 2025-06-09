@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"github.com/go-logr/logr"
+	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	modulepb "github.com/tiny-systems/module/internal/server/api/module-go"
@@ -44,18 +45,33 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 	//
 	modulepb.RegisterModuleServiceServer(srv, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
-		s.log.Info("incoming grpc request")
-
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		err := handler(ctx, &runner.Msg{
+		res, err := handler(ctx, &runner.Msg{
 			EdgeID: req.EdgeID,
 			To:     req.To,
 			Data:   req.Payload,
 			From:   req.From,
 		})
-		return &modulepb.MessageResponse{}, err
+		if err != nil {
+			return nil, err
+		}
+
+		if resData, ok := res.([]byte); ok {
+			return &modulepb.MessageResponse{
+				Data: resData,
+			}, err
+		}
+
+		data, err := json.Marshal(res)
+		if err != nil {
+			return nil, err
+		}
+
+		return &modulepb.MessageResponse{
+			Data: data,
+		}, nil
 	}))
 
 	reflection.Register(srv)

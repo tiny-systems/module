@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sync/atomic"
 	"time"
 
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
@@ -34,8 +35,9 @@ import (
 // TinyTrackerReconciler reconciles a TinyTracker object
 type TinyTrackerReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Manager tracker.Manager
+	Scheme   *runtime.Scheme
+	Manager  tracker.Manager
+	IsLeader *atomic.Bool
 }
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinytrackers,verbs=get;list;watch;create;update;patch;delete;deletecollection
@@ -54,6 +56,11 @@ type TinyTrackerReconciler struct {
 func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
 	l := log.FromContext(ctx)
+
+	if !r.IsLeader.Load() {
+		return reconcile.Result{}, nil
+	}
+	// only leaders process signals
 
 	t := &operatorv1alpha1.TinyTracker{}
 

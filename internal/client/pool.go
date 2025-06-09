@@ -51,15 +51,15 @@ func (p *AddressPool) SetLogger(l logr.Logger) *AddressPool {
 	return p
 }
 
-func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) error {
+func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error) {
 	moduleName, _, err := module2.ParseFullName(msg.To)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	addr, ok := p.addressTable.Get(moduleName)
 	if !ok {
-		return fmt.Errorf("%s module address is unknown", moduleName)
+		return nil, fmt.Errorf("%s module address is unknown", moduleName)
 	}
 	client, err := p.getClient(ctx, addr)
 	if err != nil {
@@ -67,14 +67,17 @@ func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) error {
 	}
 
 	// sending request using gRPC
-	_, err = client.Message(ctx, &module.MessageRequest{
+	resp, err := client.Message(ctx, &module.MessageRequest{
 		From:    msg.From,
 		Payload: msg.Data,
 		EdgeID:  msg.EdgeID,
 		To:      msg.To,
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	return resp.Data, nil
 }
 
 func (p *AddressPool) Start(ctx context.Context) error {
