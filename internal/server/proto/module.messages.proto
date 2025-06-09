@@ -12,6 +12,4 @@ message MessageRequest {
 
 message MessageResponse {
   bytes Data = 1;
-  bool HasError = 3;
-  string Error = 4;
 }

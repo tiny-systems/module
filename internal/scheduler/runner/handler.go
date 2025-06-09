@@ -4,4 +4,4 @@ import (
 	"context"
 )
 
-type Handler func(ctx context.Context, msg *Msg) error
+type Handler func(ctx context.Context, msg *Msg) (any, error)

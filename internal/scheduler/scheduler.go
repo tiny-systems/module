@@ -24,7 +24,7 @@ type Scheduler interface {
 	//Update creates a new instance by using unique name, if instance exists - updates one using its specs and signals
 	Update(ctx context.Context, node *v1alpha1.TinyNode, signals *v1alpha1.TinySignalList) error
 	//Handle sync incoming call
-	Handle(ctx context.Context, msg *runner.Msg) error
+	Handle(ctx context.Context, msg *runner.Msg) (any, error)
 
 	//Destroy stops the instance and deletes it
 	Destroy(name string) error
@@ -97,12 +97,12 @@ func (s *Schedule) Install(component module.Component) error {
 
 // Handle could be external and synchronous
 // @todo use retry with backoff here
-func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
+func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 
 	nodeName, port := utils.ParseFullPortName(msg.To)
 	if port == module.ReconcilePort {
 		// system port; do nothing
-		return nil
+		return nil, nil
 	}
 
 	instance, ok := s.instancesMap.Get(nodeName)
@@ -117,7 +117,7 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 		select {
 		// what ever happens first
 		case <-ctx.Done():
-			return nil
+			return nil, nil
 		case <-t.C:
 			return s.outsideHandler(ctx, msg)
 		}
@@ -125,25 +125,27 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) error {
 	return s.send(ctx, instance, msg)
 }
 
-func (s *Schedule) send(ctx context.Context, instance *runner.Runner, msg *runner.Msg) error {
-	return instance.Input(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) error {
+func (s *Schedule) send(ctx context.Context, instance *runner.Runner, msg *runner.Msg) (any, error) {
+	return instance.Input(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) (any, error) {
 		return s.handleOutput(outCtx, instance, outMsg)
 	})
 }
 
-func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner, outMsg *runner.Msg) error {
+func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner, outMsg *runner.Msg) (any, error) {
 	// output
 	_, port := utils.ParseFullPortName(outMsg.To)
 	if port == "" {
-		return fmt.Errorf("empty port in handle output")
+		return nil, fmt.Errorf("empty port in handle output")
 	}
-	if port == module.ReconcilePort {
-		// create tiny signal instead which will trigger reconcile
-		if err := s.manager.CreateClusterNodeSignal(context.Background(), instance.Node(), port, nil); err != nil {
-			return fmt.Errorf("create signal error: %v", err)
-		}
+	if port != module.ReconcilePort {
+		return s.outsideHandler(outCtx, outMsg)
 	}
-	return s.outsideHandler(outCtx, outMsg)
+
+	// create tiny signal instead which will trigger reconcile
+	if err := s.manager.CreateClusterNodeSignal(context.Background(), instance.Node(), port, nil); err != nil {
+		return nil, fmt.Errorf("create signal error: %v", err)
+	}
+	return nil, nil
 }
 
 func (s *Schedule) Destroy(name string) error {
@@ -193,7 +195,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 	s.errGroup.Go(func() error {
 
 		// send signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
-		if err := s.send(ctx, runnerInstance, &runner.Msg{
+		if _, err := s.send(ctx, runnerInstance, &runner.Msg{
 			To:   utils.GetPortFullName(node.Name, module.SettingsPort),
 			Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config
 		}); err != nil {
@@ -207,7 +209,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 
 		for _, signal := range signals.Items {
 			//
-			if err := s.send(ctx, runnerInstance, &runner.Msg{
+			if _, err := s.send(ctx, runnerInstance, &runner.Msg{
 				From:  runner.FromSignal, // @todo use const
 				To:    utils.GetPortFullName(node.Name, signal.Spec.Port),
 				Data:  signal.Spec.Data,
