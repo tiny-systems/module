@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,6 +45,7 @@ type TinyNodeReconciler struct {
 	Scheme    *runtime.Scheme
 	Scheduler scheduler.Scheduler
 	Module    module.Info
+	IsLeader  *atomic.Bool
 }
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinynodes,verbs=get;list;watch;create;update;patch;delete;deletecollection
@@ -143,10 +145,16 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		status.Status = err.Error()
 	}
 
+	if !r.IsLeader.Load() {
+		return reconcile.Result{
+			RequeueAfter: time.Minute * 30,
+		}, nil
+	}
+
 	node.Status = *status
 
+	// leader
 	err = r.Status().Patch(context.Background(), node, client.MergeFrom(originNode))
-	//err = r.Status().Update(context.Background(), node)
 	if err != nil {
 		l.Error(err, "status update error")
 		return reconcile.Result{}, err

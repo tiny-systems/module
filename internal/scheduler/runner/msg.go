@@ -2,6 +2,7 @@ package runner
 
 // Msg being sent via instances edges
 type Msg struct {
+
 	// which edge lead this message, optional
 	EdgeID string `json:"edgeID"`
 	// which node:port sent message, optional
@@ -10,5 +11,8 @@ type Msg struct {
 	To   string `json:"to"`
 	Data []byte `json:"data"`
 
-	Nonce string `json:"nonce"`
+	Nonce string `json:"nonce,omitempty"`
+
+	//
+	Resp interface{} `json:"-"`
 }

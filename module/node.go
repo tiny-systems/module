@@ -28,14 +28,18 @@ const (
 )
 
 type Port struct {
-	// if that's a source port, source means it accepts the data, the source of incoming data
+	// if that's a source port, source means it can be a source of data
 	Source bool
 	// which side of the node will have this port
 	Position Position
 	// Name lower case programmatic name
 	Name string
+
 	// Human readable name (capital cased)
 	Label string
-	// DTO object
+	// Request conf
 	Configuration interface{}
+
+	// Response conf
+	ResponseConfiguration interface{}
 }

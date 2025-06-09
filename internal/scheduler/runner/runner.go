@@ -58,7 +58,9 @@ type Runner struct {
 	//
 	nodeLock *sync.Mutex
 
-	portMsg   map[string]interface{}
+	portMsg map[string]interface{}
+
+	portRes   map[string]interface{}
 	portErr   map[string]error
 	portNonce map[string]string
 	//
@@ -76,6 +78,7 @@ func NewRunner(name string, component m.Component) *Runner {
 		portsCacheLock: &sync.RWMutex{},
 		reconciling:    &atomic.Bool{},
 		portMsg:        make(map[string]interface{}),
+		portRes:        make(map[string]interface{}),
 		portErr:        make(map[string]error),
 		portNonce:      make(map[string]string),
 	}
@@ -207,13 +210,13 @@ func (c *Runner) HasPort(port string) bool {
 	return false
 }
 
-// Input processes input to the inherited component
+// Input processes input to the embedded component
 // applies port config for the given port if any
-func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (err error) {
+func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (res any, err error) {
 	_, port := utils.ParseFullPortName(msg.To)
 
 	if port == "" {
-		return fmt.Errorf("input port is empty")
+		return nil, fmt.Errorf("input port is empty")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -233,7 +236,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	if nodePort == nil {
 		// component has no such port
-		return nil
+		return nil, nil
 	}
 
 	var (
@@ -247,7 +250,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		// from signal controller (outside)
 
 		if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
-			return err
+			return nil, err
 		}
 		portData = portInputData.Interface()
 
@@ -256,7 +259,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
-			return errors.Wrap(err, "ajson parse requestData payload error")
+			return nil, errors.Wrap(err, "ajson parse requestData payload error")
 		}
 		//
 		eval := evaluator.NewEvaluator(func(expression string) (interface{}, error) {
@@ -276,12 +279,12 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 		configurationMap, err := eval.Eval(portConfig.Configuration)
 		if err != nil {
-			return errors.Wrap(err, "eval port edge settings config")
+			return nil, errors.Wrap(err, "eval port edge settings config")
 		}
 		// all good, we can say that's the data for incoming port
 		// adaptive
 		if err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface()); err != nil {
-			return errors.Wrap(err, "map decode from config map to port input type")
+			return nil, errors.Wrap(err, "map decode from config map to port input type")
 		}
 		portData = portInputData.Interface()
 
@@ -293,7 +296,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 	// we do not send data from signals if they are not changed to prevent work disruptions due to reconciliations each 5min
 	if msg.From == FromSignal || port == m.SettingsPort {
 		if cmp.Equal(portData, c.portMsg[port]) && msg.Nonce == c.portNonce[port] {
-			return c.portErr[port]
+			return c.portRes[port], c.portErr[port]
 		}
 		c.portMsg[port] = portData
 		c.portNonce[port] = msg.Nonce
@@ -303,7 +306,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 
 	u, err := uuid.NewUUID()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ctx, inputSpan := c.tracer.Start(ctx, u.String(),
@@ -326,6 +329,8 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 		c.addSpanPortData(inputSpan, string(inputData))
 	}
 
+	var resp any
+
 	err = errorpanic.Wrap(func() error {
 		// panic safe
 		c.setGauge(1, msg.EdgeID, metrics.MetricEdgeBusy)
@@ -338,21 +343,22 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 			}()
 		}()
 
-		return c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData interface{}) error {
+		resp = c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData interface{}) any {
 			//c.log.Info("component callback handler", "port", outputPort, "node", c.name)
 
 			if outputPort == m.ReconcilePort {
 				if c.reconciling.Load() {
-					// reconciling already
+					// reconciling is already in progress
 					return nil
 				}
 
 				c.reconciling.Store(true)
 
 				// do not trace reconcile port
-				return outputHandler(ctx, &Msg{
+				_, err = outputHandler(ctx, &Msg{
 					To: utils.GetPortFullName(c.name, outputPort),
 				})
+				return err
 			}
 
 			u, err = uuid.NewUUID()
@@ -374,15 +380,24 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (er
 				c.addSpanPortData(outputSpan, string(outputDataBytes))
 			}
 
-			if err = c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler); err != nil {
+			res, err = c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler)
+			if err != nil {
 				return err
 			}
-			return nil
+			return res
+
 		}, port, portData)
+
+		if err = utils.CheckForError(resp); err != nil {
+			return err
+		}
+		return nil
 	})
 
 	c.portErr[port] = err
-	return err
+	c.portRes[port] = resp
+
+	return resp, err
 }
 
 func (c *Runner) Node() v1alpha1.TinyNode {
@@ -410,15 +425,15 @@ func (c *Runner) Cancel() {
 	close(c.closeCh)
 }
 
-func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) error {
+func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) (any, error) {
 
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if handler == nil {
-		return nil
+		return nil, nil
 	}
 
 	if node, _ := utils.ParseFullPortName(port); node != "" {
@@ -451,6 +466,20 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	// get all edges to connected nodes
 	wg, ctx := errgroup.WithContext(ctx)
 
+	var (
+		firstResult any
+		resLock     = &sync.Mutex{}
+	)
+
+	var sourcePort m.Port
+
+	for _, p := range c.getPorts() {
+		if p.Name != port {
+			continue
+		}
+		sourcePort = p
+	}
+
 	for _, e := range edges {
 		var edge = e
 		//
@@ -463,16 +492,27 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		wg.Go(func() error {
 			// send to destination
 			// track how many messages component send
-			return handler(ctx, &Msg{
+
+			res, er := handler(ctx, &Msg{
 				To:     edge.To,
 				From:   fromPort,
 				EdgeID: edge.ID,
 				Data:   dataBytes,
+				Resp:   sourcePort.ResponseConfiguration,
 			})
+			if er != nil {
+				return er
+			}
+
+			resLock.Lock()
+			defer resLock.Unlock()
+			firstResult = res
+
+			return er
 		})
 	}
 	// wait while all port will be unblocked
-	return wg.Wait()
+	return firstResult, wg.Wait()
 }
 
 func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
