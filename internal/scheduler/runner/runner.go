@@ -7,6 +7,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"github.com/spyzhov/ajson"
@@ -16,6 +17,7 @@ import (
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
+	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel/attribute"
@@ -31,9 +33,15 @@ import (
 )
 
 type Runner struct {
-	// unique instance name
-	name string
 
+	// CRD
+	node v1alpha1.TinyNode
+
+	// to control CRD
+	manager resource.ManagerInterface
+
+	// unique instance name
+	name      string
 	flowID    string
 	projectID string
 
@@ -44,11 +52,10 @@ type Runner struct {
 	// to control K8s resources
 
 	closeCh chan struct{}
-	node    v1alpha1.TinyNode
 
 	//
-	portsCache     []m.Port
-	portsCacheLock *sync.RWMutex
+	nodePorts     []m.Port
+	nodePortsLock *sync.RWMutex
 
 	//
 	tracer  trace.Tracer
@@ -58,29 +65,38 @@ type Runner struct {
 	//
 	nodeLock *sync.Mutex
 
-	portMsg map[string]interface{}
+	// if second request to the port comes we cancel previous if it is still running to avoid goroutine leak
+	portCancel cmap.ConcurrentMap[string, context.CancelFunc]
 
-	portRes   map[string]interface{}
-	portErr   map[string]error
-	portNonce map[string]string
+	// caching requests => responses, errors
+	portMsg   cmap.ConcurrentMap[string, any]
+	portRes   cmap.ConcurrentMap[string, any]
+	portErr   cmap.ConcurrentMap[string, error]
+	portNonce cmap.ConcurrentMap[string, string]
 	//
 	reconciling *atomic.Bool
 }
 
 const FromSignal = "signal"
 
-func NewRunner(name string, component m.Component) *Runner {
+func NewRunner(component m.Component) *Runner {
 	return &Runner{
-		name:           name,
-		component:      component,
-		nodeLock:       &sync.Mutex{},
-		closeCh:        make(chan struct{}),
-		portsCacheLock: &sync.RWMutex{},
-		reconciling:    &atomic.Bool{},
-		portMsg:        make(map[string]interface{}),
-		portRes:        make(map[string]interface{}),
-		portErr:        make(map[string]error),
-		portNonce:      make(map[string]string),
+		component: component,
+		nodeLock:  &sync.Mutex{},
+
+		nodePortsLock: &sync.RWMutex{},
+
+		reconciling: &atomic.Bool{},
+		//
+		portCancel: cmap.New[context.CancelFunc](),
+		//
+		portMsg:   cmap.New[any](),
+		portRes:   cmap.New[any](),
+		portErr:   cmap.New[error](),
+		portNonce: cmap.New[string](),
+
+		//
+		closeCh: make(chan struct{}),
 	}
 }
 
@@ -104,25 +120,36 @@ func (c *Runner) SetLogger(l logr.Logger) *Runner {
 	return c
 }
 
-func (c *Runner) getPorts() []m.Port {
-	c.portsCacheLock.RLock()
-
-	if c.portsCache != nil {
-		c.portsCacheLock.RUnlock()
-		return c.portsCache
-	}
-
-	c.portsCacheLock.RUnlock()
-	return c.getUpdatePorts()
+func (c *Runner) SetManager(m resource.ManagerInterface) *Runner {
+	c.manager = m
+	return c
 }
 
-func (c *Runner) getUpdatePorts() []m.Port {
-	c.portsCacheLock.Lock()
+func (c *Runner) GetComponent() m.Component {
+	return c.component
+}
 
-	defer c.portsCacheLock.Unlock()
+// getPorts get ports cache or an actual node ports
+func (c *Runner) getPorts() []m.Port {
+	c.nodePortsLock.RLock()
 
-	c.portsCache = c.component.Ports()
-	return c.portsCache
+	if c.nodePorts != nil {
+		c.nodePortsLock.RUnlock()
+		return c.nodePorts
+	}
+
+	c.nodePortsLock.RUnlock()
+	return c.getNodePorts()
+}
+
+// getNodePorts gets actual ports and caches it
+func (c *Runner) getNodePorts() []m.Port {
+	c.nodePortsLock.Lock()
+
+	defer c.nodePortsLock.Unlock()
+
+	c.nodePorts = c.component.Ports()
+	return c.nodePorts
 }
 
 // ReadStatus reads status
@@ -134,8 +161,8 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 
 	var ports []m.Port
 	// trim system ports
-	for _, p := range c.getUpdatePorts() {
-		if p.Name == m.NodePort || p.Name == m.ClientPort {
+	for _, p := range c.getNodePorts() {
+		if p.Name == m.ReconcilePort || p.Name == m.ClientPort {
 			continue
 		}
 		ports = append(ports, p)
@@ -160,7 +187,7 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 			// get real schema and config using reflection
 			schemaConf, err := schema.CreateSchema(np.Configuration)
 			if err != nil {
-				c.log.Error(err, "create schema error")
+				c.log.Error(err, "ReadStatus: create schema error")
 			} else {
 				schemaData, _ := schemaConf.MarshalJSON()
 				portStatus.Schema = schemaData
@@ -168,7 +195,7 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 			// real port data
 			confData, err := json.Marshal(np.Configuration)
 			if err != nil {
-				c.log.Error(err, "encode port configuration error")
+				c.log.Error(err, "ReadStatus: encode port configuration error")
 			}
 			portStatus.Configuration = confData
 		} else {
@@ -190,7 +217,6 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 
 func (c *Runner) getPortConfig(from string, port string) *v1alpha1.TinyNodePortConfig {
 	c.nodeLock.Lock()
-
 	defer c.nodeLock.Unlock()
 	//
 	for _, pc := range c.node.Spec.Ports {
@@ -222,7 +248,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer cancel()
-		// close all ongoing requests
+		// cancels all ongoing requests
 		<-c.closeCh
 	}()
 
@@ -234,7 +260,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 		}
 	}
 
-	if nodePort == nil {
+	if nodePort == nil || nodePort.Configuration == nil {
 		// component has no such port
 		return nil, nil
 	}
@@ -293,16 +319,29 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 		portData = nodePort.Configuration
 	}
 
-	// we do not send data from signals if they are not changed to prevent work disruptions due to reconciliations each 5min
+	// we do not send data from signals if they are not changed to prevent work disruptions due to periodic reconciliations
 	if msg.From == FromSignal || port == m.SettingsPort {
-		if cmp.Equal(portData, c.portMsg[port]) && msg.Nonce == c.portNonce[port] {
-			return c.portRes[port], c.portErr[port]
+		//
+		if prevPortData, ok := c.portMsg.Get(port); ok && cmp.Equal(portData, prevPortData) {
+			if prevPortNonce, ok := c.portNonce.Get(port); ok && msg.Nonce == prevPortNonce {
+				prevResp, _ := c.portRes.Get(port)
+				prevErr, _ := c.portErr.Get(port)
+				return prevResp, prevErr
+			}
 		}
-		c.portMsg[port] = portData
-		c.portNonce[port] = msg.Nonce
+		c.portMsg.Set(port, portData)
+		c.portNonce.Set(port, msg.Nonce)
 	}
 
 	c.log.Info("exec component handler", "msg", msg)
+
+	if prevCancel, ok := c.portCancel.Get(port); ok && prevCancel != nil {
+		// Important
+		// we do not wait prev handler goroutine to be close and expect it respects its context
+		// prevCancel()
+	}
+
+	c.portCancel.Set(port, cancel)
 
 	u, err := uuid.NewUUID()
 	if err != nil {
@@ -333,32 +372,44 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 
 	err = errorpanic.Wrap(func() error {
 		// panic safe
-		c.setGauge(1, msg.EdgeID, metrics.MetricEdgeBusy)
 
-		defer func() {
-			go func() {
-				// give it time to animate
-				time.Sleep(time.Millisecond * 1500)
-				c.setGauge(0, msg.EdgeID, metrics.MetricEdgeBusy)
-			}()
+		ticker := time.NewTicker(time.Second * 2)
+		defer ticker.Stop()
+
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case t := <-ticker.C:
+					c.setGauge(t.Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
+				}
+			}
 		}()
 
-		resp = c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData interface{}) any {
-			//c.log.Info("component callback handler", "port", outputPort, "node", c.name)
+		resp = c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData any) any {
+			c.log.Info("component callback handler", "port", outputPort, "node", c.name)
 
 			if outputPort == m.ReconcilePort {
-				if c.reconciling.Load() {
-					// reconciling is already in progress
-					return nil
+
+				if nodeUpdater, ok := outputData.(func(node *v1alpha1.TinyNode) error); ok {
+					if c.reconciling.Load() {
+						c.log.Info("already reconciling", c.name)
+						// reconciling is already in progress
+						return nil
+					}
+
+					c.reconciling.Store(true)
+
+					return c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
+						if err = c.ReadStatus(&node.Status); err != nil {
+							return err
+						}
+						return nodeUpdater(node)
+					})
+				} else {
+					c.log.Info("no tiny node updater given for reconciliation")
 				}
-
-				c.reconciling.Store(true)
-
-				// do not trace reconcile port
-				_, err = outputHandler(ctx, &Msg{
-					To: utils.GetPortFullName(c.name, outputPort),
-				})
-				return err
 			}
 
 			u, err = uuid.NewUUID()
@@ -394,8 +445,8 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 		return nil
 	})
 
-	c.portErr[port] = err
-	c.portRes[port] = resp
+	c.portErr.Set(port, err)
+	c.portRes.Set(port, resp)
 
 	return resp, err
 }
@@ -408,7 +459,7 @@ func (c *Runner) Node() v1alpha1.TinyNode {
 }
 
 // SetNode updates specs and decides do we need to restart which handles by Run method
-func (c *Runner) SetNode(node v1alpha1.TinyNode) {
+func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 
 	c.nodeLock.Lock()
 	defer c.nodeLock.Unlock()
@@ -416,8 +467,12 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) {
 	c.reconciling.Store(false)
 	c.flowID = node.Labels[v1alpha1.FlowIDLabel]
 	c.projectID = node.Labels[v1alpha1.ProjectIDLabel]
+	c.name = node.Name
+
 	//
 	c.node = node
+
+	return c
 }
 
 // Cancel cancels all ongoing requests
@@ -530,8 +585,7 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 	gauge, _ := c.meter.Int64ObservableGauge(string(m),
 		metric.WithUnit("1"),
 	)
-
-	r, err := c.meter.RegisterCallback(
+	_, err := c.meter.RegisterCallback(
 		func(ctx context.Context, o metric.Observer) error {
 			o.ObserveInt64(gauge, val,
 				metric.WithAttributes(
@@ -549,12 +603,6 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 		c.log.Error(err, "metric gauge err")
 		return
 	}
-
-	go func() {
-		// deregister sending gauges
-		time.Sleep(time.Second * 5)
-		_ = r.Unregister()
-	}()
 }
 
 func (c *Runner) incCounter(ctx context.Context, val int64, element string, m metrics.Metric) {

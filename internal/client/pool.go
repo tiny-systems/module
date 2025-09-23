@@ -67,6 +67,10 @@ func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) ([]byte, err
 	}
 
 	// sending request using gRPC
+	p.log.Info("grpc client request", "addr", addr, "to", msg.To)
+
+	defer p.log.Info("grpc client request done")
+
 	resp, err := client.Message(ctx, &module.MessageRequest{
 		From:    msg.From,
 		Payload: msg.Data,

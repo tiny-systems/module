@@ -22,18 +22,18 @@ import (
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sync/atomic"
 	"time"
@@ -65,8 +65,6 @@ type TinyNodeReconciler struct {
 func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name)
-
 	m, _, err := module.ParseFullName(req.Name)
 	if err != nil {
 		l.Error(err, "node has invalid name", "name", req.Name)
@@ -78,7 +76,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, nil
 	}
 
-	l.Info("reconcile", "tinynode", req.Name)
+	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name)
 
 	node := &operatorv1alpha1.TinyNode{}
 
@@ -101,6 +99,11 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
+
+	if node.Status.Metadata == nil {
+		node.Status.Metadata = map[string]string{}
+	}
+
 	originNode := node.DeepCopy()
 
 	// select all signals for this node
@@ -122,27 +125,23 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, fmt.Errorf("signal list error: %v", err)
 	}
 
-	status := &node.Status
-
 	// update status with current module info
-	status.Module = operatorv1alpha1.TinyNodeModuleStatus{
+	node.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
 		Version: r.Module.Version,
 		Name:    r.Module.Name,
 	}
 
-	status.Error = false
-	status.Status = ""
+	node.Status.Status = "OK"
+	node.Status.Error = false
 
-	t := v1.NewTime(time.Now())
+	//status.Metadata["time"] = t.Format(time.RFC3339)
 
-	status.LastUpdateTime = &t
 	// upsert in scheduler
-	// todo add app level context
-	err = r.Scheduler.Update(context.Background(), node, signalList)
+	err = r.Scheduler.Update(utils.WithLeader(ctx, r.IsLeader.Load()), node, signalList)
 	if err != nil {
 		l.Error(err, "scheduler upsert error")
-		status.Error = true
-		status.Status = err.Error()
+		node.Status.Error = true
+		node.Status.Status = err.Error()
 	}
 
 	if !r.IsLeader.Load() {
@@ -151,10 +150,22 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}, nil
 	}
 
-	node.Status = *status
+	if reflect.DeepEqual(originNode.Status, node.Status) && node.Status.LastUpdateTime.After(time.Now().Add(-time.Minute*time.Duration(5))) {
+		return ctrl.Result{
+			RequeueAfter: time.Minute * 5,
+		}, nil
+	}
 
-	// leader
-	err = r.Status().Patch(context.Background(), node, client.MergeFrom(originNode))
+	//else {
+	//  fmt.Println(cmp.Diff(originNode.Status, node.Status))
+	//}
+
+	t := v1.NewTime(time.Now())
+	node.Status.LastUpdateTime = &t
+
+	// update status
+	l.Info("node update", "node", node)
+	err = r.Status().Patch(ctx, node, client.MergeFrom(originNode))
 	if err != nil {
 		l.Error(err, "status update error")
 		return reconcile.Result{}, err
@@ -169,16 +180,12 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.TinyNode{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&operatorv1alpha1.TinyNode{}).
 		Watches(&operatorv1alpha1.TinySignal{}, handler.TypedFuncs[client.Object, reconcile.Request]{
 
 			CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 				signal, ok := e.Object.(*operatorv1alpha1.TinySignal)
 				if !ok {
-					return
-				}
-				if signal.Spec.Port == module.ReconcilePort {
-					// reconcile by signal only applies after deletion of the signal
 					return
 				}
 				q.Add(reconcile.Request{

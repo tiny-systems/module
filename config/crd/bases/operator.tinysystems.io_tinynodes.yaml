@@ -123,6 +123,10 @@ spec:
               lastUpdateTime:
                 format: date-time
                 type: string
+              metadata:
+                additionalProperties:
+                  type: string
+                type: object
               module:
                 properties:
                   name:

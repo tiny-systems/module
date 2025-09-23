@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-logr/logr"
+	"github.com/google/go-cmp/cmp"
+	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	v1core "k8s.io/api/core/v1"
@@ -11,11 +13,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"strings"
-	"sync"
-
 	"os"
+	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sync"
 )
 
 type Manager struct {
@@ -27,7 +28,7 @@ type Manager struct {
 
 type ManagerInterface interface {
 	RegisterModule(ctx context.Context, mod module.Info) error
-	CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error
+	PatchNode(ctx context.Context, node v1alpha1.TinyNode, update func(node *v1alpha1.TinyNode) error) error
 }
 
 func NewManager(c client.Client, log logr.Logger, ns string) *Manager {
@@ -82,6 +83,7 @@ func (m Manager) getReleaseNameByPodName(ctx context.Context, podName string) (s
 
 func (m Manager) ExposePort(ctx context.Context, autoHostName string, hostnames []string, port int) ([]string, error) {
 	m.log.Info("expose port", "port", port, "hostnames", hostnames)
+	defer m.log.Info("expose port done", "port", port)
 
 	currentPod := os.Getenv("HOSTNAME")
 	if currentPod == "" {
@@ -375,45 +377,72 @@ func (m Manager) DisclosePort(ctx context.Context, port int) error {
 	return m.removeRulesIngress(ctx, ingress, svc, port)
 }
 
-func (m Manager) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error {
+func (m Manager) PatchNode(ctx context.Context, node v1alpha1.TinyNode, updater func(node *v1alpha1.TinyNode) error) error {
 
-	signal := &v1alpha1.TinySignal{}
-	name := fmt.Sprintf("%s-%s", node.Name, strings.ReplaceAll(port, "_", ""))
-
-	err := m.client.Get(ctx, client.ObjectKey{Namespace: node.Namespace, Name: name}, signal)
-	if err != nil && !errors.IsNotFound(err) {
+	findNode := &v1alpha1.TinyNode{}
+	if err := m.client.Get(ctx, client.ObjectKeyFromObject(&node), findNode); err != nil {
 		return err
 	}
 
-	newSignal := signal.DeepCopy()
-
-	newSignal.Namespace = node.Namespace
-	newSignal.Name = name
-
-	newSignal.Labels = map[string]string{
-		v1alpha1.NodeNameLabel: node.Name,
+	if err := updater(findNode); err != nil {
+		return err
 	}
 
-	newSignal.Spec = v1alpha1.TinySignalSpec{
-		Node: node.Name,
-		Port: port,
-		Data: data,
-	}
-
-	if errors.IsNotFound(err) {
-		if err := m.client.Create(ctx, newSignal); err != nil {
-			return err
-		}
+	if reflect.DeepEqual(findNode.Status, node.Status) {
+		m.log.Info("nothing to patch node with")
 		return nil
 	}
 
-	err = m.client.Patch(ctx, newSignal, client.MergeFrom(signal))
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
+	log.Warn().Msgf("patching node %s", node.Name)
+	fmt.Println(cmp.Diff(findNode.Status, node.Status))
+	//spew.Dump(node.Status.Ports)
 
-	return nil
+	err := m.client.Status().Patch(ctx, findNode, client.MergeFrom(&node))
+	if err != nil {
+		log.Error().Err(err).Msgf("path error")
+	}
+	return err
 }
+
+//func (m Manager) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error {
+//
+//	signal := &v1alpha1.TinySignal{}
+//	name := fmt.Sprintf("%s-%s", node.Name, strings.ReplaceAll(port, "_", ""))
+//
+//	err := m.client.Get(ctx, client.ObjectKey{Namespace: node.Namespace, Name: name}, signal)
+//	if err != nil && !errors.IsNotFound(err) {
+//		return err
+//	}
+//
+//	newSignal := signal.DeepCopy()
+//
+//	newSignal.Namespace = node.Namespace
+//	newSignal.Name = name
+//
+//	newSignal.Labels = map[string]string{
+//		v1alpha1.NodeNameLabel: node.Name,
+//	}
+//
+//	newSignal.Spec = v1alpha1.TinySignalSpec{
+//		Node: node.Name,
+//		Port: port,
+//		Data: data,
+//	}
+//
+//	if errors.IsNotFound(err) {
+//		if err := m.client.Create(ctx, newSignal); err != nil {
+//			return err
+//		}
+//		return nil
+//	}
+//
+//	err = m.client.Patch(ctx, newSignal, client.MergeFrom(signal))
+//	if err != nil && !errors.IsNotFound(err) {
+//		return err
+//	}
+//
+//	return nil
+//}
 
 func (m Manager) Start(ctx context.Context) error {
 	<-ctx.Done()
