@@ -13,9 +13,6 @@ const (
 	// SettingsPort settings page
 	SettingsPort = "_settings"
 
-	//NodePort source port. Received tinynode object
-	NodePort = "_node"
-
 	//ClientPort receives a client wrapper to work with cluster resources
 	ClientPort = "_client"
 )

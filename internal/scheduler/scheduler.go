@@ -6,10 +6,10 @@ import (
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
-	"github.com/tiny-systems/module/internal/resource"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/tracker"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -32,6 +32,7 @@ type Scheduler interface {
 
 type Schedule struct {
 	log logr.Logger
+	ctx context.Context
 	// registered components map
 	componentsMap cmap.ConcurrentMap[string, module.Component]
 	//
@@ -53,8 +54,9 @@ type Schedule struct {
 	outsideHandler runner.Handler
 }
 
-func New(outsideHandler runner.Handler) *Schedule {
+func New(ctx context.Context, outsideHandler runner.Handler) *Schedule {
 	return &Schedule{
+		ctx:            ctx,
 		instancesMap:   cmap.New[*runner.Runner](),
 		componentsMap:  cmap.New[module.Component](),
 		errGroup:       &errgroup.Group{},
@@ -127,25 +129,13 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 
 func (s *Schedule) send(ctx context.Context, instance *runner.Runner, msg *runner.Msg) (any, error) {
 	return instance.Input(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) (any, error) {
-		return s.handleOutput(outCtx, instance, outMsg)
-	})
-}
 
-func (s *Schedule) handleOutput(outCtx context.Context, instance *runner.Runner, outMsg *runner.Msg) (any, error) {
-	// output
-	_, port := utils.ParseFullPortName(outMsg.To)
-	if port == "" {
-		return nil, fmt.Errorf("empty port in handle output")
-	}
-	if port != module.ReconcilePort {
+		_, port := utils.ParseFullPortName(outMsg.To)
+		if port == "" {
+			return nil, fmt.Errorf("empty port in handle's output")
+		}
 		return s.outsideHandler(outCtx, outMsg)
-	}
-
-	// create tiny signal instead which will trigger reconcile
-	if err := s.manager.CreateClusterNodeSignal(context.Background(), instance.Node(), port, nil); err != nil {
-		return nil, fmt.Errorf("create signal error: %v", err)
-	}
-	return nil, nil
+	})
 }
 
 func (s *Schedule) Destroy(name string) error {
@@ -170,15 +160,12 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 			return runnerInstance
 		}
 		// new instance
-		instance := cmp.Instance()
-
-		// init instance system ports
-		s.init(ctx, node, instance)
-
 		//configure || reconfigure
-		return runner.NewRunner(node.Name, instance).
+		return runner.NewRunner(cmp.Instance()).
+			SetNode(*node).
 			SetLogger(s.log).
 			SetTracer(s.tracer).
+			SetManager(s.manager).
 			SetTracker(s.tracker).
 			SetMeter(s.meter)
 	})
@@ -188,41 +175,65 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 		nodeBackup = runnerInstance.Node()
 		atomicErr  = new(atomic.Error)
 	)
-	// update instance
 
+	ctx = utils.WithLeader(s.ctx, utils.IsLeader(ctx))
+
+	// update system ports
+	cmpInstance := runnerInstance.GetComponent()
+
+	// update instance with copy of the node
 	runnerInstance.SetNode(*node.DeepCopy())
 
-	s.errGroup.Go(func() error {
+	for _, p := range cmpInstance.Ports() {
+		if p.Source {
+			continue
+		}
 
+		s.errGroup.Go(func() error {
+			// if node has http port then provide addressGetter
+			switch p.Name {
+			case module.ReconcilePort:
+				// component reconciles its node
+				_ = cmpInstance.Handle(ctx, nil, p.Name, *node)
+			case module.ClientPort:
+				_ = cmpInstance.Handle(ctx, nil, p.Name, s.manager)
+			}
+			return nil
+		})
+	}
+
+	s.errGroup.Go(func() error {
 		// send signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
 		if _, err := s.send(ctx, runnerInstance, &runner.Msg{
 			To:   utils.GetPortFullName(node.Name, module.SettingsPort),
 			Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config
 		}); err != nil {
 			atomicErr.Store(err)
-			return nil
+			// not allow errGroup fail due to settings
 		}
-
-		if signals == nil {
-			return nil
-		}
-
-		for _, signal := range signals.Items {
-			//
-			if _, err := s.send(ctx, runnerInstance, &runner.Msg{
-				From:  runner.FromSignal, // @todo use const
-				To:    utils.GetPortFullName(node.Name, signal.Spec.Port),
-				Data:  signal.Spec.Data,
-				Nonce: signal.Annotations[v1alpha1.SignalNonceAnnotation],
-			}); err != nil {
-				atomicErr.Store(err)
-				return nil
-			}
-		}
-
 		// configure port errors should not fail the entire error group
 		return nil
 	})
+
+	if signals != nil {
+		// send existing signals to the instance
+
+		for _, signal := range signals.Items {
+			// each signal in own goroutine
+			s.errGroup.Go(func() error {
+
+				if _, err := s.send(ctx, runnerInstance, &runner.Msg{
+					From:  runner.FromSignal,
+					To:    utils.GetPortFullName(node.Name, signal.Spec.Port),
+					Data:  signal.Spec.Data,
+					Nonce: signal.Annotations[v1alpha1.SignalNonceAnnotation],
+				}); err != nil {
+					atomicErr.Store(err)
+				}
+				return nil
+			})
+		}
+	}
 
 	// give time to node update itself or fail
 	time.Sleep(time.Second)
@@ -238,19 +249,6 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 	}
 	// do we need to rebuild status in case of rollback?
 	return err
-}
-
-func (s *Schedule) init(ctx context.Context, node *v1alpha1.TinyNode, instance module.Component) {
-	for _, p := range instance.Ports() {
-		// if node has http port then provide addressGetter
-		switch p.Name {
-		case module.NodePort:
-			//module.ListenAddressGetter
-			_ = instance.Handle(ctx, nil, module.NodePort, *node)
-		case module.ClientPort:
-			_ = instance.Handle(ctx, nil, module.ClientPort, s.manager)
-		}
-	}
 }
 
 func (s *Schedule) Start(ctx context.Context) error {
