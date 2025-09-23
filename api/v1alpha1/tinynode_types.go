@@ -157,6 +157,8 @@ type TinyNodeStatus struct {
 	// +kubebuilder:validation:Optional
 	Status string `json:"status,omitempty"`
 
+	Metadata map[string]string `json:"metadata,omitempty"`
+
 	//+kubebuilder:validation:Optional
 	Error bool `json:"error,omitempty"`
 

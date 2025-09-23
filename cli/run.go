@@ -12,13 +12,13 @@ import (
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/client"
 	"github.com/tiny-systems/module/internal/controller"
-	"github.com/tiny-systems/module/internal/resource"
 	sch "github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server"
 	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/metrics"
+	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/registry"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
@@ -294,7 +294,7 @@ var runCmd = &cobra.Command{
 		)
 
 		//
-		scheduler = sch.New(func(ctx context.Context, msg *runner.Msg) (any, error) {
+		scheduler = sch.New(ctx, func(ctx context.Context, msg *runner.Msg) (any, error) {
 			m, _, err := m.ParseFullName(msg.To)
 			if err != nil {
 				return nil, fmt.Errorf("parse destination error: %v", err)
@@ -312,7 +312,13 @@ var runCmd = &cobra.Command{
 				resp, err = pool.Handler(ctx, msg)
 				return err
 
-			}, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
+			}, backoff.WithContext(backoff.NewExponentialBackOff(func(off *backoff.ExponentialBackOff) {
+
+				off.Multiplier = 1.1               // do not slow down fast
+				off.MaxElapsedTime = 0             // never give up
+				off.MaxInterval = 30 * time.Second // max interval not too long
+
+			}), ctx))
 			if err != nil {
 				return nil, err
 			}
