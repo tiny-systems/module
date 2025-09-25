@@ -51,16 +51,16 @@ type Schedule struct {
 	// meant to be for all background processes
 	errGroup *errgroup.Group
 	// pretty much self-explanatory
-	outsideHandler runner.Handler
+	msgHandler runner.Handler
 }
 
 func New(ctx context.Context, outsideHandler runner.Handler) *Schedule {
 	return &Schedule{
-		ctx:            ctx,
-		instancesMap:   cmap.New[*runner.Runner](),
-		componentsMap:  cmap.New[module.Component](),
-		errGroup:       &errgroup.Group{},
-		outsideHandler: outsideHandler,
+		ctx:           ctx,
+		instancesMap:  cmap.New[*runner.Runner](),
+		componentsMap: cmap.New[module.Component](),
+		errGroup:      &errgroup.Group{},
+		msgHandler:    outsideHandler,
 	}
 }
 
@@ -121,20 +121,20 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 		case <-ctx.Done():
 			return nil, nil
 		case <-t.C:
-			return s.outsideHandler(ctx, msg)
+			return s.msgHandler(ctx, msg)
 		}
 	}
-	return s.send(ctx, instance, msg)
+	return s.sendMsg(ctx, instance, msg)
 }
 
-func (s *Schedule) send(ctx context.Context, instance *runner.Runner, msg *runner.Msg) (any, error) {
-	return instance.Input(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) (any, error) {
+func (s *Schedule) sendMsg(ctx context.Context, instance *runner.Runner, msg *runner.Msg) (any, error) {
+	return instance.MsgHandler(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) (any, error) {
 
 		_, port := utils.ParseFullPortName(outMsg.To)
 		if port == "" {
 			return nil, fmt.Errorf("empty port in handle's output")
 		}
-		return s.outsideHandler(outCtx, outMsg)
+		return s.msgHandler(outCtx, outMsg)
 	})
 }
 
@@ -194,7 +194,8 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 			switch p.Name {
 			case module.ReconcilePort:
 				// component reconciles its node
-				_ = cmpInstance.Handle(ctx, nil, p.Name, *node)
+				_ = cmpInstance.Handle(ctx, runnerInstance.DataHandler(s.msgHandler), p.Name, *node)
+
 			case module.ClientPort:
 				_ = cmpInstance.Handle(ctx, nil, p.Name, s.manager)
 			}
@@ -203,8 +204,8 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 	}
 
 	s.errGroup.Go(func() error {
-		// send signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
-		if _, err := s.send(ctx, runnerInstance, &runner.Msg{
+		// sendMsg signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
+		if _, err := s.sendMsg(ctx, runnerInstance, &runner.Msg{
 			To:   utils.GetPortFullName(node.Name, module.SettingsPort),
 			Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config
 		}); err != nil {
@@ -216,13 +217,13 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 	})
 
 	if signals != nil {
-		// send existing signals to the instance
+		// sendMsg existing signals to the instance
 
 		for _, signal := range signals.Items {
 			// each signal in own goroutine
 			s.errGroup.Go(func() error {
 
-				if _, err := s.send(ctx, runnerInstance, &runner.Msg{
+				if _, err := s.sendMsg(ctx, runnerInstance, &runner.Msg{
 					From:  runner.FromSignal,
 					To:    utils.GetPortFullName(node.Name, signal.Spec.Port),
 					Data:  signal.Spec.Data,
