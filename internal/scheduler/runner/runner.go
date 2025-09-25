@@ -236,9 +236,9 @@ func (c *Runner) HasPort(port string) bool {
 	return false
 }
 
-// Input processes input to the embedded component
+// MsgHandler processes msg to the embedded component
 // applies port config for the given port if any
-func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (res any, err error) {
+func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (res any, err error) {
 	_, port := utils.ParseFullPortName(msg.To)
 
 	if port == "" {
@@ -338,7 +338,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 	if prevCancel, ok := c.portCancel.Get(port); ok && prevCancel != nil {
 		// Important
 		// we do not wait prev handler goroutine to be close and expect it respects its context
-		// prevCancel()
+		prevCancel()
 	}
 
 	c.portCancel.Set(port, cancel)
@@ -387,57 +387,7 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 			}
 		}()
 
-		resp = c.component.Handle(ctx, func(outputCtx context.Context, outputPort string, outputData any) any {
-			c.log.Info("component callback handler", "port", outputPort, "node", c.name)
-
-			if outputPort == m.ReconcilePort {
-
-				if nodeUpdater, ok := outputData.(func(node *v1alpha1.TinyNode) error); ok {
-					if c.reconciling.Load() {
-						c.log.Info("already reconciling", c.name)
-						// reconciling is already in progress
-						return nil
-					}
-
-					c.reconciling.Store(true)
-
-					return c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
-						if err = c.ReadStatus(&node.Status); err != nil {
-							return err
-						}
-						return nodeUpdater(node)
-					})
-				} else {
-					c.log.Info("no tiny node updater given for reconciliation")
-				}
-			}
-
-			u, err = uuid.NewUUID()
-			if err != nil {
-				return err
-			}
-
-			outputCtx, outputSpan := c.tracer.Start(outputCtx, u.String(), trace.WithAttributes(
-				attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
-				attribute.String("flowID", c.flowID),
-				attribute.String("projectID", c.projectID),
-			))
-
-			defer outputSpan.End()
-
-			// send span data only is tracker is on
-			if c.tracker.Active(c.projectID) {
-				outputDataBytes, _ := json.Marshal(outputData)
-				c.addSpanPortData(outputSpan, string(outputDataBytes))
-			}
-
-			res, err = c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler)
-			if err != nil {
-				return err
-			}
-			return res
-
-		}, port, portData)
+		resp = c.component.Handle(ctx, c.DataHandler(msgHandler), port, portData)
 
 		if err = utils.CheckForError(resp); err != nil {
 			return err
@@ -449,6 +399,61 @@ func (c *Runner) Input(ctx context.Context, msg *Msg, outputHandler Handler) (re
 	c.portRes.Set(port, resp)
 
 	return resp, err
+}
+
+func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Context, outputPort string, outputData any) any {
+
+	return func(outputCtx context.Context, outputPort string, outputData any) any {
+		c.log.Info("component callback handler", "port", outputPort, "node", c.name)
+
+		if outputPort == m.ReconcilePort {
+
+			if nodeUpdater, ok := outputData.(func(node *v1alpha1.TinyNode) error); ok {
+				if c.reconciling.Load() {
+					c.log.Info("already reconciling", c.name)
+					// reconciling is already in progress
+					return nil
+				}
+
+				c.reconciling.Store(true)
+
+				return c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
+					if err := c.ReadStatus(&node.Status); err != nil {
+						return err
+					}
+					return nodeUpdater(node)
+				})
+			} else {
+				c.log.Info("no tiny node updater given for reconciliation")
+			}
+		}
+
+		u, err := uuid.NewUUID()
+		if err != nil {
+			return err
+		}
+
+		outputCtx, outputSpan := c.tracer.Start(outputCtx, u.String(), trace.WithAttributes(
+			attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
+			attribute.String("flowID", c.flowID),
+			attribute.String("projectID", c.projectID),
+		))
+
+		defer outputSpan.End()
+
+		// send span data only is tracker is on
+		if c.tracker.Active(c.projectID) {
+			outputDataBytes, _ := json.Marshal(outputData)
+			c.addSpanPortData(outputSpan, string(outputDataBytes))
+		}
+
+		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler)
+		if err != nil {
+			return err
+		}
+		return res
+	}
+
 }
 
 func (c *Runner) Node() v1alpha1.TinyNode {

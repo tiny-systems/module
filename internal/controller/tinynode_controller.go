@@ -164,7 +164,6 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	node.Status.LastUpdateTime = &t
 
 	// update status
-	l.Info("node update", "node", node)
 	err = r.Status().Patch(ctx, node, client.MergeFrom(originNode))
 	if err != nil {
 		l.Error(err, "status update error")
