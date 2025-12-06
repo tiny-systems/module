@@ -21,11 +21,20 @@ import (
 )
 
 const (
-	//FlowIDLabel flow ID k8s label
-	FlowIDLabel = "tinysystems.io/flow-id"
-	//ProjectIDLabel project ID k8s label
-	ProjectIDLabel = "tinysystems.io/project-id"
+	//tiny nod elables flow name k8s label
+	FlowNameLabel = "tinysystems.io/flow-name"
+	//ProjectIDLabel project name k8s label
+	ProjectNameLabel = "tinysystems.io/project-name"
 
+	PageTitleAnnotation = "tinysystems.io/page-name"
+
+	PageSortIdxAnnotation = "tinysystems.io/page-sort-idx"
+	//
+	ProjectNameAnnotation     = "tinysystems.io/project-name"
+	FlowDescriptionAnnotation = "tinysystems.io/flow-description"
+	//
+
+	// use for tinysignals to attach them to tinynodes
 	NodeNameLabel = "tinysystems.io/node-name"
 
 	//ModuleNameMajorLabel module major version label

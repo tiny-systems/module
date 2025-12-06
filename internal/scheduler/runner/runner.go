@@ -28,7 +28,6 @@ import (
 	"reflect"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -41,9 +40,9 @@ type Runner struct {
 	manager resource.ManagerInterface
 
 	// unique instance name
-	name      string
-	flowID    string
-	projectID string
+	name        string
+	flowName    string
+	projectName string
 
 	// underlying component
 	component m.Component
@@ -65,16 +64,12 @@ type Runner struct {
 	//
 	nodeLock *sync.Mutex
 
-	// if second request to the port comes we cancel previous if it is still running to avoid goroutine leak
-	portCancel cmap.ConcurrentMap[string, context.CancelFunc]
-
 	// caching requests => responses, errors
 	portMsg   cmap.ConcurrentMap[string, any]
 	portRes   cmap.ConcurrentMap[string, any]
 	portErr   cmap.ConcurrentMap[string, error]
 	portNonce cmap.ConcurrentMap[string, string]
 	//
-	reconciling *atomic.Bool
 }
 
 const FromSignal = "signal"
@@ -86,13 +81,13 @@ func NewRunner(component m.Component) *Runner {
 
 		nodePortsLock: &sync.RWMutex{},
 
-		reconciling: &atomic.Bool{},
-		//
-		portCancel: cmap.New[context.CancelFunc](),
-		//
-		portMsg:   cmap.New[any](),
-		portRes:   cmap.New[any](),
-		portErr:   cmap.New[error](),
+		// msg cache
+		portMsg: cmap.New[any](),
+		// response cache
+		portRes: cmap.New[any](),
+		// response error cache
+		portErr: cmap.New[error](),
+		// last port message nonce
 		portNonce: cmap.New[string](),
 
 		//
@@ -145,7 +140,6 @@ func (c *Runner) getPorts() []m.Port {
 // getNodePorts gets actual ports and caches it
 func (c *Runner) getNodePorts() []m.Port {
 	c.nodePortsLock.Lock()
-
 	defer c.nodePortsLock.Unlock()
 
 	c.nodePorts = c.component.Ports()
@@ -162,7 +156,7 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 	var ports []m.Port
 	// trim system ports
 	for _, p := range c.getNodePorts() {
-		if p.Name == m.ReconcilePort || p.Name == m.ClientPort {
+		if p.Name == v1alpha1.ReconcilePort || p.Name == v1alpha1.ClientPort {
 			continue
 		}
 		ports = append(ports, p)
@@ -320,7 +314,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	}
 
 	// we do not send data from signals if they are not changed to prevent work disruptions due to periodic reconciliations
-	if msg.From == FromSignal || port == m.SettingsPort {
+	if msg.From == FromSignal || port == v1alpha1.SettingsPort {
 		//
 		if prevPortData, ok := c.portMsg.Get(port); ok && cmp.Equal(portData, prevPortData) {
 			if prevPortNonce, ok := c.portNonce.Get(port); ok && msg.Nonce == prevPortNonce {
@@ -335,14 +329,6 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	c.log.Info("exec component handler", "msg", msg)
 
-	if prevCancel, ok := c.portCancel.Get(port); ok && prevCancel != nil {
-		// Important
-		// we do not wait prev handler goroutine to be close and expect it respects its context
-		prevCancel()
-	}
-
-	c.portCancel.Set(port, cancel)
-
 	u, err := uuid.NewUUID()
 	if err != nil {
 		return nil, err
@@ -351,8 +337,8 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	ctx, inputSpan := c.tracer.Start(ctx, u.String(),
 		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
 		trace.WithAttributes(attribute.String("from", msg.From)),
-		trace.WithAttributes(attribute.String("flowID", c.flowID)),
-		trace.WithAttributes(attribute.String("projectID", c.projectID)),
+		trace.WithAttributes(attribute.String("flowID", c.flowName)),
+		trace.WithAttributes(attribute.String("projectID", c.projectName)),
 	)
 
 	defer func() {
@@ -363,7 +349,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	}()
 
 	// send span data only is tracker is on
-	if c.tracker.Active(c.projectID) {
+	if c.tracker.Active(c.projectName) {
 		inputData, _ := json.Marshal(portData)
 		c.addSpanPortData(inputSpan, string(inputData))
 	}
@@ -406,26 +392,19 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 	return func(outputCtx context.Context, outputPort string, outputData any) any {
 		c.log.Info("component callback handler", "port", outputPort, "node", c.name)
 
-		if outputPort == m.ReconcilePort {
+		if outputPort == v1alpha1.ReconcilePort {
+			// special case
+			nodeUpdater, _ := outputData.(func(node *v1alpha1.TinyNode) error)
 
-			if nodeUpdater, ok := outputData.(func(node *v1alpha1.TinyNode) error); ok {
-				if c.reconciling.Load() {
-					c.log.Info("already reconciling", c.name)
-					// reconciling is already in progress
+			return c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
+				if err := c.ReadStatus(&node.Status); err != nil {
+					return err
+				}
+				if nodeUpdater == nil {
 					return nil
 				}
-
-				c.reconciling.Store(true)
-
-				return c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
-					if err := c.ReadStatus(&node.Status); err != nil {
-						return err
-					}
-					return nodeUpdater(node)
-				})
-			} else {
-				c.log.Info("no tiny node updater given for reconciliation")
-			}
+				return nodeUpdater(node)
+			})
 		}
 
 		u, err := uuid.NewUUID()
@@ -435,14 +414,14 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 
 		outputCtx, outputSpan := c.tracer.Start(outputCtx, u.String(), trace.WithAttributes(
 			attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
-			attribute.String("flowID", c.flowID),
-			attribute.String("projectID", c.projectID),
+			attribute.String("flowID", c.flowName),
+			attribute.String("projectID", c.projectName),
 		))
 
 		defer outputSpan.End()
 
 		// send span data only is tracker is on
-		if c.tracker.Active(c.projectID) {
+		if c.tracker.Active(c.projectName) {
 			outputDataBytes, _ := json.Marshal(outputData)
 			c.addSpanPortData(outputSpan, string(outputDataBytes))
 		}
@@ -469,9 +448,9 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 	c.nodeLock.Lock()
 	defer c.nodeLock.Unlock()
 	//
-	c.reconciling.Store(false)
-	c.flowID = node.Labels[v1alpha1.FlowIDLabel]
-	c.projectID = node.Labels[v1alpha1.ProjectIDLabel]
+
+	c.flowName = node.Labels[v1alpha1.FlowNameLabel]
+	c.projectName = node.Labels[v1alpha1.ProjectNameLabel]
 	c.name = node.Name
 
 	//
@@ -480,8 +459,8 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 	return c
 }
 
-// Cancel cancels all ongoing requests
-func (c *Runner) Cancel() {
+// Stop cancels all ongoing requests
+func (c *Runner) Stop() {
 	close(c.closeCh)
 }
 
@@ -590,15 +569,17 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 	gauge, _ := c.meter.Int64ObservableGauge(string(m),
 		metric.WithUnit("1"),
 	)
-	_, err := c.meter.RegisterCallback(
+
+	r, err := c.meter.RegisterCallback(
 		func(ctx context.Context, o metric.Observer) error {
 			o.ObserveInt64(gauge, val,
 				metric.WithAttributes(
 					// element could be nodeID or edgeID
 					attribute.String("element", name),
-					attribute.String("flowID", c.flowID),
-					attribute.String("projectID", c.projectID),
+					attribute.String("flowID", c.flowName),
+					attribute.String("projectID", c.projectName),
 				))
+
 			return nil
 		},
 		gauge,
@@ -608,6 +589,12 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 		c.log.Error(err, "metric gauge err")
 		return
 	}
+
+	go func() {
+		time.Sleep(time.Second * 6)
+		_ = r.Unregister()
+	}()
+
 }
 
 func (c *Runner) incCounter(ctx context.Context, val int64, element string, m metrics.Metric) {
@@ -627,8 +614,8 @@ func (c *Runner) incCounter(ctx context.Context, val int64, element string, m me
 	var attrs = []metric.AddOption{
 		metric.WithAttributes(
 			attribute.String("element", element),
-			attribute.String("flowID", c.flowID),
-			attribute.String("projectID", c.projectID),
+			attribute.String("flowID", c.flowName),
+			attribute.String("projectID", c.projectName),
 			attribute.String("metric", string(m)),
 		),
 	}

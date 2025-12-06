@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server/api/module-go"
 	module2 "github.com/tiny-systems/module/module"
@@ -18,9 +19,6 @@ type Pool interface {
 	Register(moduleName, addr string)
 	Deregister(moduleName string)
 }
-
-// DefaultStoreTTL for how long we keep grpc client in a pool, default 1h
-const DefaultStoreTTL = 60 * 60
 
 type AddressPool struct {
 	log          logr.Logger
@@ -52,6 +50,7 @@ func (p *AddressPool) SetLogger(l logr.Logger) *AddressPool {
 }
 
 func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error) {
+
 	moduleName, _, err := module2.ParseFullName(msg.To)
 	if err != nil {
 		return nil, err
@@ -69,15 +68,18 @@ func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) ([]byte, err
 	// sending request using gRPC
 	p.log.Info("grpc client request", "addr", addr, "to", msg.To)
 
-	defer p.log.Info("grpc client request done")
+	defer p.log.Info(fmt.Sprintf("grpc client request done"))
 
-	resp, err := client.Message(ctx, &module.MessageRequest{
+	var resp *module.MessageResponse
+
+	resp, err = client.Message(ctx, &module.MessageRequest{
 		From:    msg.From,
 		Payload: msg.Data,
 		EdgeID:  msg.EdgeID,
 		To:      msg.To,
 	})
 	if err != nil {
+		log.Error().Err(err).Msgf("grpc request tp %s failed", msg.To)
 		return nil, err
 	}
 

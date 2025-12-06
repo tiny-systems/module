@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/goccy/go-json"
+	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"io"
 	"os"
 )
@@ -37,7 +38,7 @@ func Push(ctx context.Context, opts PushOpts) error {
 	}
 
 	// check image locally before push
-	summary, err := dockerClient.ImageList(ctx, types.ImageListOptions{
+	summary, err := dockerClient.ImageList(ctx, image.ListOptions{
 		Filters: filters.NewArgs(filters.Arg("reference", opts.Image)),
 	})
 	if err != nil {
@@ -47,12 +48,15 @@ func Push(ctx context.Context, opts PushOpts) error {
 		return fmt.Errorf("image %s not found locally", opts.Image)
 	}
 
-	imgOpts := types.ImagePushOptions{
+	imgOpts := image.PushOptions{
 		RegistryAuth: base64.URLEncoding.EncodeToString(authBytes),
 	}
 
 	if opts.TargetOs != "" && opts.TargetArch != "" {
-		imgOpts.Platform = fmt.Sprintf("%s/%s", opts.TargetOs, opts.TargetArch)
+		imgOpts.Platform = &v1.Platform{
+			OS:           opts.TargetOs,
+			Architecture: opts.TargetArch,
+		}
 	}
 
 	out, err := dockerClient.ImagePush(ctx, opts.Image, imgOpts)
