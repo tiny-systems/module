@@ -20,4 +20,12 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the Project itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- tinywidget_editor_role.yaml
+- tinywidget_viewer_role.yaml
+- tinywidgetpage_editor_role.yaml
+- tinywidgetpage_viewer_role.yaml
+- tinyflow_editor_role.yaml
+- tinyflow_viewer_role.yaml
+- tinyproject_editor_role.yaml
+- tinyproject_viewer_role.yaml
 

@@ -35,17 +35,24 @@ func (s *server) SetLogger(l logr.Logger) *server {
 	return s
 }
 
-func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr string, clb func(net.Addr)) error {
+func (s *server) Start(globalCtx context.Context, handler runner.Handler, listenAddr string, clb func(net.Addr)) error {
 
-	wg, ctx := errgroup.WithContext(ctx)
+	wg, globalCtx := errgroup.WithContext(globalCtx)
 
 	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
-
 	grpc_health_v1.RegisterHealthServer(srv, health.NewChecker())
+
 	//
 	modulepb.RegisterModuleServiceServer(srv, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
-		ctx, cancel := context.WithCancel(ctx)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if globalCtx.Err() != nil {
+			return nil, globalCtx.Err()
+		}
+
+		ctx, cancel := mergeContext(ctx, globalCtx)
 		defer cancel()
 
 		res, err := handler(ctx, &runner.Msg{
@@ -54,8 +61,13 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 			Data:   req.Payload,
 			From:   req.From,
 		})
+
 		if err != nil {
 			return nil, err
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 
 		if resData, ok := res.([]byte); ok {
@@ -89,9 +101,39 @@ func (s *server) Start(ctx context.Context, handler runner.Handler, listenAddr s
 		return srv.Serve(lis)
 	})
 
-	<-ctx.Done()
+	<-globalCtx.Done()
+
 	log.Info().Msg("graceful shutdown")
-	srv.Stop()
+	srv.GracefulStop()
 
 	return wg.Wait()
+}
+
+// mergeContext creates a new Context that is canceled when either context 'a' or context 'b' is canceled.
+// This is crucial for long-running gRPC requests, as it ensures they are stopped
+// if the client disconnects (a) OR the server is shutting down (b).
+func mergeContext(a, b context.Context) (context.Context, context.CancelFunc) {
+	// 1. Create a new child context that can be manually canceled.
+	ctx, cancel := context.WithCancel(a) // 'a' is the initial parent for propagation
+
+	// 2. Start a goroutine to listen for cancellation on both the server's context (b)
+	// and the new merged context (mctx).
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Case 1: The 'a' context (client request) was canceled first, which
+			// automatically canceled mctx (since mctx is a child of a).
+			// We exit this goroutine to prevent a leak.
+
+		case <-b.Done():
+			// Case 2: The 'b' context (server shutdown) was canceled first.
+			// We explicitly call the new context's cancel function.
+			cancel()
+		}
+	}()
+
+	// 3. Return the new merged context and its cancel function.
+	// The user of this function must call 'defer mcancel()' in their RPC handler
+	// to release the resources associated with mctx.
+	return ctx, cancel
 }

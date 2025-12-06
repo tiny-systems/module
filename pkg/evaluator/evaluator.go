@@ -83,7 +83,7 @@ func (c *Evaluator) Eval(data []byte) (interface{}, error) {
 		return nil, err
 	}
 	if !root.IsObject() {
-		return nil, fmt.Errorf("node is not an object")
+		return nil, fmt.Errorf("node is not an object it is %v %s", root.Type(), string(data))
 	}
 	result, err := c.calculateResult(root)
 	if err != nil {

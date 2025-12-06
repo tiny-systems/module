@@ -1,0 +1,23 @@
+# permissions for end users to view tinyflows.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: operator
+    app.kubernetes.io/managed-by: kustomize
+  name: tinyflow-viewer-role
+rules:
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinyflows
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinyflows/status
+  verbs:
+  - get

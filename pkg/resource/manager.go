@@ -4,19 +4,22 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-logr/logr"
-	"github.com/google/go-cmp/cmp"
 	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
 	v1core "k8s.io/api/core/v1"
 	v1ingress "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"os"
 	"reflect"
+	"regexp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sync"
+	"time"
 )
 
 type Manager struct {
@@ -394,7 +397,6 @@ func (m Manager) PatchNode(ctx context.Context, node v1alpha1.TinyNode, updater 
 	}
 
 	log.Warn().Msgf("patching node %s", node.Name)
-	fmt.Println(cmp.Diff(findNode.Status, node.Status))
 	//spew.Dump(node.Status.Ports)
 
 	err := m.client.Status().Patch(ctx, findNode, client.MergeFrom(&node))
@@ -404,47 +406,209 @@ func (m Manager) PatchNode(ctx context.Context, node v1alpha1.TinyNode, updater 
 	return err
 }
 
-//func (m Manager) CreateClusterNodeSignal(ctx context.Context, node v1alpha1.TinyNode, port string, data []byte) error {
-//
-//	signal := &v1alpha1.TinySignal{}
-//	name := fmt.Sprintf("%s-%s", node.Name, strings.ReplaceAll(port, "_", ""))
-//
-//	err := m.client.Get(ctx, client.ObjectKey{Namespace: node.Namespace, Name: name}, signal)
-//	if err != nil && !errors.IsNotFound(err) {
-//		return err
-//	}
-//
-//	newSignal := signal.DeepCopy()
-//
-//	newSignal.Namespace = node.Namespace
-//	newSignal.Name = name
-//
-//	newSignal.Labels = map[string]string{
-//		v1alpha1.NodeNameLabel: node.Name,
-//	}
-//
-//	newSignal.Spec = v1alpha1.TinySignalSpec{
-//		Node: node.Name,
-//		Port: port,
-//		Data: data,
-//	}
-//
-//	if errors.IsNotFound(err) {
-//		if err := m.client.Create(ctx, newSignal); err != nil {
-//			return err
-//		}
-//		return nil
-//	}
-//
-//	err = m.client.Patch(ctx, newSignal, client.MergeFrom(signal))
-//	if err != nil && !errors.IsNotFound(err) {
-//		return err
-//	}
-//
-//	return nil
-//}
+func (m Manager) CreateFlow(ctx context.Context, ns string, projectName string, name string) (*string, error) {
+
+	flow := v1alpha1.TinyFlow{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels:       map[string]string{},
+			Namespace:    ns,
+			GenerateName: utils.SanitizeResourceName(name),
+			Annotations: map[string]string{
+				v1alpha1.FlowDescriptionAnnotation: name,
+			},
+		},
+	}
+
+	flow.Labels[v1alpha1.ProjectNameLabel] = projectName
+
+	if err := m.client.Create(ctx, &flow); err != nil {
+		return nil, fmt.Errorf("unable to create project %s", err)
+	}
+	return &flow.Name, nil
+}
+
+func (m Manager) CreateProject(ctx context.Context, ns string, name string) (*v1alpha1.TinyProject, error) {
+
+	proj := v1alpha1.TinyProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:    ns,
+			GenerateName: utils.SanitizeResourceName(name),
+			Annotations:  map[string]string{},
+			Labels:       map[string]string{},
+		},
+	}
+
+	proj.Annotations[v1alpha1.ProjectNameAnnotation] = name
+
+	if err := m.client.Create(ctx, &proj); err != nil {
+		return nil, fmt.Errorf("unable to create project %s", err)
+	}
+
+	return &proj, nil
+}
+
+func (m Manager) GetProjectList(ctx context.Context) ([]v1alpha1.TinyProject, error) {
+	var projectList = &v1alpha1.TinyProjectList{}
+
+	if err := m.client.List(ctx, projectList, client.InNamespace(m.namespace)); err != nil {
+		return nil, fmt.Errorf("service list error: %v", err)
+	}
+	return projectList.Items, nil
+}
+
+func (m Manager) GetFlowList(ctx context.Context, projectName string) ([]v1alpha1.TinyFlow, error) {
+
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			v1alpha1.ProjectNameLabel: projectName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build selector error: %s", err)
+	}
+	var projectList = &v1alpha1.TinyFlowList{}
+
+	if err := m.client.List(ctx, projectList, client.MatchingLabelsSelector{
+		Selector: selector,
+	}, client.InNamespace(m.namespace)); err != nil {
+		return nil, fmt.Errorf("service list error: %v", err)
+	}
+	return projectList.Items, nil
+}
+
+func (m Manager) CreatePage(ctx context.Context, page *v1alpha1.TinyWidgetPage) error {
+	return m.client.Create(ctx, page)
+}
+
+func (m Manager) DeletePage(ctx context.Context, page *v1alpha1.TinyWidgetPage) error {
+	return m.client.Delete(ctx, page)
+}
+
+func (m Manager) UpdatePage(ctx context.Context, page *v1alpha1.TinyWidgetPage) error {
+	return m.client.Update(ctx, page)
+}
+
+func (m Manager) GetProjectNodes(ctx context.Context, projectName string) ([]v1alpha1.TinyNode, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			v1alpha1.ProjectNameLabel: projectName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build selector error: %s", err)
+	}
+
+	var (
+		list = &v1alpha1.TinyNodeList{}
+	)
+	err = m.client.List(ctx, list, client.MatchingLabelsSelector{
+		Selector: selector,
+	}, client.InNamespace(m.namespace))
+	if err != nil {
+		return nil, err
+	}
+
+	return list.Items, nil
+}
+
+func (m Manager) GetProjectPageWidgets(ctx context.Context, projectName string) ([]v1alpha1.TinyWidgetPage, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			v1alpha1.ProjectNameLabel: projectName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build selector error: %s", err)
+	}
+
+	var (
+		list = &v1alpha1.TinyWidgetPageList{}
+	)
+	err = m.client.List(ctx, list, client.MatchingLabelsSelector{
+		Selector: selector,
+	}, client.InNamespace(m.namespace))
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (m Manager) MoveWidgetPageToPos(ctx context.Context, namespace, pageResourceName, pos int) error {
+	return nil
+}
+
+func (m Manager) DeleteTracker(ctx context.Context, tracker *v1alpha1.TinyTracker, c client.Client) error {
+	log.Info().Msg("deleting tracker")
+	delCtx, cancel := context.WithTimeout(ctx, time.Second*30)
+	defer cancel()
+
+	if err := c.Delete(delCtx, tracker); err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+func (m Manager) RenameFlow(ctx context.Context, name string, namespace string, newName string) error {
+
+	flow := &v1alpha1.TinyFlow{}
+	key := types.NamespacedName{
+		Name:      name,
+		Namespace: namespace,
+	}
+	err := m.client.Get(ctx, key, flow)
+
+	if err != nil {
+		return err
+	}
+	flow.Annotations[v1alpha1.FlowDescriptionAnnotation] = newName
+	return m.client.Update(ctx, flow)
+}
+
+func (m Manager) GetFLow(ctx context.Context, name string, namespace string) (*v1alpha1.TinyFlow, error) {
+
+	flow := &v1alpha1.TinyFlow{}
+	key := types.NamespacedName{
+		Name:      name,
+		Namespace: namespace,
+	}
+	err := m.client.Get(ctx, key, flow)
+
+	if err != nil {
+		return nil, err
+	}
+	return flow, nil
+}
+
+func (m Manager) PutTracker(ctx context.Context, namespace string, projectResourceName string, c client.Client) (*v1alpha1.TinyTracker, error) {
+	// place tracker
+	tracker := &v1alpha1.TinyTracker{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Labels: map[string]string{
+				v1alpha1.ProjectNameLabel: projectResourceName,
+			},
+			Annotations:  map[string]string{},
+			GenerateName: utils.SanitizeResourceName(fmt.Sprintf("prj-%s-tracker-", projectResourceName)),
+		},
+		Spec: v1alpha1.TinyTrackerSpec{},
+	}
+
+	if err := c.Create(ctx, tracker); err != nil {
+		log.Error().Err(err).Msg("can not create tracker")
+		return nil, fmt.Errorf("can not create tracker %s", err)
+	}
+
+	return tracker, nil
+}
 
 func (m Manager) Start(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
+}
+
+var whitespaceRegex = regexp.MustCompile(`\s+`)
+
+func removeAllWhitespace(input string) string {
+	// Replace all matches of the whitespace regex with an empty string
+	return whitespaceRegex.ReplaceAllString(input, "")
 }

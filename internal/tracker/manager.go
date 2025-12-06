@@ -9,7 +9,7 @@ import (
 )
 
 type Manager interface {
-	Active(flowID string) bool
+	Active(projectName string) bool
 	Register(tracker v1alpha1.TinyTracker) error
 	Deregister(name string) error
 }
@@ -52,11 +52,11 @@ func NewManager() *manager {
 	}
 }
 
-func (t *manager) Active(projectID string) bool {
+func (t *manager) Active(projectName string) bool {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
 	for _, tt := range t.trackers {
-		if tt.Labels[v1alpha1.ProjectIDLabel] == projectID {
+		if tt.Labels[v1alpha1.ProjectNameLabel] == projectName {
 			return true
 		}
 	}

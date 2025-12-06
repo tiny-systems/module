@@ -13,7 +13,6 @@ import (
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"time"
 )
@@ -22,7 +21,7 @@ type Scheduler interface {
 	//Install makes component available to run instances
 	Install(component module.Component) error
 	//Update creates a new instance by using unique name, if instance exists - updates one using its specs and signals
-	Update(ctx context.Context, node *v1alpha1.TinyNode, signals *v1alpha1.TinySignalList) error
+	Update(ctx context.Context, node *v1alpha1.TinyNode) error
 	//Handle sync incoming call
 	Handle(ctx context.Context, msg *runner.Msg) (any, error)
 
@@ -32,7 +31,7 @@ type Scheduler interface {
 
 type Schedule struct {
 	log logr.Logger
-	ctx context.Context
+
 	// registered components map
 	componentsMap cmap.ConcurrentMap[string, module.Component]
 	//
@@ -54,9 +53,8 @@ type Schedule struct {
 	msgHandler runner.Handler
 }
 
-func New(ctx context.Context, outsideHandler runner.Handler) *Schedule {
+func New(outsideHandler runner.Handler) *Schedule {
 	return &Schedule{
-		ctx:           ctx,
 		instancesMap:  cmap.New[*runner.Runner](),
 		componentsMap: cmap.New[module.Component](),
 		errGroup:      &errgroup.Group{},
@@ -102,7 +100,7 @@ func (s *Schedule) Install(component module.Component) error {
 func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 
 	nodeName, port := utils.ParseFullPortName(msg.To)
-	if port == module.ReconcilePort {
+	if port == v1alpha1.ReconcilePort {
 		// system port; do nothing
 		return nil, nil
 	}
@@ -110,7 +108,7 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 	instance, ok := s.instancesMap.Get(nodeName)
 
 	if !ok || (instance != nil && !instance.HasPort(port)) {
-		// instance is not registered currently, or it's port is not yet available (setting did not enable it yet?)
+		// instance is not registered currently, or it's port is not yet available (settings did not enable it yet?)
 		// maybe reconcile call did not register it yet
 		// sleep and try again
 		t := time.NewTimer(time.Millisecond)
@@ -129,7 +127,7 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 
 func (s *Schedule) sendMsg(ctx context.Context, instance *runner.Runner, msg *runner.Msg) (any, error) {
 	return instance.MsgHandler(ctx, msg, func(outCtx context.Context, outMsg *runner.Msg) (any, error) {
-
+		// output
 		_, port := utils.ParseFullPortName(outMsg.To)
 		if port == "" {
 			return nil, fmt.Errorf("empty port in handle's output")
@@ -142,25 +140,28 @@ func (s *Schedule) Destroy(name string) error {
 	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
 		// remove from map first so no one can access it
 		s.instancesMap.Remove(name)
-		instance.Cancel()
+		instance.Stop()
 	}
 	return nil
 }
 
-// Update updates node instance or creates one
-func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals *v1alpha1.TinySignalList) error {
+// Update updates node instance or creates one based on tinyNode crd
+// updates status resource based on outcome of Update
+func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 
 	cmp, ok := s.componentsMap.Get(node.Spec.Component)
 	if !ok {
+		// not recoverable error
 		return fmt.Errorf("component %s is not registered", node.Spec.Component)
 	}
+
+	// get or create
 
 	runnerInstance := s.instancesMap.Upsert(node.Name, nil, func(exist bool, runnerInstance *runner.Runner, _ *runner.Runner) *runner.Runner {
 		if exist {
 			return runnerInstance
 		}
 		// new instance
-		//configure || reconfigure
 		return runner.NewRunner(cmp.Instance()).
 			SetNode(*node).
 			SetLogger(s.log).
@@ -170,86 +171,66 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode, signals 
 			SetMeter(s.meter)
 	})
 
-	var (
-		// backup node instance had before
-		nodeBackup = runnerInstance.Node()
-		atomicErr  = new(atomic.Error)
-	)
+	// backup if new not will node work to avoid disruption to working system due to faulty settings
+	var nodeBackup = runnerInstance.Node()
 
-	ctx = utils.WithLeader(s.ctx, utils.IsLeader(ctx))
+	// update instance with copy of the new node
+	runnerInstance.SetNode(*node.DeepCopy())
+
+	var err error
+
+	defer func() {
+		if err == nil {
+			return
+		}
+		// instance failed with new version of node, backup
+
+		runnerInstance.SetNode(nodeBackup)
+		node.Status.Status = err.Error()
+		node.Status.Error = true
+	}()
 
 	// update system ports
 	cmpInstance := runnerInstance.GetComponent()
-
-	// update instance with copy of the node
-	runnerInstance.SetNode(*node.DeepCopy())
 
 	for _, p := range cmpInstance.Ports() {
 		if p.Source {
 			continue
 		}
 
-		s.errGroup.Go(func() error {
-			// if node has http port then provide addressGetter
-			switch p.Name {
-			case module.ReconcilePort:
-				// component reconciles its node
-				_ = cmpInstance.Handle(ctx, runnerInstance.DataHandler(s.msgHandler), p.Name, *node)
+		var portResp any
 
-			case module.ClientPort:
-				_ = cmpInstance.Handle(ctx, nil, p.Name, s.manager)
-			}
-			return nil
-		})
-	}
+		// if node has http port then provide addressGetter
+		switch p.Name {
+		case v1alpha1.ReconcilePort:
+			// component can use copy of node for its reconciliation
+			// it can not update node as it may take, and we try to make Update process as fast as possible
+			portResp = cmpInstance.Handle(ctx, runnerInstance.DataHandler(s.msgHandler), p.Name, *node)
 
-	s.errGroup.Go(func() error {
-		// sendMsg signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
-		if _, err := s.sendMsg(ctx, runnerInstance, &runner.Msg{
-			To:   utils.GetPortFullName(node.Name, module.SettingsPort),
-			Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config
-		}); err != nil {
-			atomicErr.Store(err)
-			// not allow errGroup fail due to settings
+		case v1alpha1.ClientPort:
+			// provide kubernetes resource manager client
+			portResp = cmpInstance.Handle(ctx, nil, p.Name, s.manager)
 		}
-		// configure port errors should not fail the entire error group
+
+		respErr := utils.CheckForError(portResp)
+		if respErr == nil {
+			continue
+		}
+		err = respErr
+
 		return nil
-	})
-
-	if signals != nil {
-		// sendMsg existing signals to the instance
-
-		for _, signal := range signals.Items {
-			// each signal in own goroutine
-			s.errGroup.Go(func() error {
-
-				if _, err := s.sendMsg(ctx, runnerInstance, &runner.Msg{
-					From:  runner.FromSignal,
-					To:    utils.GetPortFullName(node.Name, signal.Spec.Port),
-					Data:  signal.Spec.Data,
-					Nonce: signal.Annotations[v1alpha1.SignalNonceAnnotation],
-				}); err != nil {
-					atomicErr.Store(err)
-				}
-				return nil
-			})
-		}
 	}
 
-	// give time to node update itself or fail
-	time.Sleep(time.Second)
-
-	var err = runnerInstance.ReadStatus(&node.Status)
-
-	if atomicErr.Load() != nil {
-		// set previous node state to the scheduler because configuration did not end well
-		runnerInstance.SetNode(nodeBackup)
-
-		node.Status.Status = atomicErr.Load().Error()
-		node.Status.Error = true
+	// sendMsg signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
+	if _, err = s.sendMsg(ctx, runnerInstance, &runner.Msg{
+		To:   utils.GetPortFullName(node.Name, v1alpha1.SettingsPort),
+		Data: []byte("{}"), // no external data sent to port, rely solely on a node's port config
+	}); err != nil {
+		return nil
 	}
+
 	// do we need to rebuild status in case of rollback?
-	return err
+	return runnerInstance.ReadStatus(&node.Status)
 }
 
 func (s *Schedule) Start(ctx context.Context) error {
