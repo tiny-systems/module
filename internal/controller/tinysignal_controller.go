@@ -19,11 +19,16 @@ package controller
 import (
 	"context"
 	"github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/tiny-systems/module/pkg/utils"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -40,7 +45,15 @@ type TinySignalReconciler struct {
 	Scheduler scheduler.Scheduler
 	Module    module.Info
 	IsLeader  *atomic.Bool
+	//
+	mu               *sync.Mutex
+	runningProcesses map[types.NamespacedName]context.CancelFunc
+
+	// This is used to determine if a process needs to be restarted due to a spec change.
+	processedNonce map[types.NamespacedName]string
 }
+
+const signalFinalizer = "io.tinysystems/signal-finalizer"
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals/status,verbs=get;update;patch
@@ -75,25 +88,140 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return reconcile.Result{}, nil
 	}
 
-	// @todo const
-	if !strings.HasSuffix(req.Name, "-reconcile") {
-		return reconcile.Result{}, nil
+	var signal operatorv1alpha1.TinySignal
+
+	if err := r.Get(ctx, req.NamespacedName, &signal); err != nil {
+		if errors.IsNotFound(err) {
+			// The resource was not found, likely deleted. The delete logic below in the
+			// finalizer section will have already run, or there's nothing for us to do.
+			l.Info("tinySignal not found. Ignoring since object must be deleted.")
+			return ctrl.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		return ctrl.Result{}, err
 	}
 
-	signal := &operatorv1alpha1.TinySignal{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      req.Name,
-			Namespace: req.Namespace,
-		},
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !signal.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is being deleted.
+		if controllerutil.ContainsFinalizer(&signal, signalFinalizer) {
+			l.Info("tinySignal is being deleted, stopping associated process.")
+
+			// Look up the process's cancel function in our map.
+			if cancel, ok := r.runningProcesses[req.NamespacedName]; ok {
+				// Call the cancel function to signal the goroutine to stop.
+				cancel()
+				// Remove the entries from our maps to clean up.
+				delete(r.runningProcesses, req.NamespacedName)
+				delete(r.processedNonce, req.NamespacedName)
+				l.Info("process stopped successfully.")
+			}
+
+			// Now that our cleanup is done, remove the finalizer.
+			// This allows the Kubernetes garbage collector to actually delete the resource.
+			controllerutil.RemoveFinalizer(&signal, signalFinalizer)
+			if err := r.Update(ctx, &signal); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		// Stop reconciliation as the signal is being deleted.
+		return ctrl.Result{}, nil
 	}
 
-	_ = r.Delete(ctx, signal)
+	// --- Add Finalizer if it doesn't exist ---
+	if !controllerutil.ContainsFinalizer(&signal, signalFinalizer) {
+		l.Info("adding finalizer to signal.")
+		controllerutil.AddFinalizer(&signal, signalFinalizer)
+		if err := r.Update(ctx, &signal); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	_, isRunning := r.runningProcesses[req.NamespacedName]
+	lastProcessedNonce := r.processedNonce[req.NamespacedName]
+
+	specHasChanged := signal.Annotations[operatorv1alpha1.SignalNonceAnnotation] != lastProcessedNonce
+
+	// If the spec has changed, we must stop the old process before starting a new one.
+	if isRunning && specHasChanged {
+		l.Info("spec has changed, restarting process.", "lastProcessedNonce", lastProcessedNonce)
+		if cancel, ok := r.runningProcesses[req.NamespacedName]; ok {
+			cancel() // Signal the old process to stop.
+		}
+	}
+
+	if !isRunning || specHasChanged {
+
+		// Create a new context that we can cancel later.
+		processCtx, cancel := context.WithCancel(utils.WithLeader(context.Background(), r.IsLeader.Load()))
+
+		r.runningProcesses[req.NamespacedName] = cancel
+		r.processedNonce[req.NamespacedName] = signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
+
+		go func(ctx context.Context, spec operatorv1alpha1.TinySignalSpec) {
+			l.Info("process goroutine started.")
+
+			// Exponential backoff configuration for retries on failure.
+			initialBackoff := 2 * time.Second
+			maxBackoff := 30 * time.Second
+			currentBackoff := initialBackoff
+
+			for {
+
+				// Execute the actual business logic.
+				_, err := r.Scheduler.Handle(ctx, &runner.Msg{
+					From:  runner.FromSignal,
+					To:    utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
+					Data:  signal.Spec.Data,
+					Nonce: signal.Annotations[operatorv1alpha1.SignalNonceAnnotation],
+				})
+
+				if err != nil {
+
+					l.Error(err, "run failed, will retry with backoff.", "nextRetryIn", currentBackoff)
+
+					// Wait for the backoff period, but immediately exit if the context is cancelled.
+					select {
+					case <-time.After(currentBackoff):
+						// Increase backoff for the next potential failure.
+						currentBackoff *= 2
+						if currentBackoff > maxBackoff {
+							currentBackoff = maxBackoff
+						}
+						continue // Jump to the next iteration to retry the work.
+					case <-ctx.Done():
+						// Context was cancelled during the backoff period.
+						l.Info("process context cancelled during retry backoff. shutting down goroutine.")
+						return
+					}
+				}
+
+				// If the work was successful, reset the backoff duration.
+				currentBackoff = initialBackoff
+
+				select {
+				case <-ctx.Done():
+					// The context was cancelled during the normal interval.
+					l.Info("process context cancelled during normal interval. shutting down goroutine.")
+					return
+				case <-time.After(15 * time.Second):
+					// Interval finished, continue to the next loop to do the work again.
+				}
+			}
+		}(processCtx, signal.Spec) // Pass the context and spec data to the goroutine.
+	}
+
 	return ctrl.Result{}, nil
-
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinySignalReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.mu = &sync.Mutex{}
+	r.processedNonce = make(map[types.NamespacedName]string)
+	r.runningProcesses = make(map[types.NamespacedName]context.CancelFunc)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinySignal{}).
 		Complete(r)

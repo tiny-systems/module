@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tinysystems-otel-collector.fullname" . }}
+  labels:
+    {{- include "tinysystems-otel-collector.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+  - port: {{ .Values.service.port }}
+    targetPort: otlp-grpc
+    protocol: TCP
+    name: otlp-grpc
+  selector:
+    {{- include "tinysystems-otel-collector.selectorLabels" . | nindent 4 }}

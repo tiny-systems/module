@@ -21,6 +21,7 @@ import (
 	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/registry"
 	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -68,6 +69,11 @@ var runCmd = &cobra.Command{
 		l := zerologr.New(&log.Logger)
 		err := metrics.ConfigureOpenTelemetry(
 			metrics.WithDSN(os.Getenv("OTLP_DSN")),
+			metrics.WithBatchSpanProcessorOption(func(o *sdktrace.BatchSpanProcessorOptions) {
+				o.BatchTimeout = 500 * time.Millisecond // Very responsive
+				// Optional: also reduce batch size for faster sends
+				o.MaxExportBatchSize = 10
+			}),
 		)
 		if err != nil {
 			l.Error(err, "configure opentelemetry error")
@@ -294,7 +300,7 @@ var runCmd = &cobra.Command{
 		)
 
 		//
-		scheduler = sch.New(ctx, func(ctx context.Context, msg *runner.Msg) (any, error) {
+		scheduler = sch.New(func(ctx context.Context, msg *runner.Msg) (any, error) {
 			m, _, err := m.ParseFullName(msg.To)
 			if err != nil {
 				return nil, fmt.Errorf("parse destination error: %v", err)
