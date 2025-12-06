@@ -816,4 +816,15 @@ entries:
     urls:
     - https://github.com/tiny-systems/module/releases/download/tinysystems-operator-0.1.5/tinysystems-operator-0.1.5.tgz
     version: 0.1.5
-generated: "2025-03-02T19:51:30.374431135Z"
+  tinysystems-otel-collector:
+  - apiVersion: v2
+    appVersion: "1.0"
+    created: "2025-12-06T18:34:35.309010828Z"
+    description: A minimalistic Helm chart for OpenTelemetry Collector
+    digest: b609f9f4fc2a6612d2070ff0598da40287e3754dafd102af5ef55549ce69486e
+    name: tinysystems-otel-collector
+    type: application
+    urls:
+    - https://github.com/tiny-systems/module/releases/download/tinysystems-otel-collector-0.1.0/tinysystems-otel-collector-0.1.0.tgz
+    version: 0.1.0
+generated: "2025-12-06T18:34:35.30925821Z"
