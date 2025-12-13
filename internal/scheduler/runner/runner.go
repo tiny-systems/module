@@ -359,8 +359,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	err = errorpanic.Wrap(func() error {
 		// panic safe
 
-		ticker := time.NewTicker(time.Second * 2)
+		ticker := time.NewTicker(time.Second * 3)
 		defer ticker.Stop()
+
+		// send right away
+		c.setGauge(time.Now().Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
 
 		go func() {
 			for {
@@ -541,6 +544,10 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			})
 			if er != nil {
 				return er
+			}
+			if res == nil {
+				// don't care about nil responses
+				return nil
 			}
 
 			resLock.Lock()
