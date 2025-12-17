@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
 	"github.com/goccy/go-json"
 	"github.com/google/go-cmp/cmp"
@@ -15,6 +16,7 @@ import (
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
@@ -467,6 +469,95 @@ func (c *Runner) Stop() {
 	close(c.closeCh)
 }
 
+// sendToEdgeWithRetry sends a message to an edge with infinite retry logic.
+// It only stops retrying if the error is permanent or the context is cancelled.
+func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort, edgeTo string, dataBytes []byte, responseConfig interface{}, handler Handler) (any, error) {
+	// Configure exponential backoff: 1s -> 2s -> 4s -> ... -> 30s (max)
+	// MaxElapsedTime = 0 means infinite retry
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = 1 * time.Second
+	b.MaxInterval = 30 * time.Second
+	b.MaxElapsedTime = 0 // Never stop retrying
+
+	var result any
+	attempt := 0
+
+	operation := func() error {
+		attempt++
+
+		res, err := handler(ctx, &Msg{
+			To:     edgeTo,
+			From:   fromPort,
+			EdgeID: edge.ID,
+			Data:   dataBytes,
+			Resp:   responseConfig,
+		})
+
+		if err != nil {
+			// Check if this is a permanent error that should not be retried
+			if perrors.IsPermanent(err) {
+				c.log.Error(err, "edge call failed with permanent error, will not retry",
+					"edge", edgeTo,
+					"from", fromPort,
+					"attempt", attempt,
+				)
+				return backoff.Permanent(err)
+			}
+
+			// Transient error - log and retry
+			c.log.Error(err, "edge call failed, will retry",
+				"edge", edgeTo,
+				"from", fromPort,
+				"attempt", attempt,
+			)
+			return err
+		}
+
+		// Success
+		if attempt > 1 {
+			c.log.Info("edge call succeeded after retries",
+				"edge", edgeTo,
+				"from", fromPort,
+				"attempts", attempt,
+			)
+		}
+
+		result = res
+		return nil
+	}
+
+	// Retry until success, permanent error, or context cancelled
+	err := backoff.RetryNotify(
+		operation,
+		backoff.WithContext(b, ctx),
+		func(err error, duration time.Duration) {
+			c.log.Info("retrying edge call",
+				"edge", edgeTo,
+				"from", fromPort,
+				"nextRetry", duration,
+				"error", err.Error(),
+				"attempt", attempt,
+			)
+		},
+	)
+
+	if err != nil {
+		// Check if it's a permanent error
+		if perrors.IsPermanent(err) {
+			return nil, err
+		}
+		// Context cancelled
+		c.log.Info("edge retry stopped (context cancelled)",
+			"edge", edgeTo,
+			"from", fromPort,
+			"attempts", attempt,
+		)
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) (any, error) {
 
 	dataBytes, err := json.Marshal(data)
@@ -480,10 +571,8 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 
 	if node, _ := utils.ParseFullPortName(port); node != "" {
 		// we already have full port name, means no need to check edges (useful for input/outputs)
-		return handler(ctx, &Msg{
-			To:   port,
-			Data: dataBytes,
-		})
+		// Use retry logic even for direct calls
+		return c.sendToEdgeWithRetry(ctx, v1alpha1.TinyNodeEdge{}, "", port, dataBytes, nil, handler)
 	}
 
 	var (
@@ -509,8 +598,9 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	wg, ctx := errgroup.WithContext(ctx)
 
 	var (
-		firstResult any
-		resLock     = &sync.Mutex{}
+		results    = make([]any, 0)
+		errors     = make([]error, 0)
+		resultLock = &sync.Mutex{}
 	)
 
 	var sourcePort m.Port
@@ -532,33 +622,40 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 
 		fromPort := utils.GetPortFullName(c.name, port)
 		wg.Go(func() error {
-			// send to destination
-			// track how many messages component send
+			// Send to destination with infinite retry
+			res, err := c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
 
-			res, er := handler(ctx, &Msg{
-				To:     edge.To,
-				From:   fromPort,
-				EdgeID: edge.ID,
-				Data:   dataBytes,
-				Resp:   sourcePort.ResponseConfiguration,
-			})
-			if er != nil {
-				return er
-			}
-			if res == nil {
-				// don't care about nil responses
+			// Collect results and errors
+			resultLock.Lock()
+			defer resultLock.Unlock()
+
+			if err != nil {
+				errors = append(errors, err)
+				// Don't return error - let other edges continue
 				return nil
 			}
 
-			resLock.Lock()
-			defer resLock.Unlock()
-			firstResult = res
+			if res != nil {
+				results = append(results, res)
+			}
 
-			return er
+			return nil
 		})
 	}
-	// wait while all port will be unblocked
-	return firstResult, wg.Wait()
+
+	// Wait for ALL edges to complete
+	_ = wg.Wait()
+
+	// Return first non-nil result, or first error if all failed
+	if len(results) > 0 {
+		return results[0], nil
+	}
+
+	if len(errors) > 0 {
+		return nil, errors[0]
+	}
+
+	return nil, nil
 }
 
 func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
