@@ -28,11 +28,13 @@ type TinySignalSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of TinySignal. Edit tinysignal_types.go to remove/update
+	// Node is the name of the TinyNode to signal
 	Node string `json:"node"`
+	// Port is the port on the node to send the signal to
 	Port string `json:"port"`
 
 	// +kubebuilder:validation:Optional
+	// Data is the payload to send with the signal
 	Data []byte `json:"data"`
 }
 
