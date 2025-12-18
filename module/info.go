@@ -14,6 +14,8 @@ type Info struct {
 	VersionID string // if module's build is registered
 	Version   string
 	Addr      string //listed address
+	//
+	Components []ComponentInfo
 }
 
 // GetNameAndVersion Container image full name
