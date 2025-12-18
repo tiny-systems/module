@@ -1,10 +1,10 @@
-# Tiny Systems Module SDK
+# TinySystems Module SDK
 
 A Kubebuilder-based Kubernetes operator SDK for building flow-based workflow engines. This SDK provides the complete infrastructure for developing modular operators that can be composed into visual workflows.
 
 ## Overview
 
-Tiny Systems Module SDK enables developers to create **module operators** (like `common-module`, `http-module`, `grpc-module`) that bring specific functionality into a Kubernetes-native flow engine. Each module provides reusable components that can be connected through a port-based architecture to create complex workflows.
+TinySystems Module SDK enables developers to create **module operators** (like `common-module`, `http-module`, `grpc-module`) that bring specific functionality into a Kubernetes-native flow engine. Each module provides reusable components that can be connected through a port-based architecture to create complex workflows.
 
 ### Key Features
 
@@ -582,13 +582,7 @@ case "_client":
         Port: "input",
         Data: map[string]any{"key": "value"},
     })
-
-    // Create a flow
-    flow, err := client.CreateFlow(ctx, resource.CreateFlowRequest{
-        Name:    "my-flow",
-        Project: "my-project",
-    })
-
+    
     // Get node information
     node, err := client.GetNode(ctx, "node-name")
 ```
