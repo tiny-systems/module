@@ -35,6 +35,7 @@ import (
 	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"strings"
@@ -293,10 +294,15 @@ var runCmd = &cobra.Command{
 		)
 
 		//
+		resourceManager, err := resource.NewManagerFromClient(mgr.GetClient().(runtimeclient.WithWatch), namespace)
+		if err != nil {
+			l.Error(err, "unable to create resource manager")
+			os.Exit(1)
+		}
+
 		var (
-			resourceManager = resource.NewManager(mgr.GetClient(), l, namespace)
-			trackManager    = tracker.NewManager().SetLogger(l)
-			scheduler       *sch.Schedule
+			trackManager = tracker.NewManager().SetLogger(l)
+			scheduler    *sch.Schedule
 		)
 
 		//
@@ -448,7 +454,7 @@ var runCmd = &cobra.Command{
 
 		l.Info("registering", "module", moduleInfo.Name)
 
-		if err = resourceManager.RegisterModule(ctx, moduleInfo); err != nil {
+		if err = resourceManager.CreateModule(ctx, moduleInfo); err != nil {
 			l.Error(err, "unable to register a module")
 			return
 		}

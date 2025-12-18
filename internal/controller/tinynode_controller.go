@@ -92,12 +92,6 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !node.ObjectMeta.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(node, nodeFinalizer) {
 
-			// Object not found, return.  Created objects are automatically garbage collected.
-			// For additional cleanup logic use finalizers.
-			// delete signals
-			_ = r.DeleteAllOf(context.Background(), &operatorv1alpha1.TinySignal{}, client.InNamespace(req.Namespace), client.MatchingLabels{
-				operatorv1alpha1.NodeNameLabel: req.Name,
-			})
 			if err = r.Scheduler.Destroy(req.Name); err != nil {
 				return reconcile.Result{}, errors2.Wrap(err, "unable to destroy scheduler")
 			}
