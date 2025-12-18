@@ -45,10 +45,3 @@ managerService:
     protocol: TCP
     targetPort: grpc
   type: ClusterIP
-metricsService:
-  ports:
-  - name: https
-    port: 8443
-    protocol: TCP
-    targetPort: https
-  type: ClusterIP
