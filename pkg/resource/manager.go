@@ -72,6 +72,15 @@ func (m Manager) GetNode(ctx context.Context, name, namespace string) (*v1alpha1
 	}, node); err != nil {
 		return nil, err
 	}
+
+	// Ensure APIVersion and Kind are set for owner references
+	if node.APIVersion == "" {
+		node.APIVersion = v1alpha1.GroupVersion.String()
+	}
+	if node.Kind == "" {
+		node.Kind = "TinyNode"
+	}
+
 	return node, nil
 }
 func (m Manager) CreateNode(ctx context.Context, node *v1alpha1.TinyNode) error {
@@ -798,6 +807,15 @@ func (m Manager) GetFLow(ctx context.Context, name string, namespace string) (*v
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure APIVersion and Kind are set for owner references
+	if flow.APIVersion == "" {
+		flow.APIVersion = v1alpha1.GroupVersion.String()
+	}
+	if flow.Kind == "" {
+		flow.Kind = "TinyFlow"
+	}
+
 	return flow, nil
 }
 
@@ -813,6 +831,15 @@ func (m Manager) GetProject(ctx context.Context, name string, namespace string) 
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure APIVersion and Kind are set for owner references
+	if project.APIVersion == "" {
+		project.APIVersion = v1alpha1.GroupVersion.String()
+	}
+	if project.Kind == "" {
+		project.Kind = "TinyProject"
+	}
+
 	return project, nil
 }
 
@@ -861,6 +888,18 @@ func (m Manager) DeleteFlow(ctx context.Context, flowResourceName string) error 
 	if err := m.client.Delete(ctx, &v1alpha1.TinyFlow{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      flowResourceName,
+			Namespace: m.namespace,
+		},
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+func (m Manager) DeleteProject(ctx context.Context, projectName string) error {
+
+	if err := m.client.Delete(ctx, &v1alpha1.TinyProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      projectName,
 			Namespace: m.namespace,
 		},
 	}); err != nil {
