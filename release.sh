@@ -145,8 +145,8 @@ main() {
     fi
 
     # Ask for commit message
-    read -p "Commit message (default: 'Release $NEW_TAG'): " COMMIT_MSG
-    COMMIT_MSG=${COMMIT_MSG:-"Release $NEW_TAG"}
+    read -p "Commit message (default: 'release $NEW_TAG'): " COMMIT_MSG
+    COMMIT_MSG=${COMMIT_MSG:-"release $NEW_TAG"}
 
     # Commit any staged changes
     if [[ -n $(git diff --cached --name-only) ]]; then
