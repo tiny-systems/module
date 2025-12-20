@@ -19,6 +19,7 @@ import (
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
+	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -187,11 +188,11 @@ var runCmd = &cobra.Command{
 		lock, err := resourcelock.New(
 			resourcelock.LeasesResourceLock,
 			namespace,
-			fmt.Sprintf("%s-lock", name),
+			fmt.Sprintf("%s-lock", utils.SanitizeResourceName(name)),
 			nil,
 			coreClient.CoordinationV1(), // Event recorder
 			resourcelock.ResourceLockConfig{
-				Identity: podName,
+				Identity: utils.SanitizeResourceName(podName),
 			},
 		)
 		if err != nil {
@@ -226,7 +227,7 @@ var runCmd = &cobra.Command{
 			RetryPeriod:     2 * time.Second,
 			Callbacks:       leaderCallbacks,
 			ReleaseOnCancel: true,
-			Name:            fmt.Sprintf("%s-leader-elector", name),
+			Name:            fmt.Sprintf("%s-leader-elector", utils.SanitizeResourceName(name)),
 		})
 		if err != nil {
 			l.Error(err, "unable to create leader elector for status updates")
