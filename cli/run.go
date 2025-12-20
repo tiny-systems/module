@@ -35,7 +35,6 @@ import (
 	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
-	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"strings"
@@ -294,7 +293,7 @@ var runCmd = &cobra.Command{
 		)
 
 		//
-		resourceManager, err := resource.NewManagerFromClient(mgr.GetClient().(runtimeclient.WithWatch), namespace)
+		resourceManager, err := resource.NewManagerFromConfig(config, namespace)
 		if err != nil {
 			l.Error(err, "unable to create resource manager")
 			os.Exit(1)
