@@ -59,25 +59,6 @@ bump_version() {
     echo "v${major}.${minor}.${patch}"
 }
 
-# Function to update Chart.yaml version
-update_chart_version() {
-    local chart_file=$1
-    local new_version=$2
-
-    # Remove 'v' prefix for chart version
-    local chart_version=${new_version#v}
-
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        sed -i '' "s/^version: .*/version: $chart_version/" "$chart_file"
-    else
-        # Linux
-        sed -i "s/^version: .*/version: $chart_version/" "$chart_file"
-    fi
-
-    info "Updated $chart_file to version $chart_version"
-}
-
 # Main script
 main() {
     # Check if git repo
@@ -125,24 +106,6 @@ main() {
     # Calculate new version
     NEW_TAG=$(bump_version "$CURRENT_TAG" "$BUMP_TYPE")
     info "New version: $NEW_TAG"
-
-    # Ask about updating charts
-    read -p "Update Helm chart versions? (y/N) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if [[ -f "charts/tinysystems-operator/Chart.yaml" ]]; then
-            update_chart_version "charts/tinysystems-operator/Chart.yaml" "$NEW_TAG"
-        fi
-        if [[ -f "charts/tinysystems-crd/Chart.yaml" ]]; then
-            update_chart_version "charts/tinysystems-crd/Chart.yaml" "$NEW_TAG"
-        fi
-        if [[ -f "charts/tinysystems-otel-collector/Chart.yaml" ]]; then
-            update_chart_version "charts/tinysystems-otel-collector/Chart.yaml" "$NEW_TAG"
-        fi
-
-        # Stage chart changes
-        git add charts/*/Chart.yaml 2>/dev/null || true
-    fi
 
     # Ask for commit message
     read -p "Commit message (default: 'release $NEW_TAG'): " COMMIT_MSG
