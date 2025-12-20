@@ -70,9 +70,9 @@ main() {
     if [[ -n $(git status -s) ]]; then
         warn "You have uncommitted changes:"
         git status -s
-        read -p "Continue anyway? (y/N) " -n 1 -r
+        read -p "Continue anyway? (Y/n) " -n 1 -r
         echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
             exit 1
         fi
     fi
@@ -117,33 +117,42 @@ main() {
         git commit -m "$COMMIT_MSG"
     fi
 
-    # Create and push tag
+    # Create tag locally first
     info "Creating tag $NEW_TAG..."
     git tag -a "$NEW_TAG" -m "$COMMIT_MSG"
 
-    read -p "Push tag to remote? (y/N) " -n 1 -r
+    # Check if there are unpushed commits
+    PUSH_COMMITS=false
+    if [[ -n $(git log origin/$(git rev-parse --abbrev-ref HEAD)..HEAD 2>/dev/null) ]]; then
+        read -p "Push commits to remote? (Y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            warn "Commits not pushed. Tag will not be pushed either (would point to non-existent commit)."
+            info "✓ Tag $NEW_TAG created locally (not pushed)"
+            warn "To push later: git push && git push origin $NEW_TAG"
+            return
+        else
+            info "Pushing commits to remote..."
+            git push
+            PUSH_COMMITS=true
+        fi
+    fi
+
+    # Now ask about pushing the tag
+    read -p "Push tag to remote? (Y/n) " -n 1 -r
     echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        info "✓ Tag $NEW_TAG created locally (not pushed)"
+        warn "Remember to push with: git push origin $NEW_TAG"
+    else
         info "Pushing tag to remote..."
         git push origin "$NEW_TAG"
-
-        # Also push commits if any
-        if [[ -n $(git log origin/$(git rev-parse --abbrev-ref HEAD)..HEAD) ]]; then
-            read -p "Push commits to remote? (y/N) " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                git push
-            fi
-        fi
 
         info "✓ Release $NEW_TAG created and pushed successfully!"
         echo ""
         info "Tag: $NEW_TAG"
         info "You can create a GitHub release at:"
         echo "  https://github.com/$(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\.git/\1/')/releases/new?tag=$NEW_TAG"
-    else
-        info "✓ Tag $NEW_TAG created locally (not pushed)"
-        warn "Remember to push with: git push origin $NEW_TAG"
     fi
 }
 
