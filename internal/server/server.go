@@ -45,15 +45,36 @@ func (s *server) Start(globalCtx context.Context, handler runner.Handler, listen
 	//
 	modulepb.RegisterModuleServiceServer(srv, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
 		// incoming request from gRPC
+		s.log.Info("grpc server: received message request",
+			"to", req.To,
+			"from", req.From,
+			"edgeID", req.EdgeID,
+			"payloadSize", len(req.Payload),
+		)
+
 		if ctx.Err() != nil {
+			s.log.Error(ctx.Err(), "grpc server: request context already cancelled",
+				"to", req.To,
+				"from", req.From,
+			)
 			return nil, ctx.Err()
 		}
 		if globalCtx.Err() != nil {
+			s.log.Error(globalCtx.Err(), "grpc server: global context cancelled (server shutting down)",
+				"to", req.To,
+				"from", req.From,
+			)
 			return nil, globalCtx.Err()
 		}
 
 		ctx, cancel := mergeContext(ctx, globalCtx)
 		defer cancel()
+
+		s.log.Info("grpc server: forwarding to handler",
+			"to", req.To,
+			"from", req.From,
+			"edgeID", req.EdgeID,
+		)
 
 		res, err := handler(ctx, &runner.Msg{
 			EdgeID: req.EdgeID,
@@ -63,14 +84,27 @@ func (s *server) Start(globalCtx context.Context, handler runner.Handler, listen
 		})
 
 		if err != nil {
+			s.log.Error(err, "grpc server: handler returned error",
+				"to", req.To,
+				"from", req.From,
+				"edgeID", req.EdgeID,
+			)
 			return nil, err
 		}
 
 		if ctx.Err() != nil {
+			s.log.Error(ctx.Err(), "grpc server: context cancelled after handler",
+				"to", req.To,
+				"from", req.From,
+			)
 			return nil, ctx.Err()
 		}
 
 		if resData, ok := res.([]byte); ok {
+			s.log.Info("grpc server: returning byte response",
+				"to", req.To,
+				"responseSize", len(resData),
+			)
 			return &modulepb.MessageResponse{
 				Data: resData,
 			}, err
@@ -78,8 +112,17 @@ func (s *server) Start(globalCtx context.Context, handler runner.Handler, listen
 
 		data, err := json.Marshal(res)
 		if err != nil {
+			s.log.Error(err, "grpc server: failed to marshal response",
+				"to", req.To,
+				"from", req.From,
+			)
 			return nil, err
 		}
+
+		s.log.Info("grpc server: returning json response",
+			"to", req.To,
+			"responseSize", len(data),
+		)
 
 		return &modulepb.MessageResponse{
 			Data: data,

@@ -161,26 +161,45 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		r.processedNonce[req.NamespacedName] = signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
 
 		go func(ctx context.Context, spec operatorv1alpha1.TinySignalSpec) {
-			l.Info("process goroutine started.")
+			targetPort := utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port)
+			nonce := signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
+
+			l.Info("signal controller: process goroutine started",
+				"node", signal.Spec.Node,
+				"port", signal.Spec.Port,
+				"targetPort", targetPort,
+				"nonce", nonce,
+				"dataSize", len(signal.Spec.Data),
+			)
 
 			// Exponential backoff configuration for retries on failure.
 			initialBackoff := 2 * time.Second
 			maxBackoff := 30 * time.Second
 			currentBackoff := initialBackoff
+			attempt := 0
 
 			for {
+				attempt++
+
+				l.Info("signal controller: sending signal to scheduler",
+					"targetPort", targetPort,
+					"attempt", attempt,
+				)
 
 				// Execute the actual business logic.
-				_, err := r.Scheduler.Handle(ctx, &runner.Msg{
+				res, err := r.Scheduler.Handle(ctx, &runner.Msg{
 					From:  runner.FromSignal,
-					To:    utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port),
+					To:    targetPort,
 					Data:  signal.Spec.Data,
-					Nonce: signal.Annotations[operatorv1alpha1.SignalNonceAnnotation],
+					Nonce: nonce,
 				})
 
 				if err != nil {
-
-					l.Error(err, "run failed, will retry with backoff.", "nextRetryIn", currentBackoff)
+					l.Error(err, "signal controller: scheduler handle failed, will retry with backoff",
+						"targetPort", targetPort,
+						"attempt", attempt,
+						"nextRetryIn", currentBackoff,
+					)
 
 					// Wait for the backoff period, but immediately exit if the context is cancelled.
 					select {
@@ -193,21 +212,36 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 						continue // Jump to the next iteration to retry the work.
 					case <-ctx.Done():
 						// Context was cancelled during the backoff period.
-						l.Info("process context cancelled during retry backoff. shutting down goroutine.")
+						l.Info("signal controller: context cancelled during retry backoff, shutting down",
+							"targetPort", targetPort,
+							"attempt", attempt,
+						)
 						return
 					}
 				}
 
+				l.Info("signal controller: scheduler handle succeeded",
+					"targetPort", targetPort,
+					"attempt", attempt,
+					"hasResponse", res != nil,
+				)
+
 				// If the work was successful, reset the backoff duration.
 				currentBackoff = initialBackoff
+				attempt = 0
 
 				select {
 				case <-ctx.Done():
 					// The context was cancelled during the normal interval.
-					l.Info("process context cancelled during normal interval. shutting down goroutine.")
+					l.Info("signal controller: context cancelled during interval, shutting down",
+						"targetPort", targetPort,
+					)
 					return
 				case <-time.After(15 * time.Second):
 					// Interval finished, continue to the next loop to do the work again.
+					l.Info("signal controller: interval timer fired, sending next signal",
+						"targetPort", targetPort,
+					)
 				}
 			}
 		}(processCtx, signal.Spec) // Pass the context and spec data to the goroutine.

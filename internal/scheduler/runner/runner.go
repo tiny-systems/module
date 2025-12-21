@@ -237,7 +237,19 @@ func (c *Runner) HasPort(port string) bool {
 func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (res any, err error) {
 	_, port := utils.ParseFullPortName(msg.To)
 
+	c.log.Info("msg handler: received message",
+		"to", msg.To,
+		"from", msg.From,
+		"port", port,
+		"edgeID", msg.EdgeID,
+		"dataSize", len(msg.Data),
+	)
+
 	if port == "" {
+		c.log.Error(fmt.Errorf("input port is empty"), "msg handler: invalid message - empty port",
+			"to", msg.To,
+			"from", msg.From,
+		)
 		return nil, fmt.Errorf("input port is empty")
 	}
 
@@ -258,6 +270,12 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	if nodePort == nil || nodePort.Configuration == nil {
 		// component has no such port
+		c.log.Info("msg handler: port not found or has no configuration, skipping",
+			"port", port,
+			"to", msg.To,
+			"from", msg.From,
+			"nodePortNil", nodePort == nil,
+		)
 		return nil, nil
 	}
 
@@ -272,15 +290,32 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		// from signal controller (outside)
 
 		if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
+			c.log.Error(err, "msg handler: failed to unmarshal signal data",
+				"port", port,
+				"dataSize", len(msg.Data),
+			)
 			return nil, err
 		}
 		portData = portInputData.Interface()
+		c.log.Info("msg handler: processed signal data",
+			"port", port,
+		)
 
 	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
 		// we have edge config
+		c.log.Info("msg handler: applying edge configuration",
+			"port", port,
+			"from", msg.From,
+			"edgeID", msg.EdgeID,
+		)
 
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
+			c.log.Error(err, "msg handler: failed to parse request data payload",
+				"port", port,
+				"from", msg.From,
+				"dataSize", len(msg.Data),
+			)
 			return nil, errors.Wrap(err, "ajson parse requestData payload error")
 		}
 		//
@@ -301,17 +336,34 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 		configurationMap, err := eval.Eval(portConfig.Configuration)
 		if err != nil {
+			c.log.Error(err, "msg handler: failed to evaluate edge configuration",
+				"port", port,
+				"from", msg.From,
+				"edgeID", msg.EdgeID,
+			)
 			return nil, errors.Wrap(err, "eval port edge settings config")
 		}
 		// all good, we can say that's the data for incoming port
 		// adaptive
 		if err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface()); err != nil {
+			c.log.Error(err, "msg handler: failed to decode configuration to port input type",
+				"port", port,
+				"from", msg.From,
+			)
 			return nil, errors.Wrap(err, "map decode from config map to port input type")
 		}
 		portData = portInputData.Interface()
+		c.log.Info("msg handler: edge configuration applied successfully",
+			"port", port,
+			"from", msg.From,
+		)
 
 	} else {
 		// default is the state of a port's config
+		c.log.Info("msg handler: using default port configuration",
+			"port", port,
+			"from", msg.From,
+		)
 		portData = nodePort.Configuration
 	}
 
@@ -378,13 +430,37 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 			}
 		}()
 
+		c.log.Info("msg handler: invoking component handler",
+			"port", port,
+			"node", c.name,
+		)
+
 		resp = c.component.Handle(ctx, c.DataHandler(msgHandler), port, portData)
 
 		if err = utils.CheckForError(resp); err != nil {
+			c.log.Error(err, "msg handler: component handler returned error",
+				"port", port,
+				"node", c.name,
+			)
 			return err
 		}
 		return nil
 	})
+
+	if err != nil {
+		c.log.Error(err, "msg handler: component execution failed",
+			"port", port,
+			"node", c.name,
+			"from", msg.From,
+			"edgeID", msg.EdgeID,
+		)
+	} else {
+		c.log.Info("msg handler: component execution completed",
+			"port", port,
+			"node", c.name,
+			"hasResponse", resp != nil,
+		)
+	}
 
 	c.portErr.Set(port, err)
 	c.portRes.Set(port, resp)
@@ -395,14 +471,24 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Context, outputPort string, outputData any) any {
 
 	return func(outputCtx context.Context, outputPort string, outputData any) any {
-		c.log.Info("component callback handler", "port", outputPort, "node", c.name)
+		c.log.Info("data handler: component output callback",
+			"port", outputPort,
+			"node", c.name,
+			"hasData", outputData != nil,
+		)
 
 		if outputPort == v1alpha1.ReconcilePort {
 			// special case
+			c.log.Info("data handler: processing reconcile port",
+				"node", c.name,
+			)
 			nodeUpdater, _ := outputData.(func(node *v1alpha1.TinyNode) error)
 
-			return c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
+			err := c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
 				if err := c.ReadStatus(&node.Status); err != nil {
+					c.log.Error(err, "data handler: failed to read node status",
+						"node", c.name,
+					)
 					return err
 				}
 				if nodeUpdater == nil {
@@ -410,6 +496,12 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 				}
 				return nodeUpdater(node)
 			})
+			if err != nil {
+				c.log.Error(err, "data handler: failed to patch node",
+					"node", c.name,
+				)
+			}
+			return err
 		}
 
 		u, err := uuid.NewUUID()
@@ -431,10 +523,25 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			c.addSpanPortData(outputSpan, string(outputDataBytes))
 		}
 
+		c.log.Info("data handler: sending to output handler",
+			"port", outputPort,
+			"node", c.name,
+		)
+
 		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler)
 		if err != nil {
+			c.log.Error(err, "data handler: output handler failed",
+				"port", outputPort,
+				"node", c.name,
+			)
 			return err
 		}
+
+		c.log.Info("data handler: output handler completed",
+			"port", outputPort,
+			"node", c.name,
+			"hasResponse", res != nil,
+		)
 		return res
 	}
 
@@ -472,6 +579,13 @@ func (c *Runner) Stop() {
 // sendToEdgeWithRetry sends a message to an edge with infinite retry logic.
 // It only stops retrying if the error is permanent or the context is cancelled.
 func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort, edgeTo string, dataBytes []byte, responseConfig interface{}, handler Handler) (any, error) {
+	c.log.Info("send to edge: starting",
+		"to", edgeTo,
+		"from", fromPort,
+		"edgeID", edge.ID,
+		"dataSize", len(dataBytes),
+	)
+
 	// Configure exponential backoff: 1s -> 2s -> 4s -> ... -> 30s (max)
 	// MaxElapsedTime = 0 means infinite retry
 	b := backoff.NewExponentialBackOff()
@@ -485,6 +599,13 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	operation := func() error {
 		attempt++
 
+		c.log.Info("send to edge: attempt",
+			"to", edgeTo,
+			"from", fromPort,
+			"edgeID", edge.ID,
+			"attempt", attempt,
+		)
+
 		res, err := handler(ctx, &Msg{
 			To:     edgeTo,
 			From:   fromPort,
@@ -496,18 +617,20 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		if err != nil {
 			// Check if this is a permanent error that should not be retried
 			if perrors.IsPermanent(err) {
-				c.log.Error(err, "edge call failed with permanent error, will not retry",
-					"edge", edgeTo,
+				c.log.Error(err, "send to edge: permanent error, will not retry",
+					"to", edgeTo,
 					"from", fromPort,
+					"edgeID", edge.ID,
 					"attempt", attempt,
 				)
 				return backoff.Permanent(err)
 			}
 
 			// Transient error - log and retry
-			c.log.Error(err, "edge call failed, will retry",
-				"edge", edgeTo,
+			c.log.Error(err, "send to edge: transient error, will retry",
+				"to", edgeTo,
 				"from", fromPort,
+				"edgeID", edge.ID,
 				"attempt", attempt,
 			)
 			return err
@@ -515,10 +638,18 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 
 		// Success
 		if attempt > 1 {
-			c.log.Info("edge call succeeded after retries",
-				"edge", edgeTo,
+			c.log.Info("send to edge: succeeded after retries",
+				"to", edgeTo,
 				"from", fromPort,
+				"edgeID", edge.ID,
 				"attempts", attempt,
+			)
+		} else {
+			c.log.Info("send to edge: succeeded",
+				"to", edgeTo,
+				"from", fromPort,
+				"edgeID", edge.ID,
+				"hasResponse", res != nil,
 			)
 		}
 
@@ -531,10 +662,11 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		operation,
 		backoff.WithContext(b, ctx),
 		func(err error, duration time.Duration) {
-			c.log.Info("retrying edge call",
-				"edge", edgeTo,
+			c.log.Info("send to edge: scheduling retry",
+				"to", edgeTo,
 				"from", fromPort,
-				"nextRetry", duration,
+				"edgeID", edge.ID,
+				"nextRetryIn", duration,
 				"error", err.Error(),
 				"attempt", attempt,
 			)
@@ -544,12 +676,19 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	if err != nil {
 		// Check if it's a permanent error
 		if perrors.IsPermanent(err) {
+			c.log.Error(err, "send to edge: failed with permanent error",
+				"to", edgeTo,
+				"from", fromPort,
+				"edgeID", edge.ID,
+				"attempts", attempt,
+			)
 			return nil, err
 		}
 		// Context cancelled
-		c.log.Info("edge retry stopped (context cancelled)",
-			"edge", edgeTo,
+		c.log.Info("send to edge: stopped (context cancelled)",
+			"to", edgeTo,
 			"from", fromPort,
+			"edgeID", edge.ID,
 			"attempts", attempt,
 		)
 		return nil, err
@@ -559,18 +698,38 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 }
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) (any, error) {
+	c.log.Info("output handler: processing output",
+		"port", port,
+		"node", c.name,
+	)
 
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
+		c.log.Error(err, "output handler: failed to marshal output data",
+			"port", port,
+			"node", c.name,
+		)
 		return nil, err
 	}
 
+	c.log.Info("output handler: marshaled data",
+		"port", port,
+		"dataSize", len(dataBytes),
+	)
+
 	if handler == nil {
+		c.log.Info("output handler: no handler provided, skipping",
+			"port", port,
+		)
 		return nil, nil
 	}
 
 	if node, _ := utils.ParseFullPortName(port); node != "" {
 		// we already have full port name, means no need to check edges (useful for input/outputs)
+		c.log.Info("output handler: direct send (full port name)",
+			"port", port,
+			"targetNode", node,
+		)
 		// Use retry logic even for direct calls
 		return c.sendToEdgeWithRetry(ctx, v1alpha1.TinyNodeEdge{}, "", port, dataBytes, nil, handler)
 	}
@@ -594,6 +753,11 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	// unique
 	c.nodeLock.Unlock()
 
+	c.log.Info("output handler: found edges for port",
+		"port", port,
+		"edgeCount", len(edges),
+	)
+
 	// get all edges to connected nodes
 	wg, ctx := errgroup.WithContext(ctx)
 
@@ -612,6 +776,7 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		sourcePort = p
 	}
 
+	matchingEdges := 0
 	for _, e := range edges {
 		var edge = e
 		//
@@ -619,8 +784,15 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			// edge is not configured for this port as source
 			continue
 		}
+		matchingEdges++
 
 		fromPort := utils.GetPortFullName(c.name, port)
+		c.log.Info("output handler: sending to edge",
+			"from", fromPort,
+			"to", edge.To,
+			"edgeID", edge.ID,
+		)
+
 		wg.Go(func() error {
 			// Send to destination with infinite retry
 			res, err := c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
@@ -630,10 +802,22 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 			defer resultLock.Unlock()
 
 			if err != nil {
+				c.log.Error(err, "output handler: edge send failed",
+					"from", fromPort,
+					"to", edge.To,
+					"edgeID", edge.ID,
+				)
 				errors = append(errors, err)
 				// Don't return error - let other edges continue
 				return nil
 			}
+
+			c.log.Info("output handler: edge send completed",
+				"from", fromPort,
+				"to", edge.To,
+				"edgeID", edge.ID,
+				"hasResponse", res != nil,
+			)
 
 			if res != nil {
 				results = append(results, res)
@@ -643,8 +827,21 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		})
 	}
 
+	if matchingEdges == 0 {
+		c.log.Info("output handler: no matching edges for port",
+			"port", port,
+			"node", c.name,
+		)
+	}
+
 	// Wait for ALL edges to complete
 	_ = wg.Wait()
+
+	c.log.Info("output handler: all edges completed",
+		"port", port,
+		"successCount", len(results),
+		"errorCount", len(errors),
+	)
 
 	// Return first non-nil result, or first error if all failed
 	if len(results) > 0 {
@@ -652,6 +849,10 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	}
 
 	if len(errors) > 0 {
+		c.log.Error(errors[0], "output handler: returning first error",
+			"port", port,
+			"totalErrors", len(errors),
+		)
 		return nil, errors[0]
 	}
 

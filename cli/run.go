@@ -312,21 +312,65 @@ var runCmd = &cobra.Command{
 
 		//
 		scheduler = sch.New(func(ctx context.Context, msg *runner.Msg) (any, error) {
-			m, _, err := m.ParseFullName(msg.To)
+			l.Info("message router: received message",
+				"to", msg.To,
+				"from", msg.From,
+				"edgeID", msg.EdgeID,
+				"dataSize", len(msg.Data),
+			)
+
+			targetModule, _, err := m.ParseFullName(msg.To)
 			if err != nil {
+				l.Error(err, "message router: failed to parse destination",
+					"to", msg.To,
+				)
 				return nil, fmt.Errorf("parse destination error: %v", err)
 			}
 
-			if m == moduleInfo.GetNameSanitised() {
+			if targetModule == moduleInfo.GetNameSanitised() {
 				// destination is the current module
-				return scheduler.Handle(ctx, msg)
+				l.Info("message router: routing to local scheduler",
+					"to", msg.To,
+					"module", targetModule,
+				)
+				res, err := scheduler.Handle(ctx, msg)
+				if err != nil {
+					l.Error(err, "message router: local scheduler handle failed",
+						"to", msg.To,
+					)
+				} else {
+					l.Info("message router: local scheduler handle completed",
+						"to", msg.To,
+						"hasResponse", res != nil,
+					)
+				}
+				return res, err
 			}
 
 			// gRPC call with retries
+			l.Info("message router: routing to remote module via grpc",
+				"to", msg.To,
+				"targetModule", targetModule,
+			)
+
 			var resp []byte
+			attempt := 0
 
 			err = backoff.Retry(func() error {
+				attempt++
+				l.Info("message router: grpc call attempt",
+					"to", msg.To,
+					"targetModule", targetModule,
+					"attempt", attempt,
+				)
+
 				resp, err = pool.Handler(ctx, msg)
+				if err != nil {
+					l.Error(err, "message router: grpc call failed",
+						"to", msg.To,
+						"attempt", attempt,
+					)
+				}
 				return err
 
 			}, backoff.WithContext(backoff.NewExponentialBackOff(func(off *backoff.ExponentialBackOff) {
@@ -337,17 +381,40 @@ var runCmd = &cobra.Command{
 
 			}), ctx))
 			if err != nil {
+				l.Error(err, "message router: grpc call failed after retries",
+					"to", msg.To,
+					"totalAttempts", attempt,
+				)
 				return nil, err
 			}
 
+			l.Info("message router: grpc call succeeded",
+				"to", msg.To,
+				"attempts", attempt,
+				"responseSize", len(resp),
+			)
+
 			if msg.Resp == nil {
+				l.Info("message router: returning raw bytes (no response type specified)",
+					"to", msg.To,
+					"bytesLen", len(resp),
+				)
 				return resp, nil
 			}
 
 			respData := reflect.New(reflect.TypeOf(msg.Resp)).Elem()
 			if err = json.Unmarshal(resp, respData.Addr().Interface()); err != nil {
+				l.Error(err, "message router: failed to unmarshal response",
+					"to", msg.To,
+					"respType", fmt.Sprintf("%T", msg.Resp),
+					"rawBytes", string(resp),
+				)
 				return nil, err
 			}
+			l.Info("message router: response unmarshaled successfully",
+				"to", msg.To,
+				"respType", fmt.Sprintf("%T", respData.Interface()),
+			)
 			return respData.Interface(), err
 		}).
 			SetLogger(l).
