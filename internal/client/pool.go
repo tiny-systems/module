@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
@@ -12,6 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 type Pool interface {
@@ -56,75 +59,30 @@ func (p *AddressPool) SetLogger(l logr.Logger) *AddressPool {
 }
 
 func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error) {
-	p.log.Info("grpc client: handling outgoing message",
-		"to", msg.To,
-		"from", msg.From,
-		"edgeID", msg.EdgeID,
-		"dataSize", len(msg.Data),
-	)
-
 	moduleName, _, err := module2.ParseFullName(msg.To)
 	if err != nil {
-		p.log.Error(err, "grpc client: failed to parse module name from destination",
-			"to", msg.To,
-		)
 		return nil, err
 	}
 
 	addr, ok := p.addressTable.Get(moduleName)
 	if !ok {
-		p.log.Error(fmt.Errorf("module address unknown"), "grpc client: module not registered",
-			"module", moduleName,
-			"to", msg.To,
-		)
 		return nil, fmt.Errorf("%s module address is unknown", moduleName)
 	}
 
-	p.log.Info("grpc client: resolved module address",
-		"module", moduleName,
-		"addr", addr,
-	)
-
 	client, err := p.getClient(ctx, addr)
 	if err != nil {
-		p.log.Error(err, "grpc client: failed to get client connection",
-			"addr", addr,
-			"module", moduleName,
-		)
 		return nil, err
 	}
 
-	// sending request using gRPC
-	p.log.Info("grpc client: sending message request",
-		"addr", addr,
-		"to", msg.To,
-		"from", msg.From,
-		"edgeID", msg.EdgeID,
-	)
-
-	var resp *module.MessageResponse
-
-	resp, err = client.Message(ctx, &module.MessageRequest{
+	resp, err := client.Message(ctx, &module.MessageRequest{
 		From:    msg.From,
 		Payload: msg.Data,
 		EdgeID:  msg.EdgeID,
 		To:      msg.To,
 	})
 	if err != nil {
-		p.log.Error(err, "grpc client: message request failed",
-			"to", msg.To,
-			"from", msg.From,
-			"addr", addr,
-			"edgeID", msg.EdgeID,
-		)
 		return nil, err
 	}
-
-	p.log.Info("grpc client: message request completed",
-		"to", msg.To,
-		"addr", addr,
-		"responseSize", len(resp.Data),
-	)
 
 	return resp.Data, nil
 }
@@ -136,42 +94,31 @@ func (p *AddressPool) Start(ctx context.Context) error {
 }
 
 func (p *AddressPool) getClient(_ context.Context, addr string) (module.ModuleServiceClient, error) {
-
-	client, ok := p.clients.Get(addr)
-	if ok {
-		p.log.Info("grpc client: reusing existing connection",
-			"addr", addr,
-		)
+	if client, ok := p.clients.Get(addr); ok {
 		return client, nil
 	}
 
-	p.log.Info("grpc client: creating new connection",
-		"addr", addr,
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second, // ping every 10s if idle
+			Timeout:             3 * time.Second,  // wait 3s for ping ack
+			PermitWithoutStream: true,             // ping even without active RPCs
+		}),
 	)
-
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
 	if err != nil {
-		p.log.Error(err, "grpc client: failed to create connection",
-			"addr", addr,
-		)
+		p.log.Error(err, "grpc client: connection failed", "addr", addr)
 		return nil, err
 	}
 
-	p.log.Info("grpc client: connection created successfully",
-		"addr", addr,
-	)
-
 	p.errGroup.Go(func() error {
 		<-p.runCtx.Done()
-
-		p.log.Info("grpc client: closing connection on shutdown",
-			"addr", addr,
-		)
 		_ = conn.Close()
 		return nil
 	})
 
-	client = module.NewModuleServiceClient(conn)
+	client := module.NewModuleServiceClient(conn)
 	p.clients.Set(addr, client)
 	return client, nil
 }

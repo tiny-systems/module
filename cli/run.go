@@ -347,52 +347,36 @@ var runCmd = &cobra.Command{
 				return res, err
 			}
 
-			// gRPC call with retries
-			l.Info("message router: routing to remote module via grpc",
-				"to", msg.To,
-				"targetModule", targetModule,
-			)
-
-			var resp []byte
-			attempt := 0
-
-			err = backoff.Retry(func() error {
-				attempt++
-				l.Info("message router: grpc call attempt",
-					"to", msg.To,
-					"targetModule", targetModule,
-					"attempt", attempt,
-				)
-
-				resp, err = pool.Handler(ctx, msg)
-				if err != nil {
-					l.Error(err, "message router: grpc call failed",
-						"to", msg.To,
-						"attempt", attempt,
-					)
+			// gRPC call - fast path first, retry on failure
+			resp, err := pool.Handler(ctx, msg)
+			if err == nil {
+				// Success on first try
+				if msg.Resp == nil {
+					return resp, nil
 				}
-				return err
-
-			}, backoff.WithContext(backoff.NewExponentialBackOff(func(off *backoff.ExponentialBackOff) {
-
-				off.Multiplier = 1.1               // do not slow down fast
-				off.MaxElapsedTime = 0             // never give up
-				off.MaxInterval = 30 * time.Second // max interval not too long
-
-			}), ctx))
-			if err != nil {
-				l.Error(err, "message router: grpc call failed after retries",
-					"to", msg.To,
-					"totalAttempts", attempt,
-				)
-				return nil, err
+				respData := reflect.New(reflect.TypeOf(msg.Resp)).Elem()
+				if err = json.Unmarshal(resp, respData.Addr().Interface()); err != nil {
+					return nil, err
+				}
+				return respData.Interface(), nil
 			}
 
-			l.Info("message router: grpc call succeeded",
-				"to", msg.To,
-				"attempts", attempt,
-				"responseSize", len(resp),
-			)
+			// Failed - enter retry loop
+			l.Error(err, "message router: grpc call failed, starting retries", "to", msg.To)
+
+			err = backoff.Retry(func() error {
+				resp, err = pool.Handler(ctx, msg)
+				return err
+			}, backoff.WithContext(backoff.NewExponentialBackOff(func(off *backoff.ExponentialBackOff) {
+				off.Multiplier = 1.1
+				off.MaxElapsedTime = 0
+				off.MaxInterval = 30 * time.Second
+			}), ctx))
+
+			if err != nil {
+				l.Error(err, "message router: grpc retry failed", "to", msg.To)
+				return nil, err
+			}
 
 			if msg.Resp == nil {
 				l.Info("message router: returning raw bytes (no response type specified)",
