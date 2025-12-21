@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/watch"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"os"
 	"reflect"
@@ -53,6 +54,7 @@ func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
 func NewManagerFromConfig(config *rest.Config, ns string) (*Manager, error) {
 
 	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
 	_ = v1alpha1.AddToScheme(scheme)
 
 	kubeClient, err := client.NewWithWatch(config, client.Options{Scheme: scheme})
