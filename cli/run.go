@@ -222,8 +222,8 @@ var runCmd = &cobra.Command{
 
 		elector, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
 			Lock:            lock,
-			LeaseDuration:   5 * time.Second,
-			RenewDeadline:   3 * time.Second,
+			LeaseDuration:   15 * time.Second,
+			RenewDeadline:   10 * time.Second,
 			RetryPeriod:     2 * time.Second,
 			Callbacks:       leaderCallbacks,
 			ReleaseOnCancel: true,
