@@ -18,17 +18,18 @@ package controller
 
 import (
 	"context"
+	"time"
+
 	clientpool "github.com/tiny-systems/module/internal/client"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sync/atomic"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sync/atomic"
 
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
@@ -56,54 +57,56 @@ type TinyModuleReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-
-	if !r.IsLeader.Load() {
-		return reconcile.Result{}, nil
-	}
-	// only leaders update
 	l := log.FromContext(ctx)
 
 	instance := &operatorv1alpha1.TinyModule{}
-	err := r.Get(ctx, req.NamespacedName, instance)
-	if err != nil {
-		l.Error(err, "get tinymodule error")
+	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 		if errors.IsNotFound(err) {
 			r.ClientPool.Deregister(req.Name)
 			return reconcile.Result{}, nil
 		}
-		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
 
+	// Remote module - all pods register to enable sending messages
 	if req.Name != r.Module.GetNameSanitised() {
-		// not us, put into table
-		r.ClientPool.Register(req.Name, instance.Status.Addr)
-	} else {
-
-		instance.Status.Addr = r.Module.Addr
-		instance.Status.Version = r.Module.Version
-		instance.Status.Name = r.Module.Name
-
-		components := registry.Get()
-		statusComponents := make([]operatorv1alpha1.TinyModuleComponentStatus, len(components))
-		for i, cmp := range components {
-			info := cmp.GetInfo()
-			statusComponents[i] = operatorv1alpha1.TinyModuleComponentStatus{
-				Name:        info.Name,
-				Description: info.Description,
-				Info:        info.Info,
-				Tags:        info.Tags,
-			}
+		if instance.Status.Addr != "" {
+			r.ClientPool.Register(req.Name, instance.Status.Addr)
 		}
-		instance.Status.Components = statusComponents
+		return ctrl.Result{}, nil
+	}
 
-		err = r.Status().Update(ctx, instance)
-		if err != nil {
-			l.Error(err, "status update error")
-			return reconcile.Result{}, err
+	// Own module - only leaders update status
+	if !r.IsLeader.Load() {
+		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	instance.Status.Addr = r.Module.Addr
+	instance.Status.Version = r.Module.Version
+	instance.Status.Name = r.Module.Name
+	instance.Status.Components = r.buildComponentStatus()
+
+	if err := r.Status().Update(ctx, instance); err != nil {
+		l.Error(err, "failed to update module status")
+		return reconcile.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *TinyModuleReconciler) buildComponentStatus() []operatorv1alpha1.TinyModuleComponentStatus {
+	components := registry.Get()
+	status := make([]operatorv1alpha1.TinyModuleComponentStatus, len(components))
+	for i, cmp := range components {
+		info := cmp.GetInfo()
+		status[i] = operatorv1alpha1.TinyModuleComponentStatus{
+			Name:        info.Name,
+			Description: info.Description,
+			Info:        info.Info,
+			Tags:        info.Tags,
 		}
 	}
-	return ctrl.Result{}, nil
+	return status
 }
 
 // SetupWithManager sets up the controller with the Manager.
