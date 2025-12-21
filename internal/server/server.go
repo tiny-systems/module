@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"net"
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
@@ -13,8 +16,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
-	"net"
 )
 
 // Server receive api requests from other modules and sends it to scheduler
@@ -39,42 +42,29 @@ func (s *server) Start(globalCtx context.Context, handler runner.Handler, listen
 
 	wg, globalCtx := errgroup.WithContext(globalCtx)
 
-	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	srv := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    10 * time.Second, // ping client every 10s if idle
+			Timeout: 3 * time.Second,  // wait 3s for ping ack
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second, // min time between client pings
+			PermitWithoutStream: true,            // allow pings without active RPCs
+		}),
+	)
 	grpc_health_v1.RegisterHealthServer(srv, health.NewChecker())
 
-	//
 	modulepb.RegisterModuleServiceServer(srv, module.NewService(func(ctx context.Context, req *modulepb.MessageRequest) (*modulepb.MessageResponse, error) {
-		// incoming request from gRPC
-		s.log.Info("grpc server: received message request",
-			"to", req.To,
-			"from", req.From,
-			"edgeID", req.EdgeID,
-			"payloadSize", len(req.Payload),
-		)
-
 		if ctx.Err() != nil {
-			s.log.Error(ctx.Err(), "grpc server: request context already cancelled",
-				"to", req.To,
-				"from", req.From,
-			)
 			return nil, ctx.Err()
 		}
 		if globalCtx.Err() != nil {
-			s.log.Error(globalCtx.Err(), "grpc server: global context cancelled (server shutting down)",
-				"to", req.To,
-				"from", req.From,
-			)
 			return nil, globalCtx.Err()
 		}
 
 		ctx, cancel := mergeContext(ctx, globalCtx)
 		defer cancel()
-
-		s.log.Info("grpc server: forwarding to handler",
-			"to", req.To,
-			"from", req.From,
-			"edgeID", req.EdgeID,
-		)
 
 		res, err := handler(ctx, &runner.Msg{
 			EdgeID: req.EdgeID,
@@ -82,51 +72,24 @@ func (s *server) Start(globalCtx context.Context, handler runner.Handler, listen
 			Data:   req.Payload,
 			From:   req.From,
 		})
-
 		if err != nil {
-			s.log.Error(err, "grpc server: handler returned error",
-				"to", req.To,
-				"from", req.From,
-				"edgeID", req.EdgeID,
-			)
 			return nil, err
 		}
 
 		if ctx.Err() != nil {
-			s.log.Error(ctx.Err(), "grpc server: context cancelled after handler",
-				"to", req.To,
-				"from", req.From,
-			)
 			return nil, ctx.Err()
 		}
 
 		if resData, ok := res.([]byte); ok {
-			s.log.Info("grpc server: returning byte response",
-				"to", req.To,
-				"responseSize", len(resData),
-			)
-			return &modulepb.MessageResponse{
-				Data: resData,
-			}, err
+			return &modulepb.MessageResponse{Data: resData}, nil
 		}
 
 		data, err := json.Marshal(res)
 		if err != nil {
-			s.log.Error(err, "grpc server: failed to marshal response",
-				"to", req.To,
-				"from", req.From,
-			)
 			return nil, err
 		}
 
-		s.log.Info("grpc server: returning json response",
-			"to", req.To,
-			"responseSize", len(data),
-		)
-
-		return &modulepb.MessageResponse{
-			Data: data,
-		}, nil
+		return &modulepb.MessageResponse{Data: data}, nil
 	}))
 
 	reflection.Register(srv)
