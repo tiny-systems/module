@@ -28,10 +28,17 @@ type AddressPool struct {
 }
 
 func (p *AddressPool) Register(moduleName, addr string) {
+	p.log.Info("address pool: registering module",
+		"module", moduleName,
+		"addr", addr,
+	)
 	p.addressTable.Set(moduleName, addr)
 }
 
 func (p *AddressPool) Deregister(moduleName string) {
+	p.log.Info("address pool: deregistering module",
+		"module", moduleName,
+	)
 	p.addressTable.Remove(moduleName)
 }
 
