@@ -576,161 +576,88 @@ func (c *Runner) Stop() {
 	close(c.closeCh)
 }
 
-// sendToEdgeWithRetry sends a message to an edge with infinite retry logic.
-// It only stops retrying if the error is permanent or the context is cancelled.
+// sendToEdgeWithRetry sends a message to an edge with retry logic.
+// It only retries on transient errors. Permanent errors and context cancellation stop immediately.
 func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort, edgeTo string, dataBytes []byte, responseConfig interface{}, handler Handler) (any, error) {
-	c.log.Info("send to edge: starting",
-		"to", edgeTo,
-		"from", fromPort,
-		"edgeID", edge.ID,
-		"dataSize", len(dataBytes),
-	)
-
-	// Configure exponential backoff: 1s -> 2s -> 4s -> ... -> 30s (max)
-	// MaxElapsedTime = 0 means infinite retry
-	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = 1 * time.Second
-	b.MaxInterval = 30 * time.Second
-	b.MaxElapsedTime = 0 // Never stop retrying
-
-	var result any
-	attempt := 0
-
-	operation := func() error {
-		attempt++
-
-		c.log.Info("send to edge: attempt",
-			"to", edgeTo,
-			"from", fromPort,
-			"edgeID", edge.ID,
-			"attempt", attempt,
-		)
-
-		res, err := handler(ctx, &Msg{
-			To:     edgeTo,
-			From:   fromPort,
-			EdgeID: edge.ID,
-			Data:   dataBytes,
-			Resp:   responseConfig,
-		})
-
-		if err != nil {
-			// Check if this is a permanent error that should not be retried
-			if perrors.IsPermanent(err) {
-				c.log.Error(err, "send to edge: permanent error, will not retry",
-					"to", edgeTo,
-					"from", fromPort,
-					"edgeID", edge.ID,
-					"attempt", attempt,
-				)
-				return backoff.Permanent(err)
-			}
-
-			// Transient error - log and retry
-			c.log.Error(err, "send to edge: transient error, will retry",
-				"to", edgeTo,
-				"from", fromPort,
-				"edgeID", edge.ID,
-				"attempt", attempt,
-			)
-			return err
-		}
-
-		// Success
-		if attempt > 1 {
-			c.log.Info("send to edge: succeeded after retries",
-				"to", edgeTo,
-				"from", fromPort,
-				"edgeID", edge.ID,
-				"attempts", attempt,
-			)
-		} else {
-			c.log.Info("send to edge: succeeded",
-				"to", edgeTo,
-				"from", fromPort,
-				"edgeID", edge.ID,
-				"hasResponse", res != nil,
-			)
-		}
-
-		result = res
-		return nil
+	msg := &Msg{
+		To:     edgeTo,
+		From:   fromPort,
+		EdgeID: edge.ID,
+		Data:   dataBytes,
+		Resp:   responseConfig,
 	}
 
-	// Retry until success, permanent error, or context cancelled
-	err := backoff.RetryNotify(
-		operation,
-		backoff.WithContext(b, ctx),
-		func(err error, duration time.Duration) {
-			c.log.Info("send to edge: scheduling retry",
-				"to", edgeTo,
-				"from", fromPort,
-				"edgeID", edge.ID,
-				"nextRetryIn", duration,
-				"error", err.Error(),
-				"attempt", attempt,
-			)
-		},
-	)
+	// Fast path: try once without retry overhead
+	res, err := handler(ctx, msg)
+	if err == nil {
+		return res, nil
+	}
 
-	if err != nil {
-		// Check if it's a permanent error
-		if perrors.IsPermanent(err) {
-			c.log.Error(err, "send to edge: failed with permanent error",
-				"to", edgeTo,
-				"from", fromPort,
-				"edgeID", edge.ID,
-				"attempts", attempt,
-			)
-			return nil, err
-		}
-		// Context cancelled
-		c.log.Info("send to edge: stopped (context cancelled)",
+	// Check if error is permanent - don't retry
+	if perrors.IsPermanent(err) {
+		c.log.Error(err, "send to edge: permanent error",
 			"to", edgeTo,
-			"from", fromPort,
 			"edgeID", edge.ID,
-			"attempts", attempt,
 		)
 		return nil, err
 	}
 
+	// Context cancelled - don't retry
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// Transient error - enter retry loop
+	c.log.Error(err, "send to edge: transient error, starting retries",
+		"to", edgeTo,
+		"edgeID", edge.ID,
+	)
+
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = 1 * time.Second
+	b.MaxInterval = 30 * time.Second
+	b.MaxElapsedTime = 0
+
+	var result any
+	retryErr := backoff.Retry(func() error {
+		res, err := handler(ctx, msg)
+		if err != nil {
+			if perrors.IsPermanent(err) {
+				return backoff.Permanent(err)
+			}
+			return err
+		}
+		result = res
+		return nil
+	}, backoff.WithContext(b, ctx))
+
+	if retryErr != nil {
+		c.log.Error(retryErr, "send to edge: retry failed",
+			"to", edgeTo,
+			"edgeID", edge.ID,
+		)
+		return nil, retryErr
+	}
+
+	c.log.Info("send to edge: succeeded after retry",
+		"to", edgeTo,
+		"edgeID", edge.ID,
+	)
 	return result, nil
 }
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) (any, error) {
-	c.log.Info("output handler: processing output",
-		"port", port,
-		"node", c.name,
-	)
-
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
-		c.log.Error(err, "output handler: failed to marshal output data",
-			"port", port,
-			"node", c.name,
-		)
+		c.log.Error(err, "output handler: marshal failed", "port", port)
 		return nil, err
 	}
 
-	c.log.Info("output handler: marshaled data",
-		"port", port,
-		"dataSize", len(dataBytes),
-	)
-
 	if handler == nil {
-		c.log.Info("output handler: no handler provided, skipping",
-			"port", port,
-		)
 		return nil, nil
 	}
 
 	if node, _ := utils.ParseFullPortName(port); node != "" {
-		// we already have full port name, means no need to check edges (useful for input/outputs)
-		c.log.Info("output handler: direct send (full port name)",
-			"port", port,
-			"targetNode", node,
-		)
-		// Use retry logic even for direct calls
 		return c.sendToEdgeWithRetry(ctx, v1alpha1.TinyNodeEdge{}, "", port, dataBytes, nil, handler)
 	}
 
@@ -750,15 +677,8 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		edges = append(edges, e)
 	}
 
-	// unique
 	c.nodeLock.Unlock()
 
-	c.log.Info("output handler: found edges for port",
-		"port", port,
-		"edgeCount", len(edges),
-	)
-
-	// get all edges to connected nodes
 	wg, ctx := errgroup.WithContext(ctx)
 
 	var (
@@ -768,94 +688,45 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	)
 
 	var sourcePort m.Port
-
 	for _, p := range c.getPorts() {
-		if p.Name != port {
-			continue
+		if p.Name == port {
+			sourcePort = p
+			break
 		}
-		sourcePort = p
 	}
 
-	matchingEdges := 0
+	fromPort := utils.GetPortFullName(c.name, port)
 	for _, e := range edges {
-		var edge = e
-		//
+		edge := e
 		if edge.Port != port {
-			// edge is not configured for this port as source
 			continue
 		}
-		matchingEdges++
-
-		fromPort := utils.GetPortFullName(c.name, port)
-		c.log.Info("output handler: sending to edge",
-			"from", fromPort,
-			"to", edge.To,
-			"edgeID", edge.ID,
-		)
 
 		wg.Go(func() error {
-			// Send to destination with infinite retry
 			res, err := c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
 
-			// Collect results and errors
 			resultLock.Lock()
 			defer resultLock.Unlock()
 
 			if err != nil {
-				c.log.Error(err, "output handler: edge send failed",
-					"from", fromPort,
-					"to", edge.To,
-					"edgeID", edge.ID,
-				)
 				errors = append(errors, err)
-				// Don't return error - let other edges continue
 				return nil
 			}
-
-			c.log.Info("output handler: edge send completed",
-				"from", fromPort,
-				"to", edge.To,
-				"edgeID", edge.ID,
-				"hasResponse", res != nil,
-			)
-
 			if res != nil {
 				results = append(results, res)
 			}
-
 			return nil
 		})
 	}
 
-	if matchingEdges == 0 {
-		c.log.Info("output handler: no matching edges for port",
-			"port", port,
-			"node", c.name,
-		)
-	}
-
-	// Wait for ALL edges to complete
 	_ = wg.Wait()
 
-	c.log.Info("output handler: all edges completed",
-		"port", port,
-		"successCount", len(results),
-		"errorCount", len(errors),
-	)
-
-	// Return first non-nil result, or first error if all failed
 	if len(results) > 0 {
 		return results[0], nil
 	}
-
 	if len(errors) > 0 {
-		c.log.Error(errors[0], "output handler: returning first error",
-			"port", port,
-			"totalErrors", len(errors),
-		)
 		return nil, errors[0]
 	}
-
 	return nil, nil
 }
 
