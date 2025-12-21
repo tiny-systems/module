@@ -64,7 +64,7 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	l := log.FromContext(ctx)
 
 	instance := &operatorv1alpha1.TinyModule{}
-	err := r.Get(context.Background(), req.NamespacedName, instance)
+	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
 		l.Error(err, "get tinymodule error")
 		if errors.IsNotFound(err) {
@@ -97,7 +97,7 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		instance.Status.Components = statusComponents
 
-		err = r.Status().Update(context.Background(), instance)
+		err = r.Status().Update(ctx, instance)
 		if err != nil {
 			l.Error(err, "status update error")
 			return reconcile.Result{}, err

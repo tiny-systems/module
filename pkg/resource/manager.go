@@ -464,8 +464,9 @@ func (m Manager) PatchNode(ctx context.Context, node v1alpha1.TinyNode, updater 
 	}
 
 	log.Warn().Msgf("patching node %s", node.Name)
-	//spew.Dump(node.Status.Ports)
 
+	// Ensure TypeMeta is set on the base object for MergeFrom to work correctly
+	node.TypeMeta = findNode.TypeMeta
 	err := m.client.Status().Patch(ctx, findNode, client.MergeFrom(&node))
 	if err != nil {
 		log.Error().Err(err).Msgf("path error")

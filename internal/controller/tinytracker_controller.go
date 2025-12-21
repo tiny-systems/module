@@ -64,7 +64,7 @@ func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	t := &operatorv1alpha1.TinyTracker{}
 
-	err := r.Get(context.Background(), req.NamespacedName, t)
+	err := r.Get(ctx, req.NamespacedName, t)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
