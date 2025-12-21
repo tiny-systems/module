@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/sync/errgroup"
+	"io"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	"k8s.io/klog/v2"
 	"net"
 	"os"
 	"reflect"
@@ -97,6 +99,9 @@ var runCmd = &cobra.Command{
 				l.Info("recovered", "from", r)
 			}
 		}()
+
+		// Suppress klog errors from client-go leader election
+		klog.SetOutput(io.Discard)
 
 		l.Info("starting")
 
