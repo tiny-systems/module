@@ -215,25 +215,33 @@ func TestRunner_sendToEdgeWithRetry_ExponentialBackoff(t *testing.T) {
 		t.Fatalf("Expected 4 attempts, got %d", len(callTimes))
 	}
 
-	// Check that intervals are increasing (exponential backoff)
+	// With fast path optimization:
+	// - Call 0: fast path (immediate)
+	// - Call 1: first retry in backoff loop (immediate - backoff.Retry tries once before waiting)
+	// - Call 2: after InitialInterval (~1s) backoff
+	// - Call 3: after next backoff interval
+	//
+	// So only intervals[1] and intervals[2] should show backoff delays
 	intervals := []time.Duration{
 		callTimes[1].Sub(callTimes[0]),
 		callTimes[2].Sub(callTimes[1]),
 		callTimes[3].Sub(callTimes[2]),
 	}
 
-	// Verify backoff is happening (each interval should be at least 500ms)
-	// and intervals are generally increasing
-	for i, interval := range intervals {
-		if interval < 500*time.Millisecond {
-			t.Errorf("Retry %d: interval = %v, expected at least 500ms (exponential backoff)", i+1, interval)
+	// First interval can be very small (fast path to first retry attempt)
+	// Second and third intervals should show backoff (at least 500ms, typically ~1s)
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i] < 500*time.Millisecond {
+			t.Errorf("Retry %d: interval = %v, expected at least 500ms (exponential backoff)", i+1, intervals[i])
 		}
 	}
 
-	// Verify general trend: later intervals should be longer
-	// (allowing for jitter, just check second > first or third > first)
-	if intervals[1] < intervals[0] && intervals[2] < intervals[0] {
-		t.Error("Backoff intervals are not increasing as expected")
+	// Both backoff intervals should be reasonable (backoff library adds jitter,
+	// so we just verify they're in expected range, not strictly increasing)
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i] > 5*time.Second {
+			t.Errorf("Retry %d: interval = %v, unexpectedly long", i+1, intervals[i])
+		}
 	}
 }
 
