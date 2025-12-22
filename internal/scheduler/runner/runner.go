@@ -351,23 +351,21 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	err = errorpanic.Wrap(func() error {
 		// track busy edge only if tracker is on
-		if c.tracker.Active(c.projectName) {
-			ticker := time.NewTicker(time.Second * 3)
-			defer ticker.Stop()
+		ticker := time.NewTicker(time.Second * 3)
+		defer ticker.Stop()
 
-			c.setGauge(time.Now().Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
+		c.setGauge(time.Now().Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
 
-			go func() {
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case t := <-ticker.C:
-						c.setGauge(t.Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
-					}
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case t := <-ticker.C:
+					c.setGauge(t.Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
 				}
-			}()
-		}
+			}
+		}()
 
 		resp = c.component.Handle(ctx, c.DataHandler(msgHandler), port, portData)
 		return utils.CheckForError(resp)
