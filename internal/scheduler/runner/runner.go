@@ -17,6 +17,7 @@ import (
 	m "github.com/tiny-systems/module/module"
 	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/evaluator"
+	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -69,7 +70,10 @@ type Runner struct {
 	portRes   cmap.ConcurrentMap[string, any]
 	portErr   cmap.ConcurrentMap[string, error]
 	portNonce cmap.ConcurrentMap[string, string]
-	//
+
+	// busy edge tracking (optimized - gauge created once)
+	busyEdges     cmap.ConcurrentMap[string, struct{}]
+	gaugeInitOnce sync.Once
 }
 
 const FromSignal = "signal"
@@ -89,8 +93,9 @@ func NewRunner(component m.Component) *Runner {
 		portErr: cmap.New[error](),
 		// last port message nonce
 		portNonce: cmap.New[string](),
+		// busy edge tracking
+		busyEdges: cmap.New[struct{}](),
 
-		//
 		closeCh: make(chan struct{}),
 	}
 }
@@ -347,6 +352,10 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		inputData, _ := json.Marshal(portData)
 		c.addSpanPortData(inputSpan, string(inputData))
 	}
+
+	// track busy edge
+	c.setBusyEdge(msg.EdgeID)
+	defer c.clearBusyEdge(msg.EdgeID)
 
 	var resp any
 
@@ -622,4 +631,50 @@ func (c *Runner) addSpanError(span trace.Span, err error) {
 func (c *Runner) addSpanPortData(span trace.Span, data string) {
 	span.AddEvent("data",
 		trace.WithAttributes(attribute.String("payload", data)))
+}
+
+// initGauge initializes the busy edge gauge once
+func (c *Runner) initGauge() {
+	c.gaugeInitOnce.Do(func() {
+		gauge, err := c.meter.Int64ObservableGauge(string(metrics.MetricEdgeBusy),
+			metric.WithUnit("1"),
+		)
+		if err != nil {
+			c.log.Error(err, "failed to create busy edge gauge")
+			return
+		}
+
+		_, err = c.meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+			for item := range c.busyEdges.IterBuffered() {
+				o.ObserveInt64(gauge, 1,
+					metric.WithAttributes(
+						attribute.String("element", item.Key),
+						attribute.String("flowID", c.flowName),
+						attribute.String("projectID", c.projectName),
+					))
+			}
+			return nil
+		}, gauge)
+
+		if err != nil {
+			c.log.Error(err, "failed to register busy edge gauge callback")
+		}
+	})
+}
+
+// setBusyEdge marks an edge as busy
+func (c *Runner) setBusyEdge(edgeID string) {
+	if edgeID == "" {
+		return
+	}
+	c.initGauge()
+	c.busyEdges.Set(edgeID, struct{}{})
+}
+
+// clearBusyEdge removes an edge from the busy set
+func (c *Runner) clearBusyEdge(edgeID string) {
+	if edgeID == "" {
+		return
+	}
+	c.busyEdges.Remove(edgeID)
 }

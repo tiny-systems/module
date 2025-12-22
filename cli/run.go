@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/zerologr"
 	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
@@ -347,59 +346,21 @@ var runCmd = &cobra.Command{
 				return res, err
 			}
 
-			// gRPC call - fast path first, retry on failure
+			// gRPC call (retry handled by runner.go sendToEdgeWithRetry)
 			resp, err := pool.Handler(ctx, msg)
-			if err == nil {
-				// Success on first try
-				if msg.Resp == nil {
-					return resp, nil
-				}
-				respData := reflect.New(reflect.TypeOf(msg.Resp)).Elem()
-				if err = json.Unmarshal(resp, respData.Addr().Interface()); err != nil {
-					return nil, err
-				}
-				return respData.Interface(), nil
-			}
-
-			// Failed - enter retry loop
-			l.Error(err, "message router: grpc call failed, starting retries", "to", msg.To)
-
-			err = backoff.Retry(func() error {
-				resp, err = pool.Handler(ctx, msg)
-				return err
-			}, backoff.WithContext(backoff.NewExponentialBackOff(func(off *backoff.ExponentialBackOff) {
-				off.Multiplier = 1.1
-				off.MaxElapsedTime = 0
-				off.MaxInterval = 30 * time.Second
-			}), ctx))
-
 			if err != nil {
-				l.Error(err, "message router: grpc retry failed", "to", msg.To)
 				return nil, err
 			}
 
 			if msg.Resp == nil {
-				l.Info("message router: returning raw bytes (no response type specified)",
-					"to", msg.To,
-					"bytesLen", len(resp),
-				)
 				return resp, nil
 			}
 
 			respData := reflect.New(reflect.TypeOf(msg.Resp)).Elem()
 			if err = json.Unmarshal(resp, respData.Addr().Interface()); err != nil {
-				l.Error(err, "message router: failed to unmarshal response",
-					"to", msg.To,
-					"respType", fmt.Sprintf("%T", msg.Resp),
-					"rawBytes", string(resp),
-				)
 				return nil, err
 			}
-			l.Info("message router: response unmarshaled successfully",
-				"to", msg.To,
-				"respType", fmt.Sprintf("%T", respData.Interface()),
-			)
-			return respData.Interface(), err
+			return respData.Interface(), nil
 		}).
 			SetLogger(l).
 			SetMeter(meter).
