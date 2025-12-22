@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog/log"
 	"github.com/spyzhov/ajson"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -18,7 +17,6 @@ import (
 	m "github.com/tiny-systems/module/module"
 	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/evaluator"
-	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -195,7 +193,7 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 			}
 			portStatus.Configuration = confData
 		} else {
-			log.Warn().Str("port", np.Name).Str("node", c.name).Msg("configuration is nil")
+			c.log.Info("ReadStatus: port configuration is nil", "port", np.Name, "node", c.name)
 		}
 
 		status.Ports = append(status.Ports, portStatus)
@@ -236,27 +234,13 @@ func (c *Runner) HasPort(port string) bool {
 // applies port config for the given port if any
 func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (res any, err error) {
 	_, port := utils.ParseFullPortName(msg.To)
-
-	c.log.Info("msg handler: received message",
-		"to", msg.To,
-		"from", msg.From,
-		"port", port,
-		"edgeID", msg.EdgeID,
-		"dataSize", len(msg.Data),
-	)
-
 	if port == "" {
-		c.log.Error(fmt.Errorf("input port is empty"), "msg handler: invalid message - empty port",
-			"to", msg.To,
-			"from", msg.From,
-		)
 		return nil, fmt.Errorf("input port is empty")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer cancel()
-		// cancels all ongoing requests
 		<-c.closeCh
 	}()
 
@@ -269,13 +253,6 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	}
 
 	if nodePort == nil || nodePort.Configuration == nil {
-		// component has no such port
-		c.log.Info("msg handler: port not found or has no configuration, skipping",
-			"port", port,
-			"to", msg.To,
-			"from", msg.From,
-			"nodePortNil", nodePort == nil,
-		)
 		return nil, nil
 	}
 
@@ -287,35 +264,14 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
 
 	if msg.From == FromSignal {
-		// from signal controller (outside)
-
 		if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
-			c.log.Error(err, "msg handler: failed to unmarshal signal data",
-				"port", port,
-				"dataSize", len(msg.Data),
-			)
 			return nil, err
 		}
 		portData = portInputData.Interface()
-		c.log.Info("msg handler: processed signal data",
-			"port", port,
-		)
 
 	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
-		// we have edge config
-		c.log.Info("msg handler: applying edge configuration",
-			"port", port,
-			"from", msg.From,
-			"edgeID", msg.EdgeID,
-		)
-
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
-			c.log.Error(err, "msg handler: failed to parse request data payload",
-				"port", port,
-				"from", msg.From,
-				"dataSize", len(msg.Data),
-			)
 			return nil, errors.Wrap(err, "ajson parse requestData payload error")
 		}
 		//
@@ -344,26 +300,12 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 			return nil, errors.Wrap(err, "eval port edge settings config")
 		}
 		// all good, we can say that's the data for incoming port
-		// adaptive
 		if err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface()); err != nil {
-			c.log.Error(err, "msg handler: failed to decode configuration to port input type",
-				"port", port,
-				"from", msg.From,
-			)
 			return nil, errors.Wrap(err, "map decode from config map to port input type")
 		}
 		portData = portInputData.Interface()
-		c.log.Info("msg handler: edge configuration applied successfully",
-			"port", port,
-			"from", msg.From,
-		)
-
 	} else {
 		// default is the state of a port's config
-		c.log.Info("msg handler: using default port configuration",
-			"port", port,
-			"from", msg.From,
-		)
 		portData = nodePort.Configuration
 	}
 
@@ -380,8 +322,6 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		c.portMsg.Set(port, portData)
 		c.portNonce.Set(port, msg.Nonce)
 	}
-
-	c.log.Info("exec component handler", "msg", msg)
 
 	u, err := uuid.NewUUID()
 	if err != nil {
@@ -411,40 +351,8 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	var resp any
 
 	err = errorpanic.Wrap(func() error {
-		// panic safe
-
-		ticker := time.NewTicker(time.Second * 3)
-		defer ticker.Stop()
-
-		// send right away
-		c.setGauge(time.Now().Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
-
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case t := <-ticker.C:
-					c.setGauge(t.Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
-				}
-			}
-		}()
-
-		c.log.Info("msg handler: invoking component handler",
-			"port", port,
-			"node", c.name,
-		)
-
 		resp = c.component.Handle(ctx, c.DataHandler(msgHandler), port, portData)
-
-		if err = utils.CheckForError(resp); err != nil {
-			c.log.Error(err, "msg handler: component handler returned error",
-				"port", port,
-				"node", c.name,
-			)
-			return err
-		}
-		return nil
+		return utils.CheckForError(resp)
 	})
 
 	if err != nil {
@@ -453,12 +361,6 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 			"node", c.name,
 			"from", msg.From,
 			"edgeID", msg.EdgeID,
-		)
-	} else {
-		c.log.Info("msg handler: component execution completed",
-			"port", port,
-			"node", c.name,
-			"hasResponse", resp != nil,
 		)
 	}
 
@@ -471,17 +373,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Context, outputPort string, outputData any) any {
 
 	return func(outputCtx context.Context, outputPort string, outputData any) any {
-		c.log.Info("data handler: component output callback",
-			"port", outputPort,
-			"node", c.name,
-			"hasData", outputData != nil,
-		)
-
 		if outputPort == v1alpha1.ReconcilePort {
-			// special case
-			c.log.Info("data handler: processing reconcile port",
-				"node", c.name,
-			)
 			nodeUpdater, _ := outputData.(func(node *v1alpha1.TinyNode) error)
 
 			err := c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
@@ -523,11 +415,6 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			c.addSpanPortData(outputSpan, string(outputDataBytes))
 		}
 
-		c.log.Info("data handler: sending to output handler",
-			"port", outputPort,
-			"node", c.name,
-		)
-
 		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler)
 		if err != nil {
 			c.log.Error(err, "data handler: output handler failed",
@@ -536,12 +423,6 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			)
 			return err
 		}
-
-		c.log.Info("data handler: output handler completed",
-			"port", outputPort,
-			"node", c.name,
-			"hasResponse", res != nil,
-		)
 		return res
 	}
 
@@ -639,17 +520,12 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		return nil, retryErr
 	}
 
-	c.log.Info("send to edge: succeeded after retry",
-		"to", edgeTo,
-		"edgeID", edge.ID,
-	)
 	return result, nil
 }
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) (any, error) {
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
-		c.log.Error(err, "output handler: marshal failed", "port", port)
 		return nil, err
 	}
 
@@ -736,66 +612,6 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 		return err
 	}
 	return json.Unmarshal(b, output)
-}
-
-func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
-	if name == "" {
-		return
-	}
-	gauge, _ := c.meter.Int64ObservableGauge(string(m),
-		metric.WithUnit("1"),
-	)
-
-	r, err := c.meter.RegisterCallback(
-		func(ctx context.Context, o metric.Observer) error {
-			o.ObserveInt64(gauge, val,
-				metric.WithAttributes(
-					// element could be nodeID or edgeID
-					attribute.String("element", name),
-					attribute.String("flowID", c.flowName),
-					attribute.String("projectID", c.projectName),
-				))
-
-			return nil
-		},
-		gauge,
-	)
-
-	if err != nil {
-		c.log.Error(err, "metric gauge err")
-		return
-	}
-
-	go func() {
-		time.Sleep(time.Second * 6)
-		_ = r.Unregister()
-	}()
-
-}
-
-func (c *Runner) incCounter(ctx context.Context, val int64, element string, m metrics.Metric) {
-
-	if element == "" {
-		return
-	}
-	counter, err := c.meter.Int64Counter(
-		string(m),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		c.log.Error(err, "metric counter err")
-		return
-	}
-
-	var attrs = []metric.AddOption{
-		metric.WithAttributes(
-			attribute.String("element", element),
-			attribute.String("flowID", c.flowName),
-			attribute.String("projectID", c.projectName),
-			attribute.String("metric", string(m)),
-		),
-	}
-	counter.Add(ctx, val, attrs...)
 }
 
 func (c *Runner) addSpanError(span trace.Span, err error) {
