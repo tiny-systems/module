@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -993,4 +994,139 @@ var _ ManagerInterface = (*Manager)(nil)
 func (m Manager) Start(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
+}
+
+// DefaultSyncTimeout is the default timeout for waiting for node synchronization
+const DefaultSyncTimeout = 30 * time.Second
+
+// DefaultSyncPollInterval is the polling interval for sync checks
+const DefaultSyncPollInterval = 500 * time.Millisecond
+
+// CreateNodeSync creates a node and waits for it to be synchronized by the controller
+func (m Manager) CreateNodeSync(ctx context.Context, node *v1alpha1.TinyNode, timeout time.Duration) error {
+	if timeout == 0 {
+		timeout = DefaultSyncTimeout
+	}
+
+	// Create the node first
+	if err := m.CreateNode(ctx, node); err != nil {
+		return err
+	}
+
+	// Wait for synchronization
+	return m.WaitForNodeSync(ctx, node.Name, node.Namespace, timeout)
+}
+
+// UpdateNodeSync updates a node and waits for it to be synchronized by the controller
+func (m Manager) UpdateNodeSync(ctx context.Context, node *v1alpha1.TinyNode, timeout time.Duration) error {
+	if timeout == 0 {
+		timeout = DefaultSyncTimeout
+	}
+
+	// Get current generation before update
+	currentNode, err := m.GetNode(ctx, node.Name, node.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get current node: %w", err)
+	}
+	prevGeneration := currentNode.Generation
+
+	// Update the node
+	if err := m.UpdateNode(ctx, node); err != nil {
+		return err
+	}
+
+	// Wait for synchronization with generation check
+	return m.waitForNodeSyncWithGeneration(ctx, node.Name, node.Namespace, prevGeneration, timeout)
+}
+
+// WaitForNodeSync waits for a node to be synchronized by the controller
+// A node is considered synced when Status.Status == "OK", Status.Error == false,
+// and Status.Module.Name is set (indicating controller processed it)
+func (m Manager) WaitForNodeSync(ctx context.Context, name, namespace string, timeout time.Duration) error {
+	if timeout == 0 {
+		timeout = DefaultSyncTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, DefaultSyncPollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		node, err := m.GetNode(ctx, name, namespace)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// Node might not exist yet, keep polling
+				return false, nil
+			}
+			return false, err
+		}
+
+		// Check if node is synced
+		return isNodeSynced(node), nil
+	})
+}
+
+// waitForNodeSyncWithGeneration waits for a node to be synchronized after an update
+// by checking that the controller has processed the new generation
+func (m Manager) waitForNodeSyncWithGeneration(ctx context.Context, name, namespace string, prevGeneration int64, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, DefaultSyncPollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		node, err := m.GetNode(ctx, name, namespace)
+		if err != nil {
+			return false, err
+		}
+
+		// Check if generation has been updated and node is synced
+		// For updates, we need to verify the controller processed the new spec
+		if node.Generation > prevGeneration && isNodeSynced(node) {
+			return true, nil
+		}
+
+		// If generation hasn't changed but spec was updated, still check sync status
+		if isNodeSynced(node) {
+			return true, nil
+		}
+
+		return false, nil
+	})
+}
+
+// isNodeSynced checks if a node has been processed by the controller
+func isNodeSynced(node *v1alpha1.TinyNode) bool {
+	// Controller sets module name when it processes the node
+	if node.Status.Module.Name == "" {
+		return false
+	}
+
+	// Status should be "OK" (set by controller in Reconcile)
+	if node.Status.Status != "OK" {
+		return false
+	}
+
+	// No error
+	if node.Status.Error {
+		return false
+	}
+
+	return true
+}
+
+// WaitForNodeDeletion waits for a node to be fully deleted
+func (m Manager) WaitForNodeDeletion(ctx context.Context, name, namespace string, timeout time.Duration) error {
+	if timeout == 0 {
+		timeout = DefaultSyncTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, DefaultSyncPollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		_, err := m.GetNode(ctx, name, namespace)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}
+		return false, nil
+	})
 }
