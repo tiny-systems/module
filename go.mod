@@ -75,7 +75,7 @@ require (
 	github.com/spyzhov/ajson v0.9.4
 	github.com/swaggest/jsonschema-go v0.3.70
 	github.com/tiny-systems/errorpanic v0.7.1
-	github.com/tiny-systems/platform-api v0.0.10
+	github.com/tiny-systems/platform-api v0.0.11
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.46.1
 	go.opentelemetry.io/otel v1.35.0

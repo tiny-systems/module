@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/rogpeppe/go-internal/semver"
 	"github.com/spf13/cobra"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/registry"
 	"github.com/tiny-systems/module/tools/build"
 	api "github.com/tiny-systems/platform-api"
@@ -141,10 +143,41 @@ var buildCmd = &cobra.Command{
 
 func getComponentApi(c module.Component) api.PublishComponent {
 	componentInfo := c.GetInfo()
+
+	// Build ports with schemas
+	ports := make([]api.PublishComponentPort, 0)
+	for _, p := range c.Ports() {
+		port := api.PublishComponentPort{
+			Name:   p.Name,
+			Source: p.Source,
+		}
+		if p.Label != "" {
+			port.Label = &p.Label
+		}
+		pos := int(p.Position)
+		port.Position = &pos
+
+		// Generate schema from Configuration
+		if p.Configuration != nil {
+			s, err := schema.CreateSchema(p.Configuration)
+			if err == nil {
+				schemaBytes, err := s.MarshalJSON()
+				if err == nil {
+					var schemaMap map[string]interface{}
+					if json.Unmarshal(schemaBytes, &schemaMap) == nil {
+						port.Schema = &schemaMap
+					}
+				}
+			}
+		}
+		ports = append(ports, port)
+	}
+
 	return api.PublishComponent{
 		Name:        componentInfo.Name,
 		Description: componentInfo.Description,
 		Info:        &componentInfo.Info,
 		Tags:        &componentInfo.Tags,
+		Ports:       &ports,
 	}
 }
