@@ -157,7 +157,7 @@ func getComponentApi(c module.Component) api.PublishComponent {
 		pos := int(p.Position)
 		port.Position = &pos
 
-		// Generate schema from Configuration
+		// Generate schema and default data from Configuration
 		if p.Configuration != nil {
 			s, err := schema.CreateSchema(p.Configuration)
 			if err == nil {
@@ -167,6 +167,14 @@ func getComponentApi(c module.Component) api.PublishComponent {
 					if json.Unmarshal(schemaBytes, &schemaMap) == nil {
 						port.Schema = &schemaMap
 					}
+				}
+			}
+			// Include default data (the Configuration itself)
+			configBytes, err := json.Marshal(p.Configuration)
+			if err == nil {
+				var defaultData map[string]interface{}
+				if json.Unmarshal(configBytes, &defaultData) == nil {
+					port.DefaultData = &defaultData
 				}
 			}
 		}
