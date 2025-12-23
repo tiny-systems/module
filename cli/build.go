@@ -141,6 +141,25 @@ var buildCmd = &cobra.Command{
 	},
 }
 
+// filterNullValues recursively removes null values from a map
+func filterNullValues(m map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+	for k, v := range m {
+		if v == nil {
+			continue
+		}
+		if nested, ok := v.(map[string]interface{}); ok {
+			filtered := filterNullValues(nested)
+			if len(filtered) > 0 {
+				result[k] = filtered
+			}
+		} else {
+			result[k] = v
+		}
+	}
+	return result
+}
+
 func getComponentApi(c module.Component) api.PublishComponent {
 	componentInfo := c.GetInfo()
 
@@ -174,7 +193,11 @@ func getComponentApi(c module.Component) api.PublishComponent {
 			if err == nil {
 				var defaultData map[string]interface{}
 				if json.Unmarshal(configBytes, &defaultData) == nil {
-					port.DefaultData = &defaultData
+					// Filter out null values as OpenAPI schema doesn't allow them
+					filtered := filterNullValues(defaultData)
+					if len(filtered) > 0 {
+						port.DefaultData = &filtered
+					}
 				}
 			}
 		}
