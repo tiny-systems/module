@@ -14,6 +14,10 @@ import (
 )
 
 func NodesToGraph(elements map[string]v1alpha1.TinyNode, flowName *string) ([]interface{}, []interface{}, error) {
+	return NodesToGraphWithOptions(elements, flowName, true)
+}
+
+func NodesToGraphWithOptions(elements map[string]v1alpha1.TinyNode, flowName *string, minimal bool) ([]interface{}, []interface{}, error) {
 	var (
 		edges = make([]interface{}, 0)
 		nodes = make([]interface{}, 0)
@@ -53,7 +57,7 @@ func NodesToGraph(elements map[string]v1alpha1.TinyNode, flowName *string) ([]in
 			m["blocked"] = true
 		}
 
-		nodes = append(nodes, ApiNodeToMap(node, m, true))
+		nodes = append(nodes, ApiNodeToMap(node, m, minimal))
 
 		var (
 			edgeConfiguration []byte
