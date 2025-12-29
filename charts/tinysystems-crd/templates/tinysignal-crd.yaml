@@ -41,13 +41,14 @@ spec:
             description: TinySignalSpec defines the desired state of TinySignal
             properties:
               data:
+                description: Data is the payload to send with the signal
                 format: byte
                 type: string
               node:
-                description: Foo is an example field of TinySignal. Edit tinysignal_types.go
-                  to remove/update
+                description: Node is the name of the TinyNode to signal
                 type: string
               port:
+                description: Port is the port on the node to send the signal to
                 type: string
             required:
             - node
