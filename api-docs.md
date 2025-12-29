@@ -9,14 +9,20 @@
 Package v1alpha1 contains API Schema definitions for the operator v1alpha1 API group
 
 ### Resource Types
+- [TinyFlow](#tinyflow)
+- [TinyFlowList](#tinyflowlist)
 - [TinyModule](#tinymodule)
 - [TinyModuleList](#tinymodulelist)
 - [TinyNode](#tinynode)
 - [TinyNodeList](#tinynodelist)
+- [TinyProject](#tinyproject)
+- [TinyProjectList](#tinyprojectlist)
 - [TinySignal](#tinysignal)
 - [TinySignalList](#tinysignallist)
 - [TinyTracker](#tinytracker)
 - [TinyTrackerList](#tinytrackerlist)
+- [TinyWidgetPage](#tinywidgetpage)
+- [TinyWidgetPageList](#tinywidgetpagelist)
 
 
 
@@ -28,6 +34,66 @@ _Underlying type:_ _integer_
 
 _Appears in:_
 - [TinyNodePortStatus](#tinynodeportstatus)
+
+
+
+#### TinyFlow
+
+
+
+TinyFlow is the Schema for the tinyflows API
+
+_Appears in:_
+- [TinyFlowList](#tinyflowlist)
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyFlow`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `spec` _[TinyFlowSpec](#tinyflowspec)_ |  |
+| `status` _[TinyFlowStatus](#tinyflowstatus)_ |  |
+
+
+#### TinyFlowList
+
+
+
+TinyFlowList contains a list of TinyFlow
+
+
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyFlowList`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `items` _[TinyFlow](#tinyflow) array_ |  |
+
+
+#### TinyFlowSpec
+
+
+
+TinyFlowSpec defines the desired state of TinyFlow
+
+_Appears in:_
+- [TinyFlow](#tinyflow)
+
+
+
+#### TinyFlowStatus
+
+
+
+TinyFlowStatus defines the observed state of TinyFlow
+
+_Appears in:_
+- [TinyFlow](#tinyflow)
 
 
 
@@ -269,12 +335,74 @@ _Appears in:_
 
 | Field | Description |
 | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the most recent generation observed by the controller.<br /><br />It corresponds to metadata.generation, which is updated on mutation by the API Server. |
 | `module` _[TinyNodeModuleStatus](#tinynodemodulestatus)_ |  |
 | `component` _[TinyNodeComponentStatus](#tinynodecomponentstatus)_ |  |
 | `ports` _[TinyNodePortStatus](#tinynodeportstatus) array_ |  |
 | `status` _string_ |  |
+| `metadata` _object (keys:string, values:string)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
 | `error` _boolean_ |  |
 | `lastUpdateTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#time-v1-meta)_ |  |
+
+
+#### TinyProject
+
+
+
+TinyProject is the Schema for the tinyprojects API
+
+_Appears in:_
+- [TinyProjectList](#tinyprojectlist)
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyProject`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `spec` _[TinyProjectSpec](#tinyprojectspec)_ |  |
+| `status` _[TinyProjectStatus](#tinyprojectstatus)_ |  |
+
+
+#### TinyProjectList
+
+
+
+TinyProjectList contains a list of TinyProject
+
+
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyProjectList`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `items` _[TinyProject](#tinyproject) array_ |  |
+
+
+#### TinyProjectSpec
+
+
+
+TinyProjectSpec defines the desired state of TinyProject
+
+_Appears in:_
+- [TinyProject](#tinyproject)
+
+
+
+#### TinyProjectStatus
+
+
+
+TinyProjectStatus defines the observed state of TinyProject
+
+_Appears in:_
+- [TinyProject](#tinyproject)
+
 
 
 #### TinySignal
@@ -326,9 +454,9 @@ _Appears in:_
 
 | Field | Description |
 | --- | --- |
-| `node` _string_ | Foo is an example field of TinySignal. Edit tinysignal_types.go to remove/update |
-| `port` _string_ |  |
-| `data` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ |  |
+| `node` _string_ | Node is the name of the TinyNode to signal |
+| `port` _string_ | Port is the port on the node to send the signal to |
+| `data` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Data is the payload to send with the signal |
 
 
 #### TinySignalStatus
@@ -399,6 +527,89 @@ TinyTrackerStatus defines the observed state of TinyTracker
 
 _Appears in:_
 - [TinyTracker](#tinytracker)
+
+
+
+#### TinyWidget
+
+
+
+
+
+_Appears in:_
+- [TinyWidgetPageSpec](#tinywidgetpagespec)
+
+| Field | Description |
+| --- | --- |
+| `port` _string_ |  |
+| `name` _string_ |  |
+| `schemaPatch` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ |  |
+| `gridX` _integer_ |  |
+| `gridY` _integer_ |  |
+| `gridW` _integer_ |  |
+| `gridH` _integer_ |  |
+
+
+#### TinyWidgetPage
+
+
+
+TinyWidgetPage is the Schema for the tinywidgetpages API
+
+_Appears in:_
+- [TinyWidgetPageList](#tinywidgetpagelist)
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyWidgetPage`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `spec` _[TinyWidgetPageSpec](#tinywidgetpagespec)_ |  |
+| `status` _[TinyWidgetPageStatus](#tinywidgetpagestatus)_ |  |
+
+
+#### TinyWidgetPageList
+
+
+
+TinyWidgetPageList contains a list of TinyWidgetPage
+
+
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyWidgetPageList`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `items` _[TinyWidgetPage](#tinywidgetpage) array_ |  |
+
+
+#### TinyWidgetPageSpec
+
+
+
+TinyWidgetPageSpec defines the desired state of TinyWidgetPage
+
+_Appears in:_
+- [TinyWidgetPage](#tinywidgetpage)
+
+| Field | Description |
+| --- | --- |
+| `widgets` _[TinyWidget](#tinywidget) array_ | Foo is an example field of TinyWidgetPage. Edit tinywidgetpage_types.go to remove/update |
+
+
+#### TinyWidgetPageStatus
+
+
+
+TinyWidgetPageStatus defines the observed state of TinyWidgetPage
+
+_Appears in:_
+- [TinyWidgetPage](#tinywidgetpage)
 
 
 

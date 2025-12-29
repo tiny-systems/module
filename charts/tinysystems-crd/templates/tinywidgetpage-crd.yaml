@@ -40,10 +40,28 @@ spec:
           spec:
             description: TinyWidgetPageSpec defines the desired state of TinyWidgetPage
             properties:
-              foo:
+              widgets:
                 description: Foo is an example field of TinyWidgetPage. Edit tinywidgetpage_types.go
                   to remove/update
-                type: string
+                items:
+                  properties:
+                    gridH:
+                      type: integer
+                    gridW:
+                      type: integer
+                    gridX:
+                      type: integer
+                    gridY:
+                      type: integer
+                    name:
+                      type: string
+                    port:
+                      type: string
+                    schemaPatch:
+                      format: byte
+                      type: string
+                  type: object
+                type: array
             type: object
           status:
             description: TinyWidgetPageStatus defines the observed state of TinyWidgetPage

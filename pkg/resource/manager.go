@@ -1059,8 +1059,20 @@ func (m Manager) WaitForNodeSync(ctx context.Context, name, namespace string, ti
 			return false, err
 		}
 
-		// Check if node is synced
-		return isNodeSynced(node), nil
+		// Check if controller has processed current generation
+		if node.Status.ObservedGeneration >= node.Generation {
+			// Controller processed this generation - check if it succeeded or failed
+			if node.Status.Error {
+				// Controller processed but component reported error (e.g., invalid settings)
+				// Return early instead of polling until timeout
+				return true, nil
+			}
+			// Check full sync status
+			return isNodeSynced(node), nil
+		}
+
+		// Controller hasn't processed this generation yet
+		return false, nil
 	})
 }
 
@@ -1105,6 +1117,12 @@ func isNodeSynced(node *v1alpha1.TinyNode) bool {
 
 	// No error
 	if node.Status.Error {
+		return false
+	}
+
+	// ObservedGeneration must match Generation to ensure controller processed current spec
+	// This is critical for settings changes that affect ports (e.g., router routes)
+	if node.Status.ObservedGeneration < node.Generation {
 		return false
 	}
 

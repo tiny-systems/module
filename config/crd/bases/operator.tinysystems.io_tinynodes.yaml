@@ -137,6 +137,12 @@ spec:
                 - name
                 - version
                 type: object
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation observed by the controller.
+                  It corresponds to metadata.generation, which is updated on mutation by the API Server.
+                format: int64
+                type: integer
               ports:
                 items:
                   properties:

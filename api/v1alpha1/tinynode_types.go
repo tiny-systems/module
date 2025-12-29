@@ -153,6 +153,10 @@ type TinyNodeComponentStatus struct {
 
 // TinyNodeStatus defines the observed state of TinyNode
 type TinyNodeStatus struct {
+	// ObservedGeneration is the most recent generation observed by the controller.
+	// It corresponds to metadata.generation, which is updated on mutation by the API Server.
+	// +kubebuilder:validation:Optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Module TinyNodeModuleStatus `json:"module"`

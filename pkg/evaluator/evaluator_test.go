@@ -2,10 +2,10 @@ package evaluator
 
 import (
 	"fmt"
-	"github.com/spyzhov/ajson"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/spyzhov/ajson"
 )
 
 func TestNewEvaluator(t *testing.T) {
@@ -75,8 +75,8 @@ func TestEvaluator_Eval_SimpleObjects(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "object with expression (requires value key too)",
-			data: `{"field": {"expression": "$.data.value", "value": null}}`,
+			name: "object with expression returns actual type",
+			data: `{"field": "{{$.data.value}}"}`,
 			callback: func(expression string) (interface{}, error) {
 				if expression == "$.data.value" {
 					return "evaluated result", nil
@@ -89,21 +89,32 @@ func TestEvaluator_Eval_SimpleObjects(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "object with expression and fallback value",
-			data: `{"field": {"expression": "$.data", "value": "fallback"}}`,
+			name: "expression returning number",
+			data: `{"count": "{{$.data.count}}"}`,
 			callback: func(expression string) (interface{}, error) {
-				return "from expression", nil
+				return 42.0, nil
 			},
 			want: map[string]interface{}{
-				"field": "from expression",
+				"count": 42.0,
+			},
+			wantErr: false,
+		},
+		{
+			name: "expression returning boolean",
+			data: `{"active": "{{$.data.active}}"}`,
+			callback: func(expression string) (interface{}, error) {
+				return true, nil
+			},
+			want: map[string]interface{}{
+				"active": true,
 			},
 			wantErr: false,
 		},
 		{
 			name: "multiple fields with expressions",
 			data: `{
-				"name": {"expression": "$.user.name", "value": null},
-				"age": {"expression": "$.user.age", "value": null},
+				"name": "{{$.user.name}}",
+				"age": "{{$.user.age}}",
 				"static": "value"
 			}`,
 			callback: func(expression string) (interface{}, error) {
@@ -120,6 +131,92 @@ func TestEvaluator_Eval_SimpleObjects(t *testing.T) {
 				"name":   "John",
 				"age":    30.0,
 				"static": "value",
+			},
+			wantErr: false,
+		},
+		{
+			name: "dollar sign in literal string is preserved",
+			data: `{"price": "$18.99", "discount": "Save $5"}`,
+			callback: func(expression string) (interface{}, error) {
+				return nil, fmt.Errorf("should not be called for literals")
+			},
+			want: map[string]interface{}{
+				"price":    "$18.99",
+				"discount": "Save $5",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := NewEvaluator(tt.callback)
+			got, err := eval.Eval([]byte(tt.data))
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Eval() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				if !compareInterface(got, tt.want) {
+					t.Errorf("Eval() = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestEvaluator_Eval_StringInterpolation(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     string
+		callback Callback
+		want     interface{}
+		wantErr  bool
+	}{
+		{
+			name: "interpolation in middle of string",
+			data: `{"greeting": "Hello {{$.name}}!"}`,
+			callback: func(expression string) (interface{}, error) {
+				if expression == "$.name" {
+					return "World", nil
+				}
+				return nil, fmt.Errorf("unexpected: %s", expression)
+			},
+			want: map[string]interface{}{
+				"greeting": "Hello World!",
+			},
+			wantErr: false,
+		},
+		{
+			name: "multiple interpolations in one string",
+			data: `{"message": "{{$.greeting}}, {{$.name}}! You have {{$.count}} messages."}`,
+			callback: func(expression string) (interface{}, error) {
+				switch expression {
+				case "$.greeting":
+					return "Hello", nil
+				case "$.name":
+					return "Alice", nil
+				case "$.count":
+					return 5, nil
+				default:
+					return nil, fmt.Errorf("unexpected: %s", expression)
+				}
+			},
+			want: map[string]interface{}{
+				"message": "Hello, Alice! You have 5 messages.",
+			},
+			wantErr: false,
+		},
+		{
+			name: "pure expression returns actual type not string",
+			data: `{"data": "{{$.object}}"}`,
+			callback: func(expression string) (interface{}, error) {
+				return map[string]interface{}{"nested": "value"}, nil
+			},
+			want: map[string]interface{}{
+				"data": map[string]interface{}{"nested": "value"},
 			},
 			wantErr: false,
 		},
@@ -147,10 +244,10 @@ func TestEvaluator_Eval_SimpleObjects(t *testing.T) {
 func TestEvaluator_Eval_NestedObjects(t *testing.T) {
 	data := `{
 		"user": {
-			"name": {"expression": "$.data.name", "value": null},
+			"name": "{{$.data.name}}",
 			"profile": {
 				"age": 25,
-				"city": {"expression": "$.data.city", "value": null}
+				"city": "{{$.data.city}}"
 			}
 		},
 		"timestamp": 1234567890
@@ -227,7 +324,7 @@ func TestEvaluator_Eval_Arrays(t *testing.T) {
 		},
 		{
 			name: "array with expressions",
-			data: `{"values": [{"expression": "$.a", "value": null}, {"expression": "$.b", "value": null}, 3]}`,
+			data: `{"values": ["{{$.a}}", "{{$.b}}", 3]}`,
 			callback: func(expression string) (interface{}, error) {
 				switch expression {
 				case "$.a":
@@ -247,8 +344,8 @@ func TestEvaluator_Eval_Arrays(t *testing.T) {
 			name: "array of objects with expressions",
 			data: `{
 				"users": [
-					{"name": {"expression": "$.user1", "value": null}},
-					{"name": {"expression": "$.user2", "value": null}},
+					{"name": "{{$.user1}}"},
+					{"name": "{{$.user2}}"},
 					{"name": "static"}
 				]
 			}`,
@@ -328,15 +425,8 @@ func TestEvaluator_Eval_ErrorCases(t *testing.T) {
 			wantErr:  true,
 			errMsg:   "node is not an object",
 		},
-		{
-			name: "callback error",
-			data: `{"field": {"expression": "$.bad", "value": null}}`,
-			callback: func(expression string) (interface{}, error) {
-				return nil, fmt.Errorf("callback error: %s", expression)
-			},
-			wantErr: true,
-			errMsg:  "callback error",
-		},
+		// Note: callback errors are now handled gracefully (return nil, not error)
+		// This allows edge inspection to continue even when source data is unavailable
 	}
 
 	for _, tt := range tests {
@@ -358,11 +448,11 @@ func TestEvaluator_Eval_ErrorCases(t *testing.T) {
 	}
 }
 
-func TestEvaluator_Eval_EmptyExpression(t *testing.T) {
-	data := `{"field": {"expression": "", "value": "fallback"}}`
+func TestEvaluator_Eval_NoExpression(t *testing.T) {
+	data := `{"field": "just a regular string"}`
 
 	callback := func(expression string) (interface{}, error) {
-		t.Error("Callback should not be called for empty expression")
+		t.Error("Callback should not be called for plain strings")
 		return nil, fmt.Errorf("should not be called")
 	}
 
@@ -378,20 +468,71 @@ func TestEvaluator_Eval_EmptyExpression(t *testing.T) {
 		t.Fatal("result is not a map")
 	}
 
-	if result["field"] != "fallback" {
-		t.Errorf("field = %v, want 'fallback'", result["field"])
+	if result["field"] != "just a regular string" {
+		t.Errorf("field = %v, want 'just a regular string'", result["field"])
+	}
+}
+
+func TestEvaluator_Eval_CallbackErrorGraceful(t *testing.T) {
+	// When callback fails (e.g., source data unavailable), should return nil gracefully
+	data := `{"field": "{{$.unavailable}}"}`
+
+	callback := func(expression string) (interface{}, error) {
+		return nil, fmt.Errorf("data not available")
+	}
+
+	eval := NewEvaluator(callback)
+	got, err := eval.Eval([]byte(data))
+
+	if err != nil {
+		t.Fatalf("Eval() should not return error, got: %v", err)
+	}
+
+	result, ok := got.(map[string]interface{})
+	if !ok {
+		t.Fatal("result is not a map")
+	}
+
+	if result["field"] != nil {
+		t.Errorf("field = %v, want nil", result["field"])
+	}
+}
+
+func TestEvaluator_Eval_InterpolationWithCallbackError(t *testing.T) {
+	// When callback fails in interpolation, should leave expression unevaluated
+	data := `{"greeting": "Hello {{$.unavailable}}!"}`
+
+	callback := func(expression string) (interface{}, error) {
+		return nil, fmt.Errorf("data not available")
+	}
+
+	eval := NewEvaluator(callback)
+	got, err := eval.Eval([]byte(data))
+
+	if err != nil {
+		t.Fatalf("Eval() should not return error, got: %v", err)
+	}
+
+	result, ok := got.(map[string]interface{})
+	if !ok {
+		t.Fatal("result is not a map")
+	}
+
+	// When interpolation callback fails, the expression is left unevaluated
+	if result["greeting"] != "Hello {{$.unavailable}}!" {
+		t.Errorf("greeting = %v, want 'Hello {{$.unavailable}}!'", result["greeting"])
 	}
 }
 
 func TestEvaluator_Eval_RealWorldEdgeConfig(t *testing.T) {
-	// Simulates real edge configuration from TinySystems
+	// Simulates real edge configuration from TinySystems with new format
 	data := `{
-		"targetField": {"expression": "$.sourceData.items[0].value", "value": null},
-		"userId": {"expression": "$.user.id", "value": null},
-		"timestamp": {"expression": "now()", "value": null},
+		"targetField": "{{$.sourceData.items[0].value}}",
+		"userId": "{{$.user.id}}",
+		"timestamp": "{{now()}}",
 		"staticValue": "constant",
 		"nested": {
-			"computed": {"expression": "$.data.computed", "value": null},
+			"computed": "{{$.data.computed}}",
 			"literal": 42
 		}
 	}`
@@ -417,7 +558,7 @@ func TestEvaluator_Eval_RealWorldEdgeConfig(t *testing.T) {
 			nodes, _ := ajson.Eval(root, expression)
 			return nodes.Unpack()
 		case "now()":
-			return float64(time.Now().Unix()), nil
+			return 1234567890.0, nil
 		default:
 			return nil, fmt.Errorf("unknown expression: %s", expression)
 		}
@@ -466,15 +607,15 @@ func TestEvaluator_Eval_ComplexNesting(t *testing.T) {
 		"level1": {
 			"level2": {
 				"level3": {
-					"value": {"expression": "$.deep.value", "value": null}
+					"value": "{{$.deep.value}}"
 				}
 			},
 			"array": [
 				{
-					"item": {"expression": "$.item1", "value": null}
+					"item": "{{$.item1}}"
 				},
 				{
-					"item": {"expression": "$.item2", "value": null}
+					"item": "{{$.item2}}"
 				}
 			]
 		}
@@ -519,6 +660,116 @@ func TestEvaluator_Eval_ComplexNesting(t *testing.T) {
 
 	if item1["item"] != "second" {
 		t.Errorf("array[1].item = %v, want 'second'", item1["item"])
+	}
+}
+
+func TestEvaluator_Eval_FunctionExpressions(t *testing.T) {
+	// Test expressions that use functions, not just JSONPath
+	tests := []struct {
+		name     string
+		data     string
+		callback Callback
+		want     interface{}
+	}{
+		{
+			name: "function call expression",
+			data: `{"converted": "{{string($.number)}}"}`,
+			callback: func(expression string) (interface{}, error) {
+				if expression == "string($.number)" {
+					return "42", nil
+				}
+				return nil, fmt.Errorf("unexpected: %s", expression)
+			},
+			want: map[string]interface{}{
+				"converted": "42",
+			},
+		},
+		{
+			name: "concatenation expression",
+			data: `{"greeting": "{{\"Hello \" + $.name}}"}`,
+			callback: func(expression string) (interface{}, error) {
+				if expression == "\"Hello \" + $.name" {
+					return "Hello World", nil
+				}
+				return nil, fmt.Errorf("unexpected: %s", expression)
+			},
+			want: map[string]interface{}{
+				"greeting": "Hello World",
+			},
+		},
+		{
+			name: "comparison expression returning boolean",
+			data: `{"isAdmin": "{{$.role == 'admin'}}"}`,
+			callback: func(expression string) (interface{}, error) {
+				if expression == "$.role == 'admin'" {
+					return true, nil
+				}
+				return nil, fmt.Errorf("unexpected: %s", expression)
+			},
+			want: map[string]interface{}{
+				"isAdmin": true,
+			},
+		},
+		{
+			name: "arithmetic expression",
+			data: `{"total": "{{$.price * $.quantity}}"}`,
+			callback: func(expression string) (interface{}, error) {
+				if expression == "$.price * $.quantity" {
+					return 99.99, nil
+				}
+				return nil, fmt.Errorf("unexpected: %s", expression)
+			},
+			want: map[string]interface{}{
+				"total": 99.99,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := NewEvaluator(tt.callback)
+			got, err := eval.Eval([]byte(tt.data))
+
+			if err != nil {
+				t.Fatalf("Eval() unexpected error: %v", err)
+			}
+
+			if !compareInterface(got, tt.want) {
+				t.Errorf("Eval() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluator_Eval_PassEntireMessage(t *testing.T) {
+	data := `{"context": "{{$}}"}`
+
+	callback := func(expression string) (interface{}, error) {
+		if expression == "$" {
+			return map[string]interface{}{
+				"method":  "GET",
+				"path":    "/api/users",
+				"headers": map[string]interface{}{"Content-Type": "application/json"},
+			}, nil
+		}
+		return nil, fmt.Errorf("unexpected: %s", expression)
+	}
+
+	eval := NewEvaluator(callback)
+	got, err := eval.Eval([]byte(data))
+
+	if err != nil {
+		t.Fatalf("Eval() unexpected error: %v", err)
+	}
+
+	result := got.(map[string]interface{})
+	context := result["context"].(map[string]interface{})
+
+	if context["method"] != "GET" {
+		t.Errorf("context.method = %v, want 'GET'", context["method"])
+	}
+	if context["path"] != "/api/users" {
+		t.Errorf("context.path = %v, want '/api/users'", context["path"])
 	}
 }
 

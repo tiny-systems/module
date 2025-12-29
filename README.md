@@ -12,7 +12,7 @@ TinySystems Module SDK enables developers to create **module operators** (like `
 - **JSON Schema-Driven Configuration**: Automatic schema generation with UI hints
 - **Message Routing & Retry Logic**: Intelligent routing with exponential backoff
 - **Multi-Module Communication**: gRPC-based inter-module communication
-- **Expression-Based Data Transformation**: JSONPath expressions for flexible data mapping
+- **Expression-Based Data Transformation**: Mustache-style `{{expression}}` syntax with JSONPath for flexible data mapping
 - **Kubernetes-Native**: Everything is a CRD with standard controller patterns
 - **OpenTelemetry Integration**: Built-in observability with tracing and metrics
 - **CLI Tools**: Complete tooling for running and building modules
@@ -112,10 +112,29 @@ Each port can have:
 
 #### Edge Configuration
 
-Edges connect ports between nodes and support:
-- JSONPath expressions for data transformation
-- Runtime evaluation via the expression evaluator
-- Type-safe mapping through shared schema definitions
+Edges connect ports between nodes and support data transformation using mustache-style expressions:
+
+**Expression Syntax**: Use `{{expression}}` to evaluate JSONPath expressions against incoming data.
+
+```json
+{
+  "body": "{{$.request.body}}",
+  "statusCode": 200,
+  "greeting": "Hello {{$.user.name}}!",
+  "isAdmin": "{{$.user.role == 'admin'}}"
+}
+```
+
+**Expression Types**:
+- **Pure expression** (`"{{$.field}}"`) - Returns the actual type (string, number, boolean, object)
+- **Literal value** (`"hello"`, `200`, `true`) - Static values passed through as-is
+- **String interpolation** (`"Hello {{$.name}}!"`) - Embeds expression results in strings
+- **JSONPath with operators** (`"{{$.count + 1}}"`, `"{{$.method == 'GET'}}"`) - Supports arithmetic and comparison
+
+**Key Features**:
+- Type preservation: `"{{$.count}}"` returns a number, not a string
+- Graceful error handling: If source data is unavailable, expressions return `nil`
+- Full JSONPath support via [ajson](https://github.com/spyzhov/ajson) library
 
 ### SDK Components
 
@@ -139,8 +158,10 @@ Unified Kubernetes client providing:
 - Definition sharing and override mechanism
 
 #### `/pkg/evaluator/` - Expression Evaluator
-- JSONPath evaluation for data transformation
-- Edge configuration with expressions
+- Mustache-style `{{expression}}` syntax processing
+- JSONPath evaluation via ajson library
+- Type-preserving evaluation (numbers stay numbers, booleans stay booleans)
+- Graceful error handling when source data is unavailable
 
 #### `/pkg/metrics/` - Observability
 - OpenTelemetry integration with spans
@@ -182,7 +203,7 @@ When nodes belong to different modules:
 1. **Eventual Consistency with Reconciliation**: Periodic reconciliation (every 5 minutes) plus signal-based immediate updates
 2. **Leader Election**: Leader handles status updates and signal processing; non-leaders execute node logic
 3. **Schema-Driven Configuration**: Go structs automatically generate JSON schemas for UI integration
-4. **Expression-Based Transformation**: JSONPath expressions enable flexible data mapping without code changes
+4. **Expression-Based Transformation**: Mustache-style `{{expression}}` syntax with JSONPath enables flexible data mapping without code changes
 5. **Definition Sharing**: Components mark fields as `shared:true` or `configurable:true` for cross-node type safety
 
 ### Project Structure
@@ -549,7 +570,7 @@ type Config struct {
 ```
 
 **Struct Tags**:
-- `configurable:"true"`: Field can accept values from other nodes via expressions
+- `configurable:"true"`: Field can accept values from other nodes via `{{expression}}` syntax
 - `shared:"true"`: Field definition is available to other nodes for type-safe mapping
 - `propertyOrder:"N"`: Controls field order in UI
 - `tab:"name"`: Groups field under a tab in UI
