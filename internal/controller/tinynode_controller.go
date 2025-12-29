@@ -133,6 +133,10 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, errors2.Wrap(err, "failed to update scheduler")
 	}
 
+	// Mark that we've processed this generation - clients can use this to know
+	// when the controller has processed a specific spec version (including settings)
+	node.Status.ObservedGeneration = node.ObjectMeta.Generation
+
 	if !r.IsLeader.Load() {
 		return reconcile.Result{
 			RequeueAfter: time.Second * 30,

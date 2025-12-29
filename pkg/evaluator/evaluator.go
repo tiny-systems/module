@@ -2,6 +2,9 @@ package evaluator
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
+
 	"github.com/spyzhov/ajson"
 )
 
@@ -15,6 +18,12 @@ var DefaultCallback Callback = func(expression string) (interface{}, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
+// exprPattern matches {{expression}} patterns
+var exprPattern = regexp.MustCompile(`\{\{(.+?)\}\}`)
+
+// pureExprPattern matches strings that are ONLY {{expression}} with nothing else
+var pureExprPattern = regexp.MustCompile(`^\{\{(.+)\}\}$`)
+
 func NewEvaluator(callback Callback) *Evaluator {
 	if callback == nil {
 		callback = DefaultCallback
@@ -23,30 +32,17 @@ func NewEvaluator(callback Callback) *Evaluator {
 }
 
 func (c *Evaluator) calculateResult(valNode *ajson.Node) (interface{}, error) {
-
-	if valNode.IsObject() {
-		o := valNode.MustObject()
-		if len(o) == 2 {
-			// our special node
-			// value key or expression or both should exist
-			if expression, ok := o["expression"]; ok {
-				if expr, _ := expression.GetString(); expr != "" {
-					// if expression exists - calculate it
-					return c.callback(expr)
-				}
-				var ok bool
-				if valNode, ok = o["value"]; ok {
-					return c.calculateResult(valNode)
-				}
-			}
-		}
-	}
-
 	if valNode == nil {
-		// something went wrong, current object has no value sub node, return root as it is
 		return nil, nil
 	}
-	// recreate structure
+
+	// Handle strings with {{expression}} pattern
+	if valNode.IsString() {
+		str, _ := valNode.GetString()
+		return c.evaluateString(str)
+	}
+
+	// Recursively process objects
 	if valNode.IsObject() {
 		m := map[string]interface{}{}
 		for _, propName := range valNode.Keys() {
@@ -61,8 +57,10 @@ func (c *Evaluator) calculateResult(valNode *ajson.Node) (interface{}, error) {
 			m[propName] = res
 		}
 		return m, nil
+	}
 
-	} else if valNode.IsArray() {
+	// Recursively process arrays
+	if valNode.IsArray() {
 		inheritors := valNode.Inheritors()
 		m := make([]interface{}, len(inheritors))
 		for idx, node := range inheritors {
@@ -74,7 +72,47 @@ func (c *Evaluator) calculateResult(valNode *ajson.Node) (interface{}, error) {
 		}
 		return m, nil
 	}
+
+	// Return primitives (numbers, booleans, null) as-is
 	return valNode.Unpack()
+}
+
+// evaluateString processes a string that may contain {{expression}} patterns
+func (c *Evaluator) evaluateString(str string) (interface{}, error) {
+	// Check if the entire string is a single {{expression}}
+	// In this case, return the actual type (number, bool, object, etc.)
+	if matches := pureExprPattern.FindStringSubmatch(str); len(matches) == 2 {
+		result, err := c.callback(strings.TrimSpace(matches[1]))
+		if err != nil {
+			// If callback fails (e.g., source data unavailable), return nil
+			// This allows downstream code to continue with missing data
+			return nil, nil
+		}
+		return result, nil
+	}
+
+	// Check if string contains any {{expression}} patterns for interpolation
+	if !exprPattern.MatchString(str) {
+		// No expressions, return literal string
+		return str, nil
+	}
+
+	// Interpolate: replace each {{expr}} with its evaluated string value
+	result := exprPattern.ReplaceAllStringFunc(str, func(match string) string {
+		// Extract expression from {{expr}}
+		expr := strings.TrimSpace(match[2 : len(match)-2])
+		val, err := c.callback(expr)
+		if err != nil {
+			// If callback fails, leave expression unevaluated
+			return match
+		}
+		if val == nil {
+			return ""
+		}
+		return fmt.Sprintf("%v", val)
+	})
+
+	return result, nil
 }
 
 func (c *Evaluator) Eval(data []byte) (interface{}, error) {
