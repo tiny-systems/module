@@ -99,7 +99,7 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
       <li><strong>JSON Schema-Driven Configuration</strong>: Automatic schema generation with UI hints</li>
       <li><strong>Message Routing &#x26; Retry Logic</strong>: Intelligent routing with exponential backoff</li>
       <li><strong>Multi-Module Communication</strong>: gRPC-based inter-module communication</li>
-      <li><strong>Expression-Based Data Transformation</strong>: JSONPath expressions for flexible data mapping</li>
+      <li><strong>Expression-Based Data Transformation</strong>: Mustache-style <code>{{expression}}</code> syntax with JSONPath for flexible data mapping</li>
       <li><strong>Kubernetes-Native</strong>: Everything is a CRD with standard controller patterns</li>
       <li><strong>OpenTelemetry Integration</strong>: Built-in observability with tracing and metrics</li>
       <li><strong>CLI Tools</strong>: Complete tooling for running and building modules</li>
@@ -227,11 +227,33 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
       <li><strong>Response Configuration</strong>: Schema for output data structure</li>
     </ul>
     <h4 id="edge-configuration"><a class="anchor" aria-hidden="true" tabindex="-1" href="#edge-configuration"><span class="octicon octicon-link"></span></a>Edge Configuration</h4>
-    <p>Edges connect ports between nodes and support:</p>
+    <p>Edges connect ports between nodes and support data transformation using mustache-style expressions:</p>
+    <p><strong>Expression Syntax</strong>: Use <code>{{expression}}</code> to evaluate JSONPath expressions against incoming data.</p>
+    <pre class="language-json"><code class="language-json code-highlight"><span class="code-line line-number" line="1"><span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="2">  <span class="token property">"body"</span><span class="token operator">:</span> <span class="token string">"{{$.request.body}}"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="3">  <span class="token property">"statusCode"</span><span class="token operator">:</span> <span class="token number">200</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="4">  <span class="token property">"greeting"</span><span class="token operator">:</span> <span class="token string">"Hello {{$.user.name}}!"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="5">  <span class="token property">"isAdmin"</span><span class="token operator">:</span> <span class="token string">"{{$.user.role == 'admin'}}"</span>
+</span><span class="code-line line-number" line="6"><span class="token punctuation">}</span>
+</span></code><div onclick="copied(this)" data-code="{
+  &#x22;body&#x22;: &#x22;{{$.request.body}}&#x22;,
+  &#x22;statusCode&#x22;: 200,
+  &#x22;greeting&#x22;: &#x22;Hello {{$.user.name}}!&#x22;,
+  &#x22;isAdmin&#x22;: &#x22;{{$.user.role == &#x27;admin&#x27;}}&#x22;
+}
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Expression Types</strong>:</p>
     <ul>
-      <li>JSONPath expressions for data transformation</li>
-      <li>Runtime evaluation via the expression evaluator</li>
-      <li>Type-safe mapping through shared schema definitions</li>
+      <li><strong>Pure expression</strong> (<code>"{{$.field}}"</code>) - Returns the actual type (string, number, boolean, object)</li>
+      <li><strong>Literal value</strong> (<code>"hello"</code>, <code>200</code>, <code>true</code>) - Static values passed through as-is</li>
+      <li><strong>String interpolation</strong> (<code>"Hello {{$.name}}!"</code>) - Embeds expression results in strings</li>
+      <li><strong>JSONPath with operators</strong> (<code>"{{$.count + 1}}"</code>, <code>"{{$.method == 'GET'}}"</code>) - Supports arithmetic and comparison</li>
+    </ul>
+    <p><strong>Key Features</strong>:</p>
+    <ul>
+      <li>Type preservation: <code>"{{$.count}}"</code> returns a number, not a string</li>
+      <li>Graceful error handling: If source data is unavailable, expressions return <code>nil</code></li>
+      <li>Full JSONPath support via <a href="https://github.com/spyzhov/ajson">ajson</a> library</li>
     </ul>
     <h3 id="sdk-components"><a class="anchor" aria-hidden="true" tabindex="-1" href="#sdk-components"><span class="octicon octicon-link"></span></a>SDK Components</h3>
     <p>The SDK provides several packages for module developers:</p>
@@ -257,8 +279,10 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
     </ul>
     <h4 id="pkgevaluator---expression-evaluator"><a class="anchor" aria-hidden="true" tabindex="-1" href="#pkgevaluator---expression-evaluator"><span class="octicon octicon-link"></span></a><code>/pkg/evaluator/</code> - Expression Evaluator</h4>
     <ul>
-      <li>JSONPath evaluation for data transformation</li>
-      <li>Edge configuration with expressions</li>
+      <li>Mustache-style <code>{{expression}}</code> syntax processing</li>
+      <li>JSONPath evaluation via ajson library</li>
+      <li>Type-preserving evaluation (numbers stay numbers, booleans stay booleans)</li>
+      <li>Graceful error handling when source data is unavailable</li>
     </ul>
     <h4 id="pkgmetrics---observability"><a class="anchor" aria-hidden="true" tabindex="-1" href="#pkgmetrics---observability"><span class="octicon octicon-link"></span></a><code>/pkg/metrics/</code> - Observability</h4>
     <ul>
@@ -304,7 +328,7 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
       <li><strong>Eventual Consistency with Reconciliation</strong>: Periodic reconciliation (every 5 minutes) plus signal-based immediate updates</li>
       <li><strong>Leader Election</strong>: Leader handles status updates and signal processing; non-leaders execute node logic</li>
       <li><strong>Schema-Driven Configuration</strong>: Go structs automatically generate JSON schemas for UI integration</li>
-      <li><strong>Expression-Based Transformation</strong>: JSONPath expressions enable flexible data mapping without code changes</li>
+      <li><strong>Expression-Based Transformation</strong>: Mustache-style <code>{{expression}}</code> syntax with JSONPath enables flexible data mapping without code changes</li>
       <li><strong>Definition Sharing</strong>: Components mark fields as <code>shared:true</code> or <code>configurable:true</code> for cross-node type safety</li>
     </ol>
     <h3 id="project-structure"><a class="anchor" aria-hidden="true" tabindex="-1" href="#project-structure"><span class="octicon octicon-link"></span></a>Project Structure</h3>
@@ -837,7 +861,7 @@ helm install my-module \
 " class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
     <p><strong>Struct Tags</strong>:</p>
     <ul>
-      <li><code>configurable:"true"</code>: Field can accept values from other nodes via expressions</li>
+      <li><code>configurable:"true"</code>: Field can accept values from other nodes via <code>{{expression}}</code> syntax</li>
       <li><code>shared:"true"</code>: Field definition is available to other nodes for type-safe mapping</li>
       <li><code>propertyOrder:"N"</code>: Controls field order in UI</li>
       <li><code>tab:"name"</code>: Groups field under a tab in UI</li>
