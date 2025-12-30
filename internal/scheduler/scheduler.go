@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -96,7 +97,6 @@ func (s *Schedule) Install(component module.Component) error {
 }
 
 // Handle could be external and synchronous
-// @todo use retry with backoff here
 func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 	nodeName, port := utils.ParseFullPortName(msg.To)
 
@@ -119,30 +119,54 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 
 	instance, ok := s.instancesMap.Get(nodeName)
 
-	if !ok || (instance != nil && !instance.HasPort(port)) {
-		// instance is not registered currently, or it's port is not yet available (settings did not enable it yet?)
-		// maybe reconcile call did not register it yet
-		// sleep and try again
-		s.log.Info("scheduler handle: instance not ready, delegating to outside handler",
+	// If instance doesn't exist at all, delegate to outside handler (might be remote)
+	if !ok {
+		s.log.Info("scheduler handle: instance not found, delegating to outside handler",
 			"node", nodeName,
 			"port", port,
-			"instanceExists", ok,
+		)
+		return s.msgHandler(ctx, msg)
+	}
+
+	// Instance exists - check if port is ready, retry with backoff if not
+	if instance != nil && !instance.HasPort(port) {
+		s.log.Info("scheduler handle: instance exists but port not ready, starting backoff retry",
+			"node", nodeName,
+			"port", port,
 		)
 
-		t := time.NewTimer(time.Millisecond)
-		defer t.Stop()
+		b := backoff.NewExponentialBackOff()
+		b.InitialInterval = 10 * time.Millisecond
+		b.MaxInterval = 1 * time.Second
+		b.MaxElapsedTime = 30 * time.Second
 
-		select {
-		// what ever happens first
-		case <-ctx.Done():
-			s.log.Info("scheduler handle: context cancelled while waiting",
+		err := backoff.Retry(func() error {
+			instance, ok = s.instancesMap.Get(nodeName)
+			if !ok {
+				// Instance was removed - permanent error
+				return backoff.Permanent(fmt.Errorf("instance %s no longer exists", nodeName))
+			}
+			if instance != nil && instance.HasPort(port) {
+				// Port is now ready
+				return nil
+			}
+			// Port still not ready - retry
+			return fmt.Errorf("port %s not ready on node %s", port, nodeName)
+		}, backoff.WithContext(b, ctx))
+
+		if err != nil {
+			s.log.Info("scheduler handle: port not ready after backoff retries",
 				"node", nodeName,
 				"port", port,
+				"error", err.Error(),
 			)
-			return nil, nil
-		case <-t.C:
-			return s.msgHandler(ctx, msg)
+			return nil, err
 		}
+
+		s.log.Info("scheduler handle: port became ready after backoff",
+			"node", nodeName,
+			"port", port,
+		)
 	}
 
 	s.log.Info("scheduler handle: routing to local instance",
