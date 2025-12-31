@@ -137,16 +137,26 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if err := r.Update(ctx, &signal); err != nil {
 			return ctrl.Result{}, err
 		}
+		// Return here - the Update will trigger another reconcile which will handle the goroutine
+		return ctrl.Result{}, nil
 	}
 
 	_, isRunning := r.runningProcesses[req.NamespacedName]
 	lastProcessedNonce := r.processedNonce[req.NamespacedName]
+	currentNonce := signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
 
-	specHasChanged := signal.Annotations[operatorv1alpha1.SignalNonceAnnotation] != lastProcessedNonce
+	specHasChanged := currentNonce != lastProcessedNonce
+
+	l.Info("signal controller: reconcile state",
+		"isRunning", isRunning,
+		"specHasChanged", specHasChanged,
+		"lastProcessedNonce", lastProcessedNonce,
+		"currentNonce", currentNonce,
+	)
 
 	// If the spec has changed, we must stop the old process before starting a new one.
 	if isRunning && specHasChanged {
-		l.Info("spec has changed, restarting process.", "lastProcessedNonce", lastProcessedNonce)
+		l.Info("spec has changed, restarting process.", "lastProcessedNonce", lastProcessedNonce, "currentNonce", currentNonce)
 		if cancel, ok := r.runningProcesses[req.NamespacedName]; ok {
 			cancel() // Signal the old process to stop.
 		}
@@ -160,25 +170,34 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		r.runningProcesses[req.NamespacedName] = cancel
 		r.processedNonce[req.NamespacedName] = signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
 
-		go func(ctx context.Context, spec operatorv1alpha1.TinySignalSpec) {
-			targetPort := utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port)
-			nonce := signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
+		go func(ctx context.Context, spec operatorv1alpha1.TinySignalSpec, nonce string) {
+			targetPort := utils.GetPortFullName(spec.Node, spec.Port)
 
 			l.Info("signal controller: process goroutine started",
-				"node", signal.Spec.Node,
-				"port", signal.Spec.Port,
+				"node", spec.Node,
+				"port", spec.Port,
 				"targetPort", targetPort,
 				"nonce", nonce,
-				"dataSize", len(signal.Spec.Data),
+				"dataSize", len(spec.Data),
 			)
 
 			// Exponential backoff configuration for retries on failure.
 			initialBackoff := 2 * time.Second
 			maxBackoff := 30 * time.Second
+			maxAttempts := 10 // Stop retrying after this many consecutive failures
 			currentBackoff := initialBackoff
 			attempt := 0
 
 			for {
+				// Check if we should stop before attempting
+				if ctx.Err() != nil {
+					l.Info("signal controller: context cancelled, shutting down",
+						"targetPort", targetPort,
+						"attempt", attempt,
+					)
+					return
+				}
+
 				attempt++
 
 				l.Info("signal controller: sending signal to scheduler",
@@ -190,34 +209,42 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				res, err := r.Scheduler.Handle(ctx, &runner.Msg{
 					From:  runner.FromSignal,
 					To:    targetPort,
-					Data:  signal.Spec.Data,
+					Data:  spec.Data,
 					Nonce: nonce,
 				})
 
 				if err != nil {
+					// Only stop if our process context was cancelled, not for internal context errors
+					if ctx.Err() != nil {
+						l.Info("signal controller: context cancelled after handle, shutting down",
+							"targetPort", targetPort,
+							"attempt", attempt,
+						)
+						return
+					}
+
 					l.Error(err, "signal controller: scheduler handle failed, will retry with backoff",
 						"targetPort", targetPort,
 						"attempt", attempt,
 						"nextRetryIn", currentBackoff,
 					)
 
-					// Wait for the backoff period, but immediately exit if the context is cancelled.
-					select {
-					case <-time.After(currentBackoff):
-						// Increase backoff for the next potential failure.
-						currentBackoff *= 2
-						if currentBackoff > maxBackoff {
-							currentBackoff = maxBackoff
-						}
-						continue // Jump to the next iteration to retry the work.
-					case <-ctx.Done():
-						// Context was cancelled during the backoff period.
-						l.Info("signal controller: context cancelled during retry backoff, shutting down",
+					// Check if we've exceeded max attempts
+					if attempt >= maxAttempts {
+						l.Error(err, "signal controller: max retry attempts reached, giving up. Port may not exist on target node.",
 							"targetPort", targetPort,
-							"attempt", attempt,
+							"maxAttempts", maxAttempts,
 						)
 						return
 					}
+
+					// Wait for the backoff period
+					time.Sleep(currentBackoff)
+					currentBackoff *= 2
+					if currentBackoff > maxBackoff {
+						currentBackoff = maxBackoff
+					}
+					continue
 				}
 
 				l.Info("signal controller: scheduler handle succeeded",
@@ -244,7 +271,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					)
 				}
 			}
-		}(processCtx, signal.Spec) // Pass the context and spec data to the goroutine.
+		}(processCtx, signal.Spec, signal.Annotations[operatorv1alpha1.SignalNonceAnnotation])
 	}
 
 	return ctrl.Result{}, nil
