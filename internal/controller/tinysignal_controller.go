@@ -182,13 +182,34 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			)
 
 			// Wait for target instance before sending
+			waitStart := time.Now()
+			waitAttempts := 0
 			for !r.Scheduler.HasInstance(spec.Node) {
+				waitAttempts++
+				if waitAttempts%10 == 0 {
+					l.Info("signal controller: still waiting for instance",
+						"node", spec.Node,
+						"waitAttempts", waitAttempts,
+						"waitDuration", time.Since(waitStart).String(),
+					)
+				}
 				select {
 				case <-ctx.Done():
+					l.Info("signal controller: context cancelled while waiting for instance",
+						"node", spec.Node,
+						"waitAttempts", waitAttempts,
+						"waitDuration", time.Since(waitStart).String(),
+						"ctxErr", ctx.Err(),
+					)
 					return
 				case <-time.After(500 * time.Millisecond):
 				}
 			}
+			l.Info("signal controller: instance found, proceeding to send signal",
+				"node", spec.Node,
+				"waitAttempts", waitAttempts,
+				"waitDuration", time.Since(waitStart).String(),
+			)
 
 			// Exponential backoff configuration for retries on failure.
 			initialBackoff := 2 * time.Second
@@ -212,7 +233,10 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				l.Info("signal controller: sending signal to scheduler",
 					"targetPort", targetPort,
 					"attempt", attempt,
+					"ctxErrBeforeHandle", ctx.Err(),
 				)
+
+				handleStart := time.Now()
 
 				// Execute the actual business logic.
 				res, err := r.Scheduler.Handle(ctx, &runner.Msg{
@@ -222,12 +246,23 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					Nonce: nonce,
 				})
 
+				handleDuration := time.Since(handleStart)
+
 				if err != nil {
+					l.Info("signal controller: handle returned error",
+						"targetPort", targetPort,
+						"attempt", attempt,
+						"error", err.Error(),
+						"handleDuration", handleDuration.String(),
+						"ctxErrAfterHandle", ctx.Err(),
+					)
+
 					// Only stop if our process context was cancelled, not for internal context errors
 					if ctx.Err() != nil {
 						l.Info("signal controller: context cancelled after handle, shutting down",
 							"targetPort", targetPort,
 							"attempt", attempt,
+							"handleDuration", handleDuration.String(),
 						)
 						return
 					}
@@ -236,6 +271,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 						"targetPort", targetPort,
 						"attempt", attempt,
 						"nextRetryIn", currentBackoff,
+						"handleDuration", handleDuration.String(),
 					)
 
 					// Check if we've exceeded max attempts
@@ -260,6 +296,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					"targetPort", targetPort,
 					"attempt", attempt,
 					"hasResponse", res != nil,
+					"handleDuration", handleDuration.String(),
 				)
 
 				// If the work was successful, reset the backoff duration.

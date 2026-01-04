@@ -237,10 +237,22 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		return nil, fmt.Errorf("input port is empty")
 	}
 
+	c.log.Info("runner msg handler: entering",
+		"port", port,
+		"from", msg.From,
+		"to", msg.To,
+		"node", c.name,
+		"ctxErrOnEntry", ctx.Err(),
+	)
+
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer cancel()
 		<-c.closeCh
+		c.log.Info("runner msg handler: closeCh received, cancelling context",
+			"port", port,
+			"node", c.name,
+		)
 	}()
 
 	var nodePort *m.Port
@@ -349,6 +361,14 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	var resp any
 
+	handleStart := time.Now()
+	c.log.Info("runner msg handler: calling component.Handle",
+		"port", port,
+		"node", c.name,
+		"from", msg.From,
+		"ctxErrBeforeHandle", ctx.Err(),
+	)
+
 	err = errorpanic.Wrap(func() error {
 		// track busy edge only if tracker is on
 		ticker := time.NewTicker(time.Second * 3)
@@ -371,12 +391,25 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		return utils.CheckForError(resp)
 	})
 
+	handleDuration := time.Since(handleStart)
+
 	if err != nil {
 		c.log.Error(err, "msg handler: component execution failed",
 			"port", port,
 			"node", c.name,
 			"from", msg.From,
 			"edgeID", msg.EdgeID,
+			"handleDuration", handleDuration.String(),
+			"ctxErrAfterHandle", ctx.Err(),
+		)
+	} else {
+		c.log.Info("runner msg handler: component.Handle completed",
+			"port", port,
+			"node", c.name,
+			"from", msg.From,
+			"handleDuration", handleDuration.String(),
+			"ctxErrAfterHandle", ctx.Err(),
+			"hasResponse", resp != nil,
 		)
 	}
 
