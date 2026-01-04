@@ -181,6 +181,15 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				"dataSize", len(spec.Data),
 			)
 
+			// Wait for target instance before sending
+			for !r.Scheduler.HasInstance(spec.Node) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(500 * time.Millisecond):
+				}
+			}
+
 			// Exponential backoff configuration for retries on failure.
 			initialBackoff := 2 * time.Second
 			maxBackoff := 30 * time.Second

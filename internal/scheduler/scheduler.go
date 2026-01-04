@@ -28,6 +28,9 @@ type Scheduler interface {
 
 	//Destroy stops the instance and deletes it
 	Destroy(name string) error
+
+	//HasInstance checks if an instance exists for the given node name
+	HasInstance(name string) bool
 }
 
 type Schedule struct {
@@ -226,6 +229,12 @@ func (s *Schedule) Destroy(name string) error {
 		instance.Stop()
 	}
 	return nil
+}
+
+// HasInstance checks if an instance exists for the given node name
+func (s *Schedule) HasInstance(name string) bool {
+	_, ok := s.instancesMap.Get(name)
+	return ok
 }
 
 // Update updates node instance or creates one based on tinyNode crd
