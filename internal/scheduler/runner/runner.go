@@ -246,13 +246,19 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	)
 
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // Ensure context is cancelled when handler returns
+
 	go func() {
-		defer cancel()
-		<-c.closeCh
-		c.log.Info("runner msg handler: closeCh received, cancelling context",
-			"port", port,
-			"node", c.name,
-		)
+		select {
+		case <-c.closeCh:
+			c.log.Info("runner msg handler: closeCh received, cancelling context",
+				"port", port,
+				"node", c.name,
+			)
+			cancel()
+		case <-ctx.Done():
+			// Handler completed or parent context cancelled - exit goroutine
+		}
 	}()
 
 	var nodePort *m.Port

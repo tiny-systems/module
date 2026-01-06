@@ -147,22 +147,31 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	specHasChanged := currentNonce != lastProcessedNonce
 
+	// Determine if we need to process this signal
+	needsProcessing := lastProcessedNonce == "" || specHasChanged
+
 	l.Info("signal controller: reconcile state",
 		"isRunning", isRunning,
 		"specHasChanged", specHasChanged,
+		"needsProcessing", needsProcessing,
 		"lastProcessedNonce", lastProcessedNonce,
 		"currentNonce", currentNonce,
 	)
 
-	// If the spec has changed, we must stop the old process before starting a new one.
-	if isRunning && specHasChanged {
-		l.Info("spec has changed, restarting process.", "lastProcessedNonce", lastProcessedNonce, "currentNonce", currentNonce)
+	// If already running, cancel the previous in-flight request before starting a new one
+	if isRunning {
+		l.Info("signal controller: cancelling previous in-flight request",
+			"lastProcessedNonce", lastProcessedNonce,
+			"currentNonce", currentNonce,
+		)
 		if cancel, ok := r.runningProcesses[req.NamespacedName]; ok {
 			cancel() // Signal the old process to stop.
 		}
+		delete(r.runningProcesses, req.NamespacedName)
 	}
 
-	if !isRunning || specHasChanged {
+	// Only start a new process if this signal hasn't been processed yet or spec changed
+	if needsProcessing {
 
 		// Create a new context that we can cancel later.
 		processCtx, cancel := context.WithCancel(utils.WithLeader(context.Background(), r.IsLeader.Load()))
@@ -299,23 +308,17 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					"handleDuration", handleDuration.String(),
 				)
 
-				// If the work was successful, reset the backoff duration.
-				currentBackoff = initialBackoff
-				attempt = 0
+				// Signal sent successfully - fire once, then exit
+				l.Info("signal controller: signal delivered successfully, exiting",
+					"targetPort", targetPort,
+				)
 
-				select {
-				case <-ctx.Done():
-					// The context was cancelled during the normal interval.
-					l.Info("signal controller: context cancelled during interval, shutting down",
-						"targetPort", targetPort,
-					)
-					return
-				case <-time.After(15 * time.Second):
-					// Interval finished, continue to the next loop to do the work again.
-					l.Info("signal controller: interval timer fired, sending next signal",
-						"targetPort", targetPort,
-					)
-				}
+				// Clean up from runningProcesses map
+				r.mu.Lock()
+				delete(r.runningProcesses, req.NamespacedName)
+				r.mu.Unlock()
+
+				return
 			}
 		}(processCtx, signal.Spec, signal.Annotations[operatorv1alpha1.SignalNonceAnnotation])
 	}
