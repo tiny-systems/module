@@ -158,9 +158,10 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"currentNonce", currentNonce,
 	)
 
-	// If already running, cancel the previous in-flight request before starting a new one
-	if isRunning {
-		l.Info("signal controller: cancelling previous in-flight request",
+	// If already running and spec changed, cancel the previous in-flight request
+	// Don't cancel if spec hasn't changed - this would kill long-running handlers
+	if isRunning && specHasChanged {
+		l.Info("signal controller: spec changed, cancelling previous in-flight request",
 			"lastProcessedNonce", lastProcessedNonce,
 			"currentNonce", currentNonce,
 		)
@@ -168,10 +169,11 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			cancel() // Signal the old process to stop.
 		}
 		delete(r.runningProcesses, req.NamespacedName)
+		isRunning = false // Allow new process to start
 	}
 
-	// Only start a new process if this signal hasn't been processed yet or spec changed
-	if needsProcessing {
+	// Only start a new process if not running and needs processing
+	if !isRunning && needsProcessing {
 
 		// Create a new context that we can cancel later.
 		processCtx, cancel := context.WithCancel(utils.WithLeader(context.Background(), r.IsLeader.Load()))
