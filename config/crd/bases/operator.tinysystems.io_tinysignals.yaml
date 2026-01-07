@@ -46,6 +46,11 @@ spec:
               node:
                 description: Node is the name of the TinyNode to signal
                 type: string
+              nonce:
+                description: |-
+                  Nonce is a unique identifier for this signal firing.
+                  Changing the nonce triggers a new signal delivery.
+                type: string
               port:
                 description: Port is the port on the node to send the signal to
                 type: string

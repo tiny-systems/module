@@ -563,9 +563,6 @@ func (m Manager) CreateSignal(ctx context.Context, nodeName, nodeNamespace strin
 	newSignal.Labels = map[string]string{
 		v1alpha1.NodeNameLabel: nodeName,
 	}
-	newSignal.Annotations = map[string]string{
-		v1alpha1.SignalNonceAnnotation: uuid.Must(uuid.NewRandom()).String(),
-	}
 
 	// Set owner reference to the node
 	newSignal.OwnerReferences = []metav1.OwnerReference{
@@ -579,9 +576,10 @@ func (m Manager) CreateSignal(ctx context.Context, nodeName, nodeNamespace strin
 	}
 
 	newSignal.Spec = v1alpha1.TinySignalSpec{
-		Node: nodeName,
-		Port: port,
-		Data: data,
+		Node:  nodeName,
+		Port:  port,
+		Data:  data,
+		Nonce: uuid.Must(uuid.NewRandom()).String(),
 	}
 
 	if errors.IsNotFound(err) {

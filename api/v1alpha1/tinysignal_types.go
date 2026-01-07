@@ -36,6 +36,11 @@ type TinySignalSpec struct {
 	// +kubebuilder:validation:Optional
 	// Data is the payload to send with the signal
 	Data []byte `json:"data"`
+
+	// +kubebuilder:validation:Optional
+	// Nonce is a unique identifier for this signal firing.
+	// Changing the nonce triggers a new signal delivery.
+	Nonce string `json:"nonce,omitempty"`
 }
 
 // TinySignalStatus defines the observed state of TinySignal

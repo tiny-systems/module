@@ -139,7 +139,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	_, isRunning := r.runningProcesses[req.NamespacedName]
 	lastProcessedNonce := signal.Status.ProcessedNonce
-	currentNonce := signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
+	currentNonce := signal.Spec.Nonce
 
 	specHasChanged := currentNonce != lastProcessedNonce
 
@@ -328,7 +328,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 				return
 			}
-		}(processCtx, req.NamespacedName, signal.Spec, signal.Annotations[operatorv1alpha1.SignalNonceAnnotation])
+		}(processCtx, req.NamespacedName, signal.Spec, signal.Spec.Nonce)
 	}
 
 	return ctrl.Result{}, nil
