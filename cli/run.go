@@ -205,11 +205,16 @@ var runCmd = &cobra.Command{
 		}
 
 		leaderElected := make(chan struct{})
+		leadershipKnown := make(chan struct{})
 
 		leaderCallbacks := leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				l.Info("became leader for status updates")
 				isLeader.Store(true)
+				// Leadership status is now known - we are the leader
+				if !isClosed(leadershipKnown) {
+					close(leadershipKnown)
+				}
 			},
 			OnStoppedLeading: func() {
 				l.Info("stopped leading for status updates")
@@ -221,6 +226,20 @@ var runCmd = &cobra.Command{
 					return
 				}
 				close(leaderElected)
+				// Start a goroutine to close leadershipKnown after timeout if we don't become leader
+				go func() {
+					select {
+					case <-leadershipKnown:
+						// Already closed by OnStartedLeading
+						return
+					case <-time.After(20 * time.Second):
+						// We're not going to become leader - we're a replica
+						l.Info("leadership election timeout, proceeding as replica")
+						if !isClosed(leadershipKnown) {
+							close(leadershipKnown)
+						}
+					}
+				}()
 			},
 		}
 
@@ -498,10 +517,10 @@ var runCmd = &cobra.Command{
 		})
 
 		wg.Go(func() error {
-			<-leaderElected
+			<-leadershipKnown
 
-			// start manager
-			l.Info("starting kubebuilder operator")
+			// start manager (leadership status is now known - either leader or replica)
+			l.Info("starting kubebuilder operator", "isLeader", isLeader.Load())
 			defer func() {
 				l.Info("kubebuilder operator stopped")
 			}()
