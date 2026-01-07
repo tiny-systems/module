@@ -17,25 +17,26 @@ limitations under the License.
 package controller
 
 import (
-	"context"
-	"github.com/tiny-systems/module/internal/scheduler"
-	"github.com/tiny-systems/module/internal/scheduler/runner"
-	"github.com/tiny-systems/module/module"
-	"github.com/tiny-systems/module/pkg/utils"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sync"
-	"sync/atomic"
-	"time"
+  "context"
+  "sync"
+  "sync/atomic"
+  "time"
 
-	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+  "github.com/tiny-systems/module/internal/scheduler"
+  "github.com/tiny-systems/module/internal/scheduler/runner"
+  "github.com/tiny-systems/module/module"
+  "github.com/tiny-systems/module/pkg/utils"
+  "k8s.io/apimachinery/pkg/api/errors"
+  "k8s.io/apimachinery/pkg/types"
+  "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+  "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
+  "k8s.io/apimachinery/pkg/runtime"
+  ctrl "sigs.k8s.io/controller-runtime"
+  "sigs.k8s.io/controller-runtime/pkg/client"
+  "sigs.k8s.io/controller-runtime/pkg/log"
+
+  operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
 
 // TinySignalReconciler reconciles a TinySignal object
@@ -139,6 +140,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	_, isRunning := r.runningProcesses[req.NamespacedName]
 	lastProcessedNonce := signal.Status.ProcessedNonce
+
 	currentNonce := signal.Spec.Nonce
 
 	specHasChanged := currentNonce != lastProcessedNonce
@@ -328,7 +330,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 				return
 			}
-		}(processCtx, req.NamespacedName, signal.Spec, signal.Spec.Nonce)
+		}(processCtx, req.NamespacedName, signal.Spec, currentNonce)
 	}
 
 	return ctrl.Result{}, nil
