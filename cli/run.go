@@ -189,6 +189,9 @@ var runCmd = &cobra.Command{
 		isLeader := &atomic.Bool{}
 		isLeader.Store(false)
 
+		leadershipKnown := &atomic.Bool{}
+		leadershipKnown.Store(false)
+
 		lock, err := resourcelock.New(
 			resourcelock.LeasesResourceLock,
 			namespace,
@@ -205,16 +208,12 @@ var runCmd = &cobra.Command{
 		}
 
 		leaderElected := make(chan struct{})
-		leadershipKnown := make(chan struct{})
 
 		leaderCallbacks := leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				l.Info("became leader for status updates")
 				isLeader.Store(true)
-				// Leadership status is now known - we are the leader
-				if !isClosed(leadershipKnown) {
-					close(leadershipKnown)
-				}
+				leadershipKnown.Store(true)
 			},
 			OnStoppedLeading: func() {
 				l.Info("stopped leading for status updates")
@@ -226,20 +225,6 @@ var runCmd = &cobra.Command{
 					return
 				}
 				close(leaderElected)
-				// Start a goroutine to close leadershipKnown after timeout if we don't become leader
-				go func() {
-					select {
-					case <-leadershipKnown:
-						// Already closed by OnStartedLeading
-						return
-					case <-time.After(20 * time.Second):
-						// We're not going to become leader - we're a replica
-						l.Info("leadership election timeout, proceeding as replica")
-						if !isClosed(leadershipKnown) {
-							close(leadershipKnown)
-						}
-					}
-				}()
 			},
 		}
 
@@ -429,11 +414,12 @@ var runCmd = &cobra.Command{
 		moduleInfo.Addr = <-listenAddr
 
 		nodeController := &controller.TinyNodeReconciler{
-			Client:    mgr.GetClient(),
-			Scheme:    mgr.GetScheme(),
-			Scheduler: scheduler,
-			Module:    moduleInfo,
-			IsLeader:  isLeader,
+			Client:          mgr.GetClient(),
+			Scheme:          mgr.GetScheme(),
+			Scheduler:       scheduler,
+			Module:          moduleInfo,
+			IsLeader:        isLeader,
+			LeadershipKnown: leadershipKnown,
 		}
 
 		if err = nodeController.SetupWithManager(mgr); err != nil {
@@ -517,10 +503,10 @@ var runCmd = &cobra.Command{
 		})
 
 		wg.Go(func() error {
-			<-leadershipKnown
+			<-leaderElected
 
-			// start manager (leadership status is now known - either leader or replica)
-			l.Info("starting kubebuilder operator", "isLeader", isLeader.Load())
+			// start manager
+			l.Info("starting kubebuilder operator")
 			defer func() {
 				l.Info("kubebuilder operator stopped")
 			}()
