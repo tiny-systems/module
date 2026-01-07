@@ -48,9 +48,6 @@ type TinySignalReconciler struct {
 	//
 	mu               *sync.Mutex
 	runningProcesses map[types.NamespacedName]context.CancelFunc
-
-	// This is used to determine if a process needs to be restarted due to a spec change.
-	processedNonce map[types.NamespacedName]string
 }
 
 const signalFinalizer = "io.tinysystems/signal-finalizer"
@@ -113,9 +110,8 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			if cancel, ok := r.runningProcesses[req.NamespacedName]; ok {
 				// Call the cancel function to signal the goroutine to stop.
 				cancel()
-				// Remove the entries from our maps to clean up.
+				// Remove the entry from our map to clean up.
 				delete(r.runningProcesses, req.NamespacedName)
-				delete(r.processedNonce, req.NamespacedName)
 				l.Info("process stopped successfully.")
 			}
 
@@ -142,7 +138,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	_, isRunning := r.runningProcesses[req.NamespacedName]
-	lastProcessedNonce := r.processedNonce[req.NamespacedName]
+	lastProcessedNonce := signal.Status.ProcessedNonce
 	currentNonce := signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
 
 	specHasChanged := currentNonce != lastProcessedNonce
@@ -179,9 +175,8 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		processCtx, cancel := context.WithCancel(utils.WithLeader(context.Background(), r.IsLeader.Load()))
 
 		r.runningProcesses[req.NamespacedName] = cancel
-		r.processedNonce[req.NamespacedName] = signal.Annotations[operatorv1alpha1.SignalNonceAnnotation]
 
-		go func(ctx context.Context, spec operatorv1alpha1.TinySignalSpec, nonce string) {
+		go func(ctx context.Context, signalName types.NamespacedName, spec operatorv1alpha1.TinySignalSpec, nonce string) {
 			targetPort := utils.GetPortFullName(spec.Node, spec.Port)
 
 			l.Info("signal controller: process goroutine started",
@@ -311,27 +306,51 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				)
 
 				// Signal sent successfully - fire once, then exit
-				l.Info("signal controller: signal delivered successfully, exiting",
+				l.Info("signal controller: signal delivered successfully, updating status",
 					"targetPort", targetPort,
+					"nonce", nonce,
 				)
+
+				// Update the signal status with the processed nonce (HA-safe persistence)
+				if err := r.updateSignalStatus(signalName, nonce); err != nil {
+					l.Error(err, "signal controller: failed to update signal status",
+						"targetPort", targetPort,
+						"nonce", nonce,
+					)
+					// Don't return here - the signal was delivered, status update failure
+					// will cause a re-delivery on next reconcile which is acceptable
+				}
 
 				// Clean up from runningProcesses map
 				r.mu.Lock()
-				delete(r.runningProcesses, req.NamespacedName)
+				delete(r.runningProcesses, signalName)
 				r.mu.Unlock()
 
 				return
 			}
-		}(processCtx, signal.Spec, signal.Annotations[operatorv1alpha1.SignalNonceAnnotation])
+		}(processCtx, req.NamespacedName, signal.Spec, signal.Annotations[operatorv1alpha1.SignalNonceAnnotation])
 	}
 
 	return ctrl.Result{}, nil
 }
 
+// updateSignalStatus updates the signal's status with the processed nonce.
+// This persists the nonce to Kubernetes for HA-safe operation across pod restarts.
+func (r *TinySignalReconciler) updateSignalStatus(name types.NamespacedName, nonce string) error {
+	ctx := context.Background()
+
+	var signal operatorv1alpha1.TinySignal
+	if err := r.Get(ctx, name, &signal); err != nil {
+		return err
+	}
+
+	signal.Status.ProcessedNonce = nonce
+	return r.Status().Update(ctx, &signal)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinySignalReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.mu = &sync.Mutex{}
-	r.processedNonce = make(map[types.NamespacedName]string)
 	r.runningProcesses = make(map[types.NamespacedName]context.CancelFunc)
 
 	return ctrl.NewControllerManagedBy(mgr).
