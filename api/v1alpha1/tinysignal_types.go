@@ -42,6 +42,11 @@ type TinySignalSpec struct {
 type TinySignalStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	// ProcessedNonce is the last nonce that was successfully processed.
+	// Used to determine if a signal needs to be re-fired.
+	// +kubebuilder:validation:Optional
+	ProcessedNonce string `json:"processedNonce,omitempty"`
 }
 
 //+kubebuilder:object:root=true
