@@ -458,21 +458,25 @@ func (m Manager) PatchNode(ctx context.Context, node v1alpha1.TinyNode, updater 
 		return err
 	}
 
+	// Save the current state from Kubernetes BEFORE modification to use as merge base.
+	// Using a deep copy ensures the merge patch is computed against the actual current
+	// state, not a stale cached 'node' which could cause empty patches when the updated
+	// state matches the stale cached state but differs from the actual Kubernetes state.
+	baseNode := findNode.DeepCopy()
+
 	if err := updater(findNode); err != nil {
 		return err
 	}
 
-	if reflect.DeepEqual(findNode.Status, node.Status) {
+	if reflect.DeepEqual(findNode.Status, baseNode.Status) {
 		return nil
 	}
 
 	log.Warn().Msgf("patching node %s", node.Name)
 
-	// Ensure TypeMeta is set on the base object for MergeFrom to work correctly
-	node.TypeMeta = findNode.TypeMeta
-	err := m.client.Status().Patch(ctx, findNode, client.MergeFrom(&node))
+	err := m.client.Status().Patch(ctx, findNode, client.MergeFrom(baseNode))
 	if err != nil {
-		log.Error().Err(err).Msgf("path error")
+		log.Error().Err(err).Msgf("patch error")
 	}
 	return err
 }
