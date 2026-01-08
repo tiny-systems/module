@@ -39,6 +39,12 @@ import (
   operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
 
+// runningProcess tracks a signal process that's currently executing
+type runningProcess struct {
+	cancel context.CancelFunc
+	nonce  string // the nonce this process was started with
+}
+
 // TinySignalReconciler reconciles a TinySignal object
 type TinySignalReconciler struct {
 	client.Client
@@ -48,7 +54,7 @@ type TinySignalReconciler struct {
 	IsLeader  *atomic.Bool
 	//
 	mu               *sync.Mutex
-	runningProcesses map[types.NamespacedName]context.CancelFunc
+	runningProcesses map[types.NamespacedName]*runningProcess
 }
 
 const signalFinalizer = "io.tinysystems/signal-finalizer"
@@ -107,10 +113,10 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if controllerutil.ContainsFinalizer(&signal, signalFinalizer) {
 			l.Info("tinySignal is being deleted, stopping associated process.")
 
-			// Look up the process's cancel function in our map.
-			if cancel, ok := r.runningProcesses[req.NamespacedName]; ok {
+			// Look up the process in our map.
+			if proc, ok := r.runningProcesses[req.NamespacedName]; ok {
 				// Call the cancel function to signal the goroutine to stop.
-				cancel()
+				proc.cancel()
 				// Remove the entry from our map to clean up.
 				delete(r.runningProcesses, req.NamespacedName)
 				l.Info("process stopped successfully.")
@@ -138,34 +144,43 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	_, isRunning := r.runningProcesses[req.NamespacedName]
+	runningProc, isRunning := r.runningProcesses[req.NamespacedName]
 	lastProcessedNonce := signal.Status.ProcessedNonce
 
 	currentNonce := signal.Spec.Nonce
 
-	specHasChanged := currentNonce != lastProcessedNonce
+	// Check if nonce changed from what's currently running (if running)
+	// or from what was last processed (if not running)
+	var nonceChanged bool
+	var compareNonce string
+	if isRunning {
+		compareNonce = runningProc.nonce
+		nonceChanged = currentNonce != runningProc.nonce
+	} else {
+		compareNonce = lastProcessedNonce
+		nonceChanged = currentNonce != lastProcessedNonce
+	}
 
 	// Determine if we need to process this signal
-	needsProcessing := lastProcessedNonce == "" || specHasChanged
+	needsProcessing := lastProcessedNonce == "" || (currentNonce != lastProcessedNonce)
 
 	l.Info("signal controller: reconcile state",
 		"isRunning", isRunning,
-		"specHasChanged", specHasChanged,
+		"nonceChanged", nonceChanged,
 		"needsProcessing", needsProcessing,
 		"lastProcessedNonce", lastProcessedNonce,
+		"runningNonce", compareNonce,
 		"currentNonce", currentNonce,
 	)
 
-	// If already running and spec changed, cancel the previous in-flight request
-	// Don't cancel if spec hasn't changed - this would kill long-running handlers
-	if isRunning && specHasChanged {
-		l.Info("signal controller: spec changed, cancelling previous in-flight request",
-			"lastProcessedNonce", lastProcessedNonce,
+	// If already running and nonce changed from what we're processing, cancel
+	// Don't cancel if nonce hasn't changed - this would kill long-running handlers
+	if isRunning && nonceChanged {
+		l.Info("signal controller: nonce changed, cancelling previous in-flight request",
+			"runningNonce", runningProc.nonce,
 			"currentNonce", currentNonce,
 		)
-		if cancel, ok := r.runningProcesses[req.NamespacedName]; ok {
-			cancel() // Signal the old process to stop.
-		}
+		runningProc.cancel()
 		delete(r.runningProcesses, req.NamespacedName)
 		isRunning = false // Allow new process to start
 	}
@@ -176,7 +191,10 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Create a new context that we can cancel later.
 		processCtx, cancel := context.WithCancel(utils.WithLeader(context.Background(), r.IsLeader.Load()))
 
-		r.runningProcesses[req.NamespacedName] = cancel
+		r.runningProcesses[req.NamespacedName] = &runningProcess{
+			cancel: cancel,
+			nonce:  currentNonce,
+		}
 
 		go func(ctx context.Context, signalName types.NamespacedName, spec operatorv1alpha1.TinySignalSpec, nonce string) {
 			targetPort := utils.GetPortFullName(spec.Node, spec.Port)
@@ -353,7 +371,7 @@ func (r *TinySignalReconciler) updateSignalStatus(name types.NamespacedName, non
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinySignalReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.mu = &sync.Mutex{}
-	r.runningProcesses = make(map[types.NamespacedName]context.CancelFunc)
+	r.runningProcesses = make(map[types.NamespacedName]*runningProcess)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinySignal{}).
