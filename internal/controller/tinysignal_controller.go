@@ -325,7 +325,23 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					"handleDuration", handleDuration.String(),
 				)
 
-				// Signal sent successfully - fire once, then exit
+				// For long-running handlers (like HTTP server), Handle() only returns when
+				// context is cancelled. In this case, we must NOT update processedNonce,
+				// so the signal will re-fire on pod restart.
+				if ctx.Err() != nil {
+					l.Info("signal controller: handler returned due to context cancellation, not marking as processed",
+						"targetPort", targetPort,
+						"nonce", nonce,
+						"ctxErr", ctx.Err(),
+					)
+					// Clean up from runningProcesses map
+					r.mu.Lock()
+					delete(r.runningProcesses, signalName)
+					r.mu.Unlock()
+					return
+				}
+
+				// Signal sent successfully with actual completion (not cancellation)
 				l.Info("signal controller: signal delivered successfully, updating status",
 					"targetPort", targetPort,
 					"nonce", nonce,
