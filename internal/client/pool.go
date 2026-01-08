@@ -36,6 +36,23 @@ func (p *AddressPool) Register(moduleName, addr string) {
 		"addr", addr,
 	)
 	p.addressTable.Set(moduleName, addr)
+
+	// Pre-warm connection in background to avoid cold start latency on first request
+	if p.runCtx != nil {
+		go func() {
+			if _, err := p.getClient(p.runCtx, addr); err != nil {
+				p.log.Error(err, "address pool: failed to pre-warm connection",
+					"module", moduleName,
+					"addr", addr,
+				)
+			} else {
+				p.log.Info("address pool: connection pre-warmed",
+					"module", moduleName,
+					"addr", addr,
+				)
+			}
+		}()
+	}
 }
 
 func (p *AddressPool) Deregister(moduleName string) {
