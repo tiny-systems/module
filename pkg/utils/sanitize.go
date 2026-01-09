@@ -12,7 +12,22 @@ func SanitizeResourceName(in string) string {
 		return ""
 	}
 	name := reg.ReplaceAllString(strings.ToLower(in), "-")
-	return limitByRune(name, 48)
+	return limitByRuneKeepSuffix(name, 48)
+}
+
+// limitByRuneKeepSuffix truncates a string to maxLength while preserving the suffix.
+// This is important for Kubernetes pod names where the unique identifier is at the end.
+// Example: "tinysystems-http-module-v0-controller-manager-67fc65b5bc-6mdh8" (61 chars)
+// becomes: "ystems-http-module-v0-controller-manager-67fc65b5bc-6mdh8" (48 chars)
+// This ensures different pods have different identities for leader election.
+func limitByRuneKeepSuffix(s string, maxLength int) string {
+	if utf8.RuneCountInString(s) <= maxLength {
+		return s
+	}
+
+	runes := []rune(s)
+	// Keep the suffix (last maxLength characters) instead of prefix
+	return string(runes[len(runes)-maxLength:])
 }
 
 func limitByRune(s string, maxLength int) string {
