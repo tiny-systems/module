@@ -221,6 +221,9 @@ var runCmd = &cobra.Command{
 			},
 			OnNewLeader: func(identity string) {
 				l.Info("new leader elected for status updates", "leader", identity)
+				// Mark leadership as known for all pods (including non-leaders)
+				// This allows non-leader pods to proceed with ReconcilePort handling
+				leadershipKnown.Store(true)
 				if isClosed(leaderElected) {
 					return
 				}
