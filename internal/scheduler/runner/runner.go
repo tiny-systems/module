@@ -432,16 +432,20 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			nodeUpdater, _ := outputData.(func(node *v1alpha1.TinyNode) error)
 
 			err := c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
+				// Apply component's metadata updates FIRST
+				if nodeUpdater != nil {
+					if err := nodeUpdater(node); err != nil {
+						return err
+					}
+				}
+				// THEN read status (so getControl() sees updated metadata)
 				if err := c.ReadStatus(&node.Status); err != nil {
 					c.log.Error(err, "data handler: failed to read node status",
 						"node", c.name,
 					)
 					return err
 				}
-				if nodeUpdater == nil {
-					return nil
-				}
-				return nodeUpdater(node)
+				return nil
 			})
 			if err != nil {
 				c.log.Error(err, "data handler: failed to patch node",
