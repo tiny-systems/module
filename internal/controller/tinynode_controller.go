@@ -151,7 +151,7 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if !r.IsLeader.Load() {
 		return reconcile.Result{
-			RequeueAfter: time.Second * 30,
+			RequeueAfter: time.Second * 5,
 		}, nil
 	}
 
