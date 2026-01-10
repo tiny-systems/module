@@ -674,6 +674,10 @@ func (c *Runner) jsonEncodeDecode(input interface{}, output interface{}) error {
 }
 
 func (c *Runner) addSpanError(span trace.Span, err error) {
+	// Don't record context cancellation as errors - they're expected during shutdown
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	span.RecordError(err, trace.WithStackTrace(true))
 	span.SetStatus(codes.Error, err.Error())
 }
