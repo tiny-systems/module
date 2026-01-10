@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"sync/atomic"
+	"time"
 
 	errors2 "github.com/pkg/errors"
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
@@ -27,6 +28,7 @@ import (
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -142,8 +144,13 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Only update status if it changed
 	if reflect.DeepEqual(originNode.Status, node.Status) {
-		return ctrl.Result{}, nil
+		return ctrl.Result{
+			RequeueAfter: time.Minute * 5,
+		}, nil
 	}
+
+	t := v1.NewTime(time.Now())
+	node.Status.LastUpdateTime = &t
 
 	// update status
 	err = r.Status().Patch(ctx, node, client.MergeFrom(originNode))
@@ -152,7 +159,9 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return reconcile.Result{}, errors2.Wrap(err, "status update error")
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{
+		RequeueAfter: time.Minute * 5,
+	}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
