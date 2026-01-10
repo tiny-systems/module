@@ -17,26 +17,28 @@ limitations under the License.
 package controller
 
 import (
-  "context"
-  "sync"
-  "sync/atomic"
-  "time"
+	"context"
+	"sync"
+	"sync/atomic"
+	"time"
 
-  "github.com/tiny-systems/module/internal/scheduler"
-  "github.com/tiny-systems/module/internal/scheduler/runner"
-  "github.com/tiny-systems/module/module"
-  "github.com/tiny-systems/module/pkg/utils"
-  "k8s.io/apimachinery/pkg/api/errors"
-  "k8s.io/apimachinery/pkg/types"
-  "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-  "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"github.com/tiny-systems/module/internal/scheduler"
+	"github.com/tiny-systems/module/internal/scheduler/runner"
+	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
-  "k8s.io/apimachinery/pkg/runtime"
-  ctrl "sigs.k8s.io/controller-runtime"
-  "sigs.k8s.io/controller-runtime/pkg/client"
-  "sigs.k8s.io/controller-runtime/pkg/log"
-
-  operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
+	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
 
 // runningProcess tracks a signal process that's currently executing
@@ -55,6 +57,8 @@ type TinySignalReconciler struct {
 	//
 	mu               *sync.Mutex
 	runningProcesses map[types.NamespacedName]*runningProcess
+	// leadershipCh receives events when leadership changes to trigger requeue of all signals
+	leadershipCh chan event.GenericEvent
 }
 
 const signalFinalizer = "io.tinysystems/signal-finalizer"
@@ -384,12 +388,67 @@ func (r *TinySignalReconciler) updateSignalStatus(name types.NamespacedName, non
 	return r.Status().Update(ctx, &signal)
 }
 
+// RequeueAllOnLeadershipChange triggers requeue of all TinySignals when this pod becomes leader.
+// This ensures signals that were skipped while not leader get processed.
+func (r *TinySignalReconciler) RequeueAllOnLeadershipChange() {
+	if r.leadershipCh == nil {
+		return
+	}
+	// Non-blocking send - if channel already has an event pending, skip
+	select {
+	case r.leadershipCh <- event.GenericEvent{Object: &operatorv1alpha1.TinySignal{}}:
+	default:
+	}
+}
+
+// CancelAllRunningProcesses cancels all running signal processes.
+// This should be called when the pod loses leadership to ensure clean handoff.
+func (r *TinySignalReconciler) CancelAllRunningProcesses() {
+	if r.mu == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for name, proc := range r.runningProcesses {
+		proc.cancel()
+		delete(r.runningProcesses, name)
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinySignalReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.mu = &sync.Mutex{}
 	r.runningProcesses = make(map[types.NamespacedName]*runningProcess)
+	r.leadershipCh = make(chan event.GenericEvent, 1)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinySignal{}).
+		WatchesRawSource(source.Channel(
+			r.leadershipCh,
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+				// List all TinySignals and enqueue those belonging to this module
+				var signals operatorv1alpha1.TinySignalList
+				if err := r.List(ctx, &signals); err != nil {
+					return nil
+				}
+
+				var requests []reconcile.Request
+				for _, sig := range signals.Items {
+					// Only enqueue signals for this module
+					m, _, err := module.ParseFullName(sig.Name)
+					if err != nil || m != r.Module.GetNameSanitised() {
+						continue
+					}
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      sig.Name,
+							Namespace: sig.Namespace,
+						},
+					})
+				}
+				return requests
+			}),
+		)).
 		Complete(r)
 }
