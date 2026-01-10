@@ -27,3 +27,4 @@ Dockerfile.cross
 # Claude Code local settings
 .claude/settings.local.json
 file.json
+screenshots
