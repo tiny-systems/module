@@ -25,6 +25,7 @@ TinySystems Module SDK enables developers to create **module operators** (like `
   - [SDK Components](#sdk-components)
   - [Communication Patterns](#communication-patterns)
   - [Design Patterns](#design-patterns)
+  - [Scalability](#scalability)
   - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Helm Charts](#helm-charts)
@@ -201,10 +202,187 @@ When nodes belong to different modules:
 ### Design Patterns
 
 1. **Eventual Consistency with Reconciliation**: Periodic reconciliation (every 5 minutes) plus signal-based immediate updates
-2. **Leader Election**: Leader handles status updates and signal processing; non-leaders execute node logic
+2. **Leader Election with Metadata Sync**: Leader handles metadata updates for control operations; all pods execute node logic and sync state from TinyNode metadata
 3. **Schema-Driven Configuration**: Go structs automatically generate JSON schemas for UI integration
 4. **Expression-Based Transformation**: Mustache-style `{{expression}}` syntax with JSONPath enables flexible data mapping without code changes
 5. **Definition Sharing**: Components mark fields as `shared:true` or `configurable:true` for cross-node type safety
+
+### Scalability
+
+The SDK implements a **metadata-synchronization** pattern that enables horizontal scaling of module operators while maintaining consistency across replicas.
+
+#### Core Scalability Mechanism
+
+**Leader Election (for TinySignal processing):**
+- Uses Kubernetes native leader election via `k8s.io/client-go/tools/leaderelection` with Lease resources
+- Configuration: 15s lease duration, 10s renew deadline, 2s retry period
+- Each pod identifies itself using the `HOSTNAME` environment variable
+- Leadership state tracked via `isLeader` and `leadershipKnown` atomic booleans
+- **Purpose**: TinySignal broadcasts reconcile events to ALL pods; only leader processes them to avoid N-fold multiplication
+
+**Metadata as Source of Truth:**
+- TinyNode `Status.Metadata` acts as distributed state store
+- Any pod can update metadata (not just leader)
+- All pods sync state from metadata via `ReconcilePort`
+- Non-leaders requeue reconciliation every 5 seconds for faster state sync
+
+**Two Message Delivery Patterns:**
+1. **TinySignal → Reconcile**: Broadcast to all pods, only leader processes
+2. **gRPC (inter-component)**: Round-robin to any pod, receiving pod processes and updates CR
+
+#### Signal Component Scalability
+
+The Signal component (`common-module`) demonstrates leader filtering for TinySignal-triggered control operations.
+
+**Problem Solved:** TinySignal broadcasts to all pods; control commands (Send/Reset) should execute once, not N times.
+
+**Why Leader Filtering Works Here:**
+- Signal's control port accepts configurable input data
+- Platform can create TinySignals targeting control ports with input types
+- TinySignal → reconcile → all pods receive → only leader processes
+
+**Implementation:**
+
+```go
+// Only leader processes TinySignal-triggered control commands
+if !utils.IsLeader(ctx) {
+    return nil
+}
+```
+
+**Metadata Keys:**
+- `signal-running`: Boolean string indicating if signal is active
+
+**Flow:**
+1. TinySignal created → reconcile broadcast to all Signal pods
+2. Only leader pod processes the control command
+3. Leader updates `Status.Metadata["signal-running"] = "true"` via ReconcilePort handler
+4. All pods receive ReconcilePort event with updated TinyNode
+5. All pods sync their local `isRunning` state from metadata
+6. UI shows consistent state across all replicas
+
+**State Synchronization:**
+```go
+case v1alpha1.ReconcilePort:
+    if node, ok := msg.(v1alpha1.TinyNode); ok {
+        t.isRunning = node.Status.Metadata["signal-running"] == "true"
+    }
+```
+
+**Benefits:**
+- Single execution of TinySignal-triggered commands (no N-fold multiplication)
+- Consistent UI state across all pods
+- Automatic state recovery on pod restart
+- Context data preserved in component state
+
+#### HTTP Server Component Scalability
+
+The HTTP Server component (`http-module`) demonstrates gRPC round-robin with metadata sync.
+
+**Key Difference from Signal:** HTTP Server's control port has no input type (buttons only), so platform cannot create TinySignals for it. Start requests arrive via gRPC from upstream components (e.g., Signal → gRPC → HTTP Server).
+
+**Problem Solved:** Multiple replicas need to serve HTTP traffic while coordinating startup/shutdown when any pod can receive the start request.
+
+**Message Flow:**
+```
+TinySignal → Signal (leader only) → gRPC → HTTP Server (any pod, round-robin)
+```
+
+**Implementation:**
+
+**First Pod to Receive Start (becomes "initiator"):**
+- Receives start request via gRPC (round-robin, could be any pod)
+- Starts server and updates metadata with actual listening port
+- Serializes full configuration to metadata for other pods
+
+**Other Pods (followers):**
+- See metadata update via ReconcilePort
+- Auto-discover port from metadata
+- Restore configuration from serialized metadata
+- Start their own server instance
+
+**Metadata Keys:**
+- `http-server-port`: The actual listening port (0 = stopped, >0 = running)
+- `http-server-config`: Serialized startup configuration (JSON)
+
+**Flow:**
+```
+┌─────────────────────────────────────────────────────┐
+│         TinyNode Status.Metadata                    │
+│  - http-server-port: [actual-port or 0]             │
+│  - http-server-config: {serialized config}          │
+└─────────────────────────────────────────────────────┘
+         ▲                                    ▲
+    updates first                        syncs & follows
+         │                                    │
+    ┌────┴─────────────┐          ┌──────────┴─────────────┐
+    │  INITIATOR POD   │          │   FOLLOWER POD(s)      │
+    │  (receives gRPC) │          │  (sync from metadata)  │
+    │                  │          │                        │
+    │ - Starts server  │          │ - Auto-discovers port  │
+    │ - Updates meta   │          │ - Restores config      │
+    │ - Sets config    │          │ - Starts own server    │
+    └──────────────────┘          └────────────────────────┘
+```
+
+**Stop Behavior:**
+- Pod that initiated (listenPort was 0 at start) updates metadata to port=0 on stop
+- Follower pods (listenPort > 0) only stop locally, don't modify metadata
+- Restart flag prevents metadata corruption during restart sequences
+
+**Benefits:**
+- Zero-downtime scaling (pods auto-discover and start from metadata)
+- Configuration consistency (initiator's config distributed via metadata)
+- Clean shutdown coordination (metadata ensures pod agreement)
+- Automatic recovery (pods auto-restart from ReconcilePort)
+
+#### Implementing Scalable Components
+
+**Choose the right pattern based on how your component receives messages:**
+
+**Pattern 1: TinySignal-triggered control ports (like Signal)**
+
+Use when: Control port accepts configurable input that users may trigger via TinySignal.
+
+```go
+// Filter TinySignal broadcasts - only leader processes
+if !utils.IsLeader(ctx) {
+    return nil
+}
+// Process command and update metadata
+handler(ctx, v1alpha1.ReconcilePort, v1alpha1.MetadataConfigPatch{
+    Metadata: map[string]string{"my-state": "value"},
+})
+```
+
+**Pattern 2: gRPC-triggered ports (like HTTP Server)**
+
+Use when: Port receives messages via gRPC from other components (round-robin delivery).
+
+```go
+// Any pod can receive - process and update metadata
+// Other pods will sync via ReconcilePort
+handler(ctx, v1alpha1.ReconcilePort, v1alpha1.MetadataConfigPatch{
+    Metadata: map[string]string{"my-state": "value"},
+})
+```
+
+**Common: Sync state from ReconcilePort (all patterns)**
+
+```go
+case v1alpha1.ReconcilePort:
+    if node, ok := msg.(v1alpha1.TinyNode); ok {
+        c.myState = node.Status.Metadata["my-state"]
+        // Start/configure based on metadata if needed
+    }
+```
+
+**Common: Use metadata for consistent status display**
+
+```go
+// Use metadata as source of truth for UI, not local state
+isRunning := node.Status.Metadata["running"] == "true"
+```
 
 ### Project Structure
 

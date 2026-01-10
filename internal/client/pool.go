@@ -26,6 +26,7 @@ type AddressPool struct {
 	log          logr.Logger
 	addressTable cmap.ConcurrentMap[string, string]
 	clients      cmap.ConcurrentMap[string, module.ModuleServiceClient]
+	conns        cmap.ConcurrentMap[string, *grpc.ClientConn] // Store connections for lifecycle management
 	errGroup     *errgroup.Group
 	runCtx       context.Context
 }
@@ -59,13 +60,42 @@ func (p *AddressPool) Deregister(moduleName string) {
 	p.log.Info("address pool: deregistering module",
 		"module", moduleName,
 	)
+
+	// Get the address before removing from table
+	addr, ok := p.addressTable.Get(moduleName)
 	p.addressTable.Remove(moduleName)
+
+	if !ok {
+		return
+	}
+
+	// Check if any other module uses the same address
+	stillInUse := false
+	p.addressTable.IterCb(func(_ string, a string) {
+		if a == addr {
+			stillInUse = true
+		}
+	})
+
+	// Only close connection if no other module uses this address
+	if !stillInUse {
+		if conn, exists := p.conns.Get(addr); exists {
+			p.log.Info("address pool: closing connection",
+				"module", moduleName,
+				"addr", addr,
+			)
+			_ = conn.Close()
+			p.conns.Remove(addr)
+			p.clients.Remove(addr)
+		}
+	}
 }
 
 func NewPool() *AddressPool {
 	return &AddressPool{
 		addressTable: cmap.New[string](),
 		clients:      cmap.New[module.ModuleServiceClient](),
+		conns:        cmap.New[*grpc.ClientConn](),
 		errGroup:     &errgroup.Group{},
 	}
 }
@@ -110,7 +140,7 @@ func (p *AddressPool) Start(ctx context.Context) error {
 	return p.errGroup.Wait()
 }
 
-func (p *AddressPool) getClient(_ context.Context, addr string) (module.ModuleServiceClient, error) {
+func (p *AddressPool) getClient(ctx context.Context, addr string) (module.ModuleServiceClient, error) {
 	if client, ok := p.clients.Get(addr); ok {
 		return client, nil
 	}
@@ -128,6 +158,12 @@ func (p *AddressPool) getClient(_ context.Context, addr string) (module.ModuleSe
 		p.log.Error(err, "grpc client: connection failed", "addr", addr)
 		return nil, err
 	}
+
+	// Trigger immediate connection instead of waiting for first RPC
+	// This eliminates first-message latency
+	conn.Connect()
+
+	p.conns.Set(addr, conn)
 
 	p.errGroup.Go(func() error {
 		<-p.runCtx.Done()
