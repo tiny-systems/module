@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -161,6 +160,8 @@ func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinyNode{}).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		// Reconcile on spec changes (generation) OR status.metadata changes
+		// This allows non-leaders to pick up metadata updates from the leader
+		WithEventFilter(GenerationOrMetadataChangedPredicate{}).
 		Complete(r)
 }
