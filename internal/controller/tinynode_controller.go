@@ -40,11 +40,10 @@ import (
 // TinyNodeReconciler reconciles a TinyNode object
 type TinyNodeReconciler struct {
 	client.Client
-	Scheme          *runtime.Scheme
-	Scheduler       scheduler.Scheduler
-	Module          module.Info
-	IsLeader        *atomic.Bool
-	LeadershipKnown *atomic.Bool
+	Scheme    *runtime.Scheme
+	Scheduler scheduler.Scheduler
+	Module    module.Info
+	IsLeader  *atomic.Bool
 }
 
 const nodeFinalizer = "io.tinysystems/node-finalizer"
@@ -75,14 +74,6 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if m != r.Module.GetNameSanitised() {
 		// not us
 		return reconcile.Result{}, nil
-	}
-
-	// Wait for leadership status to be determined before processing
-	// This prevents race conditions where a pod starts reconciling before
-	// knowing if it's the leader or a replica
-	if r.LeadershipKnown != nil && !r.LeadershipKnown.Load() {
-		l.Info("leadership status not yet known, requeuing", "namespace", req.Namespace, "name", req.Name)
-		return reconcile.Result{RequeueAfter: time.Second * 2}, nil
 	}
 
 	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name)
@@ -135,9 +126,6 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	node.Status.Error = false
 
 	ctx = utils.WithLeader(ctx, r.IsLeader.Load())
-	if r.LeadershipKnown != nil {
-		ctx = utils.WithLeadershipKnown(ctx, r.LeadershipKnown.Load())
-	}
 
 	// upsert in scheduler
 	err = r.Scheduler.Update(ctx, node)

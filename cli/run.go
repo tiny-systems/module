@@ -189,9 +189,6 @@ var runCmd = &cobra.Command{
 		isLeader := &atomic.Bool{}
 		isLeader.Store(false)
 
-		leadershipKnown := &atomic.Bool{}
-		leadershipKnown.Store(false)
-
 		// Create signal reconciler early so we can use it in leader callbacks
 		// The Client, Scheme, and Scheduler fields will be set later before SetupWithManager
 		signalReconciler := &controller.TinySignalReconciler{
@@ -220,7 +217,6 @@ var runCmd = &cobra.Command{
 			OnStartedLeading: func(ctx context.Context) {
 				l.Info("became leader for status updates")
 				isLeader.Store(true)
-				leadershipKnown.Store(true)
 				// Trigger requeue of all TinySignals so they get processed by new leader
 				signalReconciler.RequeueAllOnLeadershipChange()
 			},
@@ -232,9 +228,6 @@ var runCmd = &cobra.Command{
 			},
 			OnNewLeader: func(identity string) {
 				l.Info("new leader elected for status updates", "leader", identity)
-				// Mark leadership as known for all pods (including non-leaders)
-				// This allows non-leader pods to proceed with ReconcilePort handling
-				leadershipKnown.Store(true)
 				if isClosed(leaderElected) {
 					return
 				}
@@ -433,7 +426,6 @@ var runCmd = &cobra.Command{
 			Scheduler:       scheduler,
 			Module:          moduleInfo,
 			IsLeader:        isLeader,
-			LeadershipKnown: leadershipKnown,
 		}
 
 		if err = nodeController.SetupWithManager(mgr); err != nil {
