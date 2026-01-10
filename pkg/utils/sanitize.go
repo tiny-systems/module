@@ -15,6 +15,17 @@ func SanitizeResourceName(in string) string {
 	return limitByRuneKeepSuffix(name, 48)
 }
 
+// SanitizeIdentity sanitizes a string for use as leader election identity.
+// Unlike SanitizeResourceName, this does not truncate as identity doesn't have
+// the same length restrictions as Kubernetes resource names.
+func SanitizeIdentity(in string) string {
+	reg, err := regexp.Compile("[^A-Za-z0-9]+")
+	if err != nil {
+		return ""
+	}
+	return reg.ReplaceAllString(strings.ToLower(in), "-")
+}
+
 // limitByRuneKeepSuffix truncates a string to maxLength while preserving the suffix.
 // This is important for Kubernetes pod names where the unique identifier is at the end.
 // Example: "tinysystems-http-module-v0-controller-manager-67fc65b5bc-6mdh8" (61 chars)
