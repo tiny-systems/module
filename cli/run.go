@@ -199,7 +199,7 @@ var runCmd = &cobra.Command{
 			nil,
 			coreClient.CoordinationV1(), // Event recorder
 			resourcelock.ResourceLockConfig{
-				Identity: utils.SanitizeResourceName(podName),
+				Identity: utils.SanitizeIdentity(podName),
 			},
 		)
 		if err != nil {
