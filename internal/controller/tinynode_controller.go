@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"reflect"
 	"sync/atomic"
 	"time"
 
@@ -143,16 +142,8 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Always update LastUpdateTime for periodic heartbeat
-	// This must be set BEFORE the DeepEqual check so periodic updates always trigger
 	t := v1.NewTime(time.Now())
 	node.Status.LastUpdateTime = &t
-
-	// Only update status if it changed (LastUpdateTime will always differ on requeue)
-	if reflect.DeepEqual(originNode.Status, node.Status) {
-		return ctrl.Result{
-			RequeueAfter: time.Minute * 5,
-		}, nil
-	}
 
 	// update status
 	err = r.Status().Patch(ctx, node, client.MergeFrom(originNode))
