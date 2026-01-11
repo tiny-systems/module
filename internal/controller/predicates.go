@@ -90,5 +90,6 @@ func (GenerationOrMetadataChangedPredicate) Update(e event.UpdateEvent) bool {
 }
 
 func (GenerationOrMetadataChangedPredicate) Generic(e event.GenericEvent) bool {
-	return false
+	// Must return true to allow RequeueAfter timer events to trigger reconciliation
+	return true
 }
