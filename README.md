@@ -969,17 +969,13 @@ The SDK includes a CLI for running and building modules:
 
 ## License
 
-Copyright 2023.
+Copyright 2026 Tiny Systems Limited. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+This project is licensed under the [Business Source License 1.1](LICENSE).
 
-    http://www.apache.org/licenses/LICENSE-2.0
+**Key terms:**
+- Free for production and non-production use
+- Not permitted: offering this software as a managed service, cloud service, or SaaS
+- Converts to Apache License 2.0 on January 11, 2031
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+For commercial licensing inquiries, contact Tiny Systems Limited.
