@@ -113,6 +113,7 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
           <li><a href="#sdk-components">SDK Components</a></li>
           <li><a href="#communication-patterns">Communication Patterns</a></li>
           <li><a href="#design-patterns">Design Patterns</a></li>
+          <li><a href="#scalability">Scalability</a></li>
           <li><a href="#project-structure">Project Structure</a></li>
         </ul>
       </li>
@@ -326,11 +327,209 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
     <h3 id="design-patterns"><a class="anchor" aria-hidden="true" tabindex="-1" href="#design-patterns"><span class="octicon octicon-link"></span></a>Design Patterns</h3>
     <ol>
       <li><strong>Eventual Consistency with Reconciliation</strong>: Periodic reconciliation (every 5 minutes) plus signal-based immediate updates</li>
-      <li><strong>Leader Election</strong>: Leader handles status updates and signal processing; non-leaders execute node logic</li>
+      <li><strong>Leader Election with Metadata Sync</strong>: Leader handles metadata updates for control operations; all pods execute node logic and sync state from TinyNode metadata</li>
       <li><strong>Schema-Driven Configuration</strong>: Go structs automatically generate JSON schemas for UI integration</li>
       <li><strong>Expression-Based Transformation</strong>: Mustache-style <code>{{expression}}</code> syntax with JSONPath enables flexible data mapping without code changes</li>
       <li><strong>Definition Sharing</strong>: Components mark fields as <code>shared:true</code> or <code>configurable:true</code> for cross-node type safety</li>
     </ol>
+    <h3 id="scalability"><a class="anchor" aria-hidden="true" tabindex="-1" href="#scalability"><span class="octicon octicon-link"></span></a>Scalability</h3>
+    <p>The SDK implements a <strong>metadata-synchronization</strong> pattern that enables horizontal scaling of module operators while maintaining consistency across replicas.</p>
+    <h4 id="core-scalability-mechanism"><a class="anchor" aria-hidden="true" tabindex="-1" href="#core-scalability-mechanism"><span class="octicon octicon-link"></span></a>Core Scalability Mechanism</h4>
+    <p><strong>Leader Election (for TinySignal processing):</strong></p>
+    <ul>
+      <li>Uses Kubernetes native leader election via <code>k8s.io/client-go/tools/leaderelection</code> with Lease resources</li>
+      <li>Configuration: 15s lease duration, 10s renew deadline, 2s retry period</li>
+      <li>Each pod identifies itself using the <code>HOSTNAME</code> environment variable</li>
+      <li>Leadership state tracked via <code>isLeader</code> and <code>leadershipKnown</code> atomic booleans</li>
+      <li><strong>Purpose</strong>: TinySignal broadcasts reconcile events to ALL pods; only leader processes them to avoid N-fold multiplication</li>
+    </ul>
+    <p><strong>Metadata as Source of Truth:</strong></p>
+    <ul>
+      <li>TinyNode <code>Status.Metadata</code> acts as distributed state store</li>
+      <li>Any pod can update metadata (not just leader)</li>
+      <li>All pods sync state from metadata via <code>ReconcilePort</code></li>
+      <li>Non-leaders requeue reconciliation every 5 seconds for faster state sync</li>
+    </ul>
+    <p><strong>Two Message Delivery Patterns:</strong></p>
+    <ol>
+      <li><strong>TinySignal → Reconcile</strong>: Broadcast to all pods, only leader processes</li>
+      <li><strong>gRPC (inter-component)</strong>: Round-robin to any pod, receiving pod processes and updates CR</li>
+    </ol>
+    <h4 id="signal-component-scalability"><a class="anchor" aria-hidden="true" tabindex="-1" href="#signal-component-scalability"><span class="octicon octicon-link"></span></a>Signal Component Scalability</h4>
+    <p>The Signal component (<code>common-module</code>) demonstrates leader filtering for TinySignal-triggered control operations.</p>
+    <p><strong>Problem Solved:</strong> TinySignal broadcasts to all pods; control commands (Send/Reset) should execute once, not N times.</p>
+    <p><strong>Why Leader Filtering Works Here:</strong></p>
+    <ul>
+      <li>Signal's control port accepts configurable input data</li>
+      <li>Platform can create TinySignals targeting control ports with input types</li>
+      <li>TinySignal → reconcile → all pods receive → only leader processes</li>
+    </ul>
+    <p><strong>Implementation:</strong></p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token comment">// Only leader processes TinySignal-triggered control commands</span>
+</span><span class="code-line line-number" line="2"><span class="token keyword">if</span> <span class="token operator">!</span>utils<span class="token punctuation">.</span><span class="token function">IsLeader</span><span class="token punctuation">(</span>ctx<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="3">    <span class="token keyword">return</span> <span class="token boolean">nil</span>
+</span><span class="code-line line-number" line="4"><span class="token punctuation">}</span>
+</span></code><div onclick="copied(this)" data-code="// Only leader processes TinySignal-triggered control commands
+if !utils.IsLeader(ctx) {
+    return nil
+}
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Metadata Keys:</strong></p>
+    <ul>
+      <li><code>signal-running</code>: Boolean string indicating if signal is active</li>
+    </ul>
+    <p><strong>Flow:</strong></p>
+    <ol>
+      <li>TinySignal created → reconcile broadcast to all Signal pods</li>
+      <li>Only leader pod processes the control command</li>
+      <li>Leader updates <code>Status.Metadata["signal-running"] = "true"</code> via ReconcilePort handler</li>
+      <li>All pods receive ReconcilePort event with updated TinyNode</li>
+      <li>All pods sync their local <code>isRunning</code> state from metadata</li>
+      <li>UI shows consistent state across all replicas</li>
+    </ol>
+    <p><strong>State Synchronization:</strong></p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">case</span> v1alpha1<span class="token punctuation">.</span>ReconcilePort<span class="token punctuation">:</span>
+</span><span class="code-line line-number" line="2">    <span class="token keyword">if</span> node<span class="token punctuation">,</span> ok <span class="token operator">:=</span> msg<span class="token punctuation">.</span><span class="token punctuation">(</span>v1alpha1<span class="token punctuation">.</span>TinyNode<span class="token punctuation">)</span><span class="token punctuation">;</span> ok <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="3">        t<span class="token punctuation">.</span>isRunning <span class="token operator">=</span> node<span class="token punctuation">.</span>Status<span class="token punctuation">.</span>Metadata<span class="token punctuation">[</span><span class="token string">"signal-running"</span><span class="token punctuation">]</span> <span class="token operator">==</span> <span class="token string">"true"</span>
+</span><span class="code-line line-number" line="4">    <span class="token punctuation">}</span>
+</span></code><div onclick="copied(this)" data-code="case v1alpha1.ReconcilePort:
+    if node, ok := msg.(v1alpha1.TinyNode); ok {
+        t.isRunning = node.Status.Metadata[&#x22;signal-running&#x22;] == &#x22;true&#x22;
+    }
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Benefits:</strong></p>
+    <ul>
+      <li>Single execution of TinySignal-triggered commands (no N-fold multiplication)</li>
+      <li>Consistent UI state across all pods</li>
+      <li>Automatic state recovery on pod restart</li>
+      <li>Context data preserved in component state</li>
+    </ul>
+    <h4 id="http-server-component-scalability"><a class="anchor" aria-hidden="true" tabindex="-1" href="#http-server-component-scalability"><span class="octicon octicon-link"></span></a>HTTP Server Component Scalability</h4>
+    <p>The HTTP Server component (<code>http-module</code>) demonstrates gRPC round-robin with metadata sync.</p>
+    <p><strong>Key Difference from Signal:</strong> HTTP Server's control port has no input type (buttons only), so platform cannot create TinySignals for it. Start requests arrive via gRPC from upstream components (e.g., Signal → gRPC → HTTP Server).</p>
+    <p><strong>Problem Solved:</strong> Multiple replicas need to serve HTTP traffic while coordinating startup/shutdown when any pod can receive the start request.</p>
+    <p><strong>Message Flow:</strong></p>
+    <pre><code class="code-highlight"><span class="code-line line-number" line="1">TinySignal → Signal (leader only) → gRPC → HTTP Server (any pod, round-robin)
+</span></code><div onclick="copied(this)" data-code="TinySignal → Signal (leader only) → gRPC → HTTP Server (any pod, round-robin)
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Implementation:</strong></p>
+    <p><strong>First Pod to Receive Start (becomes "initiator"):</strong></p>
+    <ul>
+      <li>Receives start request via gRPC (round-robin, could be any pod)</li>
+      <li>Starts server and updates metadata with actual listening port</li>
+      <li>Serializes full configuration to metadata for other pods</li>
+    </ul>
+    <p><strong>Other Pods (followers):</strong></p>
+    <ul>
+      <li>See metadata update via ReconcilePort</li>
+      <li>Auto-discover port from metadata</li>
+      <li>Restore configuration from serialized metadata</li>
+      <li>Start their own server instance</li>
+    </ul>
+    <p><strong>Metadata Keys:</strong></p>
+    <ul>
+      <li><code>http-server-port</code>: The actual listening port (0 = stopped, >0 = running)</li>
+      <li><code>http-server-config</code>: Serialized startup configuration (JSON)</li>
+    </ul>
+    <p><strong>Flow:</strong></p>
+    <pre><code class="code-highlight"><span class="code-line line-number" line="1">┌─────────────────────────────────────────────────────┐
+</span><span class="code-line line-number" line="2">│         TinyNode Status.Metadata                    │
+</span><span class="code-line line-number" line="3">│  - http-server-port: [actual-port or 0]             │
+</span><span class="code-line line-number" line="4">│  - http-server-config: {serialized config}          │
+</span><span class="code-line line-number" line="5">└─────────────────────────────────────────────────────┘
+</span><span class="code-line line-number" line="6">         ▲                                    ▲
+</span><span class="code-line line-number" line="7">    updates first                        syncs &#x26; follows
+</span><span class="code-line line-number" line="8">         │                                    │
+</span><span class="code-line line-number" line="9">    ┌────┴─────────────┐          ┌──────────┴─────────────┐
+</span><span class="code-line line-number" line="10">    │  INITIATOR POD   │          │   FOLLOWER POD(s)      │
+</span><span class="code-line line-number" line="11">    │  (receives gRPC) │          │  (sync from metadata)  │
+</span><span class="code-line line-number" line="12">    │                  │          │                        │
+</span><span class="code-line line-number" line="13">    │ - Starts server  │          │ - Auto-discovers port  │
+</span><span class="code-line line-number" line="14">    │ - Updates meta   │          │ - Restores config      │
+</span><span class="code-line line-number" line="15">    │ - Sets config    │          │ - Starts own server    │
+</span><span class="code-line line-number" line="16">    └──────────────────┘          └────────────────────────┘
+</span></code><div onclick="copied(this)" data-code="┌─────────────────────────────────────────────────────┐
+│         TinyNode Status.Metadata                    │
+│  - http-server-port: [actual-port or 0]             │
+│  - http-server-config: {serialized config}          │
+└─────────────────────────────────────────────────────┘
+         ▲                                    ▲
+    updates first                        syncs &#x26; follows
+         │                                    │
+    ┌────┴─────────────┐          ┌──────────┴─────────────┐
+    │  INITIATOR POD   │          │   FOLLOWER POD(s)      │
+    │  (receives gRPC) │          │  (sync from metadata)  │
+    │                  │          │                        │
+    │ - Starts server  │          │ - Auto-discovers port  │
+    │ - Updates meta   │          │ - Restores config      │
+    │ - Sets config    │          │ - Starts own server    │
+    └──────────────────┘          └────────────────────────┘
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Stop Behavior:</strong></p>
+    <ul>
+      <li>Pod that initiated (listenPort was 0 at start) updates metadata to port=0 on stop</li>
+      <li>Follower pods (listenPort > 0) only stop locally, don't modify metadata</li>
+      <li>Restart flag prevents metadata corruption during restart sequences</li>
+    </ul>
+    <p><strong>Benefits:</strong></p>
+    <ul>
+      <li>Zero-downtime scaling (pods auto-discover and start from metadata)</li>
+      <li>Configuration consistency (initiator's config distributed via metadata)</li>
+      <li>Clean shutdown coordination (metadata ensures pod agreement)</li>
+      <li>Automatic recovery (pods auto-restart from ReconcilePort)</li>
+    </ul>
+    <h4 id="implementing-scalable-components"><a class="anchor" aria-hidden="true" tabindex="-1" href="#implementing-scalable-components"><span class="octicon octicon-link"></span></a>Implementing Scalable Components</h4>
+    <p><strong>Choose the right pattern based on how your component receives messages:</strong></p>
+    <p><strong>Pattern 1: TinySignal-triggered control ports (like Signal)</strong></p>
+    <p>Use when: Control port accepts configurable input that users may trigger via TinySignal.</p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token comment">// Filter TinySignal broadcasts - only leader processes</span>
+</span><span class="code-line line-number" line="2"><span class="token keyword">if</span> <span class="token operator">!</span>utils<span class="token punctuation">.</span><span class="token function">IsLeader</span><span class="token punctuation">(</span>ctx<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="3">    <span class="token keyword">return</span> <span class="token boolean">nil</span>
+</span><span class="code-line line-number" line="4"><span class="token punctuation">}</span>
+</span><span class="code-line line-number" line="5"><span class="token comment">// Process command and update metadata</span>
+</span><span class="code-line line-number" line="6"><span class="token function">handler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>ReconcilePort<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>MetadataConfigPatch<span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="7">    Metadata<span class="token punctuation">:</span> <span class="token keyword">map</span><span class="token punctuation">[</span><span class="token builtin">string</span><span class="token punctuation">]</span><span class="token builtin">string</span><span class="token punctuation">{</span><span class="token string">"my-state"</span><span class="token punctuation">:</span> <span class="token string">"value"</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="8"><span class="token punctuation">}</span><span class="token punctuation">)</span>
+</span></code><div onclick="copied(this)" data-code="// Filter TinySignal broadcasts - only leader processes
+if !utils.IsLeader(ctx) {
+    return nil
+}
+// Process command and update metadata
+handler(ctx, v1alpha1.ReconcilePort, v1alpha1.MetadataConfigPatch{
+    Metadata: map[string]string{&#x22;my-state&#x22;: &#x22;value&#x22;},
+})
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Pattern 2: gRPC-triggered ports (like HTTP Server)</strong></p>
+    <p>Use when: Port receives messages via gRPC from other components (round-robin delivery).</p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token comment">// Any pod can receive - process and update metadata</span>
+</span><span class="code-line line-number" line="2"><span class="token comment">// Other pods will sync via ReconcilePort</span>
+</span><span class="code-line line-number" line="3"><span class="token function">handler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>ReconcilePort<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>MetadataConfigPatch<span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="4">    Metadata<span class="token punctuation">:</span> <span class="token keyword">map</span><span class="token punctuation">[</span><span class="token builtin">string</span><span class="token punctuation">]</span><span class="token builtin">string</span><span class="token punctuation">{</span><span class="token string">"my-state"</span><span class="token punctuation">:</span> <span class="token string">"value"</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="5"><span class="token punctuation">}</span><span class="token punctuation">)</span>
+</span></code><div onclick="copied(this)" data-code="// Any pod can receive - process and update metadata
+// Other pods will sync via ReconcilePort
+handler(ctx, v1alpha1.ReconcilePort, v1alpha1.MetadataConfigPatch{
+    Metadata: map[string]string{&#x22;my-state&#x22;: &#x22;value&#x22;},
+})
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Common: Sync state from ReconcilePort (all patterns)</strong></p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">case</span> v1alpha1<span class="token punctuation">.</span>ReconcilePort<span class="token punctuation">:</span>
+</span><span class="code-line line-number" line="2">    <span class="token keyword">if</span> node<span class="token punctuation">,</span> ok <span class="token operator">:=</span> msg<span class="token punctuation">.</span><span class="token punctuation">(</span>v1alpha1<span class="token punctuation">.</span>TinyNode<span class="token punctuation">)</span><span class="token punctuation">;</span> ok <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="3">        c<span class="token punctuation">.</span>myState <span class="token operator">=</span> node<span class="token punctuation">.</span>Status<span class="token punctuation">.</span>Metadata<span class="token punctuation">[</span><span class="token string">"my-state"</span><span class="token punctuation">]</span>
+</span><span class="code-line line-number" line="4">        <span class="token comment">// Start/configure based on metadata if needed</span>
+</span><span class="code-line line-number" line="5">    <span class="token punctuation">}</span>
+</span></code><div onclick="copied(this)" data-code="case v1alpha1.ReconcilePort:
+    if node, ok := msg.(v1alpha1.TinyNode); ok {
+        c.myState = node.Status.Metadata[&#x22;my-state&#x22;]
+        // Start/configure based on metadata if needed
+    }
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Common: Use metadata for consistent status display</strong></p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token comment">// Use metadata as source of truth for UI, not local state</span>
+</span><span class="code-line line-number" line="2">isRunning <span class="token operator">:=</span> node<span class="token punctuation">.</span>Status<span class="token punctuation">.</span>Metadata<span class="token punctuation">[</span><span class="token string">"running"</span><span class="token punctuation">]</span> <span class="token operator">==</span> <span class="token string">"true"</span>
+</span></code><div onclick="copied(this)" data-code="// Use metadata as source of truth for UI, not local state
+isRunning := node.Status.Metadata[&#x22;running&#x22;] == &#x22;true&#x22;
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
     <h3 id="project-structure"><a class="anchor" aria-hidden="true" tabindex="-1" href="#project-structure"><span class="octicon octicon-link"></span></a>Project Structure</h3>
     <pre><code class="code-highlight"><span class="code-line line-number" line="1">.
 </span><span class="code-line line-number" line="2">├── api/v1alpha1/          # CRD definitions (TinyNode, TinyModule, TinyFlow, etc.)
@@ -1181,22 +1380,15 @@ func TestHello(t *testing.T) {
 ./my-module --help
 " class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
     <h2 id="license"><a class="anchor" aria-hidden="true" tabindex="-1" href="#license"><span class="octicon octicon-link"></span></a>License</h2>
-    <p>Copyright 2023.</p>
-    <p>
-      Licensed under the Apache License, Version 2.0 (the "License");
-      you may not use this file except in compliance with the License.
-      You may obtain a copy of the License at
-    </p>
-    <pre><code class="code-highlight"><span class="code-line line-number" line="1">http://www.apache.org/licenses/LICENSE-2.0
-</span></code><div onclick="copied(this)" data-code="http://www.apache.org/licenses/LICENSE-2.0
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <p>
-      Unless required by applicable law or agreed to in writing, software
-      distributed under the License is distributed on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-      See the License for the specific language governing permissions and
-      limitations under the License.
-    </p>
+    <p>Copyright 2026 Tiny Systems Limited. All rights reserved.</p>
+    <p>This project is licensed under the <a href="LICENSE">Business Source License 1.1</a>.</p>
+    <p><strong>Key terms:</strong></p>
+    <ul>
+      <li>Free for production and non-production use</li>
+      <li>Not permitted: offering this software as a managed service, cloud service, or SaaS</li>
+      <li>Converts to Apache License 2.0 on January 11, 2031</li>
+    </ul>
+    <p>For commercial licensing inquiries, contact Tiny Systems Limited.</p>
   <style>markdown-style pre .copied {
   display: flex;
   position: absolute;
