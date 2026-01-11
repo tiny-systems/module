@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
+	"strings"
+
 	"github.com/rogpeppe/go-internal/semver"
 	"github.com/spf13/cobra"
 	"github.com/tiny-systems/module/module"
@@ -11,9 +15,6 @@ import (
 	"github.com/tiny-systems/module/registry"
 	"github.com/tiny-systems/module/tools/build"
 	api "github.com/tiny-systems/platform-api"
-	"net/http"
-	"os"
-	"strings"
 )
 
 var (
@@ -137,7 +138,7 @@ var buildCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("image %s succesfully pushed\n", image)
+		fmt.Printf("image %s successfully pushed\n", image)
 	},
 }
 

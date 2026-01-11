@@ -1,21 +1,43 @@
-MIT License
+Business Source License 1.1
 
-Copyright (c) 2023 Maksym Trofimenko
+Parameters
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Licensor:                 Tiny Systems Limited
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Licensed Work:            The software source code and documentation located at
+                          https://github.com/tiny-systems/module, and any updates
+                          or modifications thereto.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Additional Use Grant:     You may make production use of the Licensed Work, provided
+                          that your use is not a "Competitive Offering".
+
+                          A "Competitive Offering" is defined as a commercial product
+                          or service offered to third parties (including, but not limited
+                          to, a managed service, cloud service, or Software-as-a-Service)
+                          where the value of the product or service is primarily derived
+                          from the functionality of the Licensed Work.
+
+                          This restriction specifically prohibits offering the Licensed
+                          Work as a managed service on cloud platforms (such as, but not
+                          limited to, Amazon Web Services, Google Cloud Platform, or
+                          Microsoft Azure).
+
+Change Date:              January 11, 2031
+
+Change License:           Apache License, Version 2.0
+
+--------------------------------------------------------------------------------
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative works, redistribute, and make non-production use of the Licensed Work. The Licensor may make an Additional Use Grant, above, permitting limited production use.
+
+Effective on the Change Date, or the fifth anniversary of the first publicly available distribution of a specific version of the Licensed Work under this License, whichever comes first, the Licensor hereby grants you rights under the terms of the Change License, and the rights granted in the paragraph above terminate.
+
+If your use of the Licensed Work does not comply with the requirements currently in effect as described in the Additional Use Grant, you must purchase a commercial license from the Licensor, its affiliated entities, or authorized resellers, or you must refrain from using the Licensed Work.
+
+ALL PARTIES EXPRESSLY DISCLAIM ALL WARRANTIES AND GUARANTEES, EXPRESS AND IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+
+This License does not grant you rights to use the trademarks of the Licensor or any other party.
+
+The Licensor requests that you include the following copyright notice in any copy of the Licensed Work or derivative works: "Copyright (c) 2026 Tiny Systems Limited. All rights reserved."
