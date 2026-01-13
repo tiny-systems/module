@@ -33,6 +33,22 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+rbac:
+  # Enable access to Kubernetes resources (pods, services, deployments, ingresses)
+  # Required for modules that use ExposePort functionality (e.g., http-module)
+  # Set to false for modules that only work with TinySystems CRDs
+  enableKubernetesResourceAccess: false
+  # Extra RBAC rules to add to the manager ClusterRole
+  # Use this for modules that need additional Kubernetes permissions
+  # Example for kubernetes-module:
+  # extraRules:
+  #   - apiGroups: [""]
+  #     resources: ["pods", "configmaps", "secrets"]
+  #     verbs: ["create", "delete", "get", "list", "watch"]
+  #   - apiGroups: ["batch"]
+  #     resources: ["jobs"]
+  #     verbs: ["*"]
+  extraRules: []
 managerIngress:
   ingress:
     annotations: {}
