@@ -52,6 +52,16 @@ func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
 	return &Manager{client: c, namespace: ns, lock: &sync.Mutex{}}, nil
 }
 
+// GetK8sClient returns the underlying Kubernetes client
+func (m Manager) GetK8sClient() client.WithWatch {
+	return m.client
+}
+
+// GetNamespace returns the configured namespace
+func (m Manager) GetNamespace() string {
+	return m.namespace
+}
+
 func NewManagerFromConfig(config *rest.Config, ns string) (*Manager, error) {
 
 	scheme := runtime.NewScheme()
