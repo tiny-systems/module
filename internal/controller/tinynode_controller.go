@@ -29,11 +29,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // TinyNodeReconciler reconciles a TinyNode object
@@ -43,6 +47,8 @@ type TinyNodeReconciler struct {
 	Scheduler scheduler.Scheduler
 	Module    module.Info
 	IsLeader  *atomic.Bool
+	// leadershipCh receives events when leadership changes to trigger requeue of all nodes
+	leadershipCh chan event.GenericEvent
 }
 
 const nodeFinalizer = "io.tinysystems/node-finalizer"
@@ -157,13 +163,53 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}, nil
 }
 
+// RequeueAllOnLeadershipChange triggers requeue of all TinyNodes when this pod becomes leader.
+// This ensures nodes get their periodic reconciliation set up after leadership change.
+func (r *TinyNodeReconciler) RequeueAllOnLeadershipChange() {
+	if r.leadershipCh == nil {
+		return
+	}
+	// Non-blocking send - if channel already has an event pending, skip
+	select {
+	case r.leadershipCh <- event.GenericEvent{Object: &operatorv1alpha1.TinyNode{}}:
+	default:
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.leadershipCh = make(chan event.GenericEvent, 1)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinyNode{}).
 		// Reconcile on spec changes (generation) OR status.metadata changes
 		// This allows non-leaders to pick up metadata updates from the leader
 		WithEventFilter(GenerationOrMetadataChangedPredicate{}).
+		WatchesRawSource(source.Channel(
+			r.leadershipCh,
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+				// List all TinyNodes and enqueue those belonging to this module
+				var nodes operatorv1alpha1.TinyNodeList
+				if err := r.List(ctx, &nodes); err != nil {
+					return nil
+				}
+
+				var requests []reconcile.Request
+				for _, node := range nodes.Items {
+					// Only enqueue nodes for this module
+					m, _, err := module.ParseFullName(node.Name)
+					if err != nil || m != r.Module.GetNameSanitised() {
+						continue
+					}
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Name:      node.Name,
+							Namespace: node.Namespace,
+						},
+					})
+				}
+				return requests
+			}),
+		)).
 		Complete(r)
 }

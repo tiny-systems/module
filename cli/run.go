@@ -196,6 +196,13 @@ var runCmd = &cobra.Command{
 			IsLeader: isLeader,
 		}
 
+		// Create node reconciler early so we can use it in leader callbacks
+		// The Client, Scheme, and Scheduler fields will be set later before SetupWithManager
+		nodeReconciler := &controller.TinyNodeReconciler{
+			Module:   moduleInfo,
+			IsLeader: isLeader,
+		}
+
 		lock, err := resourcelock.New(
 			resourcelock.LeasesResourceLock,
 			namespace,
@@ -219,6 +226,8 @@ var runCmd = &cobra.Command{
 				isLeader.Store(true)
 				// Trigger requeue of all TinySignals so they get processed by new leader
 				signalReconciler.RequeueAllOnLeadershipChange()
+				// Trigger requeue of all TinyNodes so they set up periodic reconciliation
+				nodeReconciler.RequeueAllOnLeadershipChange()
 			},
 			OnStoppedLeading: func() {
 				l.Info("stopped leading for status updates")
@@ -420,15 +429,12 @@ var runCmd = &cobra.Command{
 		// add listening address to the module info
 		moduleInfo.Addr = <-listenAddr
 
-		nodeController := &controller.TinyNodeReconciler{
-			Client:          mgr.GetClient(),
-			Scheme:          mgr.GetScheme(),
-			Scheduler:       scheduler,
-			Module:          moduleInfo,
-			IsLeader:        isLeader,
-		}
+		// Set remaining fields on node reconciler that weren't available earlier
+		nodeReconciler.Client = mgr.GetClient()
+		nodeReconciler.Scheme = mgr.GetScheme()
+		nodeReconciler.Scheduler = scheduler
 
-		if err = nodeController.SetupWithManager(mgr); err != nil {
+		if err = nodeReconciler.SetupWithManager(mgr); err != nil {
 			l.Error(err, "unable to create tinynode controller")
 			return
 		}
