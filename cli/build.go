@@ -69,12 +69,34 @@ var buildCmd = &cobra.Command{
 		}
 
 		//devKey
-		resp, err := platformClient.PublishModuleWithResponse(ctx, api.PublishModuleRequest{
+		publishReq := api.PublishModuleRequest{
 			Name:       name,
 			Info:       &info,
 			Version:    strings.TrimPrefix(version, "v"),
 			Components: componentsApi,
-		}, func(ctx context.Context, req *http.Request) error {
+		}
+
+		// Include module requirements if set
+		if reqs := registry.GetRequirements(); reqs != nil {
+			publishReq.Requirements = &api.ModuleRequirements{
+				Rbac: &api.RBACRequirements{
+					EnableKubernetesResourceAccess: &reqs.RBAC.EnableKubernetesResourceAccess,
+				},
+			}
+			if len(reqs.RBAC.ExtraRules) > 0 {
+				extraRules := make([]api.RBACRule, len(reqs.RBAC.ExtraRules))
+				for i, r := range reqs.RBAC.ExtraRules {
+					extraRules[i] = api.RBACRule{
+						ApiGroups: &r.APIGroups,
+						Resources: &r.Resources,
+						Verbs:     &r.Verbs,
+					}
+				}
+				publishReq.Requirements.Rbac.ExtraRules = &extraRules
+			}
+		}
+
+		resp, err := platformClient.PublishModuleWithResponse(ctx, publishReq, func(ctx context.Context, req *http.Request) error {
 			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", devKey))
 			return nil
 		})

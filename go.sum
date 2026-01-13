@@ -343,8 +343,8 @@ github.com/tiny-systems/ajson v0.1.3 h1:qklS93ubEFReG7sFa86SW5SFFjaX7UzCncdmQtqR
 github.com/tiny-systems/ajson v0.1.3/go.mod h1:a6oSw0MMb7Z5aD2tPoPO+jq11ETKgXUr2XktHdT8Wt8=
 github.com/tiny-systems/errorpanic v0.7.1 h1:GgbimfhC2wnQ8012SGGxh743ryaJXSSD7boLK+IQ0Xs=
 github.com/tiny-systems/errorpanic v0.7.1/go.mod h1:AQobicdSB/J3RzN81pTG4dqgcULaEIrEOvNC8TpSgxw=
-github.com/tiny-systems/platform-api v0.0.13 h1:c7Q/0Xp+7Pwum37UozGTAi4ucQDuIaHaDaR19Qfjnic=
-github.com/tiny-systems/platform-api v0.0.13/go.mod h1:wZ5N4GR33bkFdryDGJuX2Oni9mtgTuXwdM/jHhLsAWU=
+github.com/tiny-systems/platform-api v0.0.14 h1:fIhrl6/EJ73Bw+AaQhRWC8F8gkpOJ+k+MPXxb4Iyr0w=
+github.com/tiny-systems/platform-api v0.0.14/go.mod h1:wZ5N4GR33bkFdryDGJuX2Oni9mtgTuXwdM/jHhLsAWU=
 github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4dU=
 github.com/ugorji/go/codec v1.2.11/go.mod h1:UNopzCgEMSXjBc6AOMqYvWC1ktqTAfzJZUZgYf6w6lg=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
