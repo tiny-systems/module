@@ -12,6 +12,7 @@ func SanitizeResourceName(in string) string {
 		return ""
 	}
 	name := reg.ReplaceAllString(strings.ToLower(in), "-")
+	name = strings.Trim(name, "-")
 	return limitByRuneKeepSuffix(name, 48)
 }
 
