@@ -1,34 +1,34 @@
 package resource
 
 import (
-  "context"
-  "fmt"
-  "os"
-  "reflect"
-  "strconv"
-  "strings"
-  "sync"
-  "time"
+	"context"
+	"fmt"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
-  "github.com/google/uuid"
-  helmclient "github.com/mittwald/go-helm-client"
-  "github.com/rs/zerolog/log"
-  "github.com/tiny-systems/module/api/v1alpha1"
-  "github.com/tiny-systems/module/module"
-  "github.com/tiny-systems/module/pkg/utils"
-  "helm.sh/helm/v3/pkg/release"
-  v1core "k8s.io/api/core/v1"
-  v1ingress "k8s.io/api/networking/v1"
-  "k8s.io/apimachinery/pkg/api/errors"
-  metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-  "k8s.io/apimachinery/pkg/runtime"
-  "k8s.io/apimachinery/pkg/types"
-  "k8s.io/apimachinery/pkg/util/intstr"
-  "k8s.io/apimachinery/pkg/util/wait"
-  "k8s.io/apimachinery/pkg/watch"
-  clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-  "k8s.io/client-go/rest"
-  "sigs.k8s.io/controller-runtime/pkg/client"
+	"github.com/google/uuid"
+	helmclient "github.com/mittwald/go-helm-client"
+	"github.com/rs/zerolog/log"
+	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
+	"helm.sh/helm/v3/pkg/release"
+	v1core "k8s.io/api/core/v1"
+	v1ingress "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type Manager struct {
@@ -46,8 +46,6 @@ type ManagerInterface interface {
 	DeleteNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	GetNode(ctx context.Context, name, namespace string) (*v1alpha1.TinyNode, error)
 	CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte) error
-	// TinyState operations
-	// ownerNode: if non-empty, state is owned by that node's TinyState (cascade delete)
 	UpsertState(ctx context.Context, nodeName, namespace string, data []byte, ownerNode string) error
 	DeleteState(ctx context.Context, nodeName, namespace string) error
 	GetState(ctx context.Context, nodeName, namespace string) (*v1alpha1.TinyState, error)
@@ -1186,9 +1184,21 @@ func (m Manager) GetState(ctx context.Context, nodeName, namespace string) (*v1a
 }
 
 // UpsertState creates or updates TinyState for a node.
-// If ownerNode is provided, the state is owned by that node's TinyState (for cascade delete).
+// If ownerNode is provided, the state will be owned by that node's TinyState for cascade deletion.
 // If ownerNode is empty, the state is owned by its own TinyNode.
 func (m Manager) UpsertState(ctx context.Context, nodeName, namespace string, data []byte, ownerNode string) error {
+	// Determine which node should be the owner
+	ownerNodeName := nodeName
+	if ownerNode != "" {
+		ownerNodeName = ownerNode
+	}
+
+	// Get the owner node to set owner reference
+	node, err := m.GetNode(ctx, ownerNodeName, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get node for state owner reference: %w", err)
+	}
+
 	// Try to get existing state
 	state, err := m.GetState(ctx, nodeName, namespace)
 	if err != nil {
@@ -1196,42 +1206,20 @@ func (m Manager) UpsertState(ctx context.Context, nodeName, namespace string, da
 			return err
 		}
 
-		// Build owner reference
-		var ownerRef metav1.OwnerReference
-		if ownerNode != "" {
-			// Owned by another node's TinyState - cascade delete when owner state is deleted
-			ownerState, err := m.GetState(ctx, ownerNode, namespace)
-			if err != nil {
-				return fmt.Errorf("failed to get owner state %s: %w", ownerNode, err)
-			}
-			ownerRef = metav1.OwnerReference{
-				APIVersion: ownerState.APIVersion,
-				Kind:       ownerState.Kind,
-				Name:       ownerState.Name,
-				UID:        ownerState.UID,
-				Controller: func() *bool { b := true; return &b }(),
-			}
-		} else {
-			// Owned by own TinyNode - cascade delete when node is deleted
-			node, err := m.GetNode(ctx, nodeName, namespace)
-			if err != nil {
-				return fmt.Errorf("failed to get node for state owner reference: %w", err)
-			}
-			ownerRef = metav1.OwnerReference{
-				APIVersion: node.APIVersion,
-				Kind:       node.Kind,
-				Name:       node.Name,
-				UID:        node.UID,
-				Controller: func() *bool { b := true; return &b }(),
-			}
-		}
-
 		// Create new state
 		state = &v1alpha1.TinyState{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:            nodeName,
-				Namespace:       namespace,
-				OwnerReferences: []metav1.OwnerReference{ownerRef},
+				Name:      nodeName,
+				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: node.APIVersion,
+						Kind:       node.Kind,
+						Name:       node.Name,
+						UID:        node.UID,
+						Controller: func() *bool { b := true; return &b }(),
+					},
+				},
 			},
 			Spec: v1alpha1.TinyStateSpec{
 				Node: nodeName,
