@@ -10,13 +10,14 @@ import (
 
 const nameSeparator = "."
 
-// ParseFullName parses a full node name (module.node) into its components.
-func ParseFullName(fullName string) (module string, node string, err error) {
+// ParseFullName parses a full node name (prefix.module.component) into its components.
+// Node names have the format: {project-prefix}.{module-name}.{component-name}
+func ParseFullName(fullName string) (module string, component string, err error) {
 	parts := strings.Split(fullName, nameSeparator)
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("node name is invalid, separator not found")
+	if len(parts) < 3 {
+		return "", "", fmt.Errorf("node name %s is invalid, separator not found", fullName)
 	}
-	return parts[0], parts[1], nil
+	return parts[1], parts[2], nil
 }
 
 type Info struct {
