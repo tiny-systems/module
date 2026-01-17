@@ -9,6 +9,7 @@ resources:
 - bases/operator.tinysystems.io_tinyprojects.yaml
 - bases/operator.tinysystems.io_tinyflows.yaml
 - bases/operator.tinysystems.io_tinywidgetpages.yaml
+- bases/operator.tinysystems.io_tinystates.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 # the following config is for teaching kustomize how to do kustomization for CRDs.
