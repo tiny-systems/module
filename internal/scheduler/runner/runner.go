@@ -72,7 +72,10 @@ type Runner struct {
 	portNonce cmap.ConcurrentMap[string, string]
 }
 
-const FromSignal = "signal"
+const (
+	FromSignal = "signal"
+	FromState  = "state"
+)
 
 func NewRunner(component m.Component) *Runner {
 	return &Runner{
@@ -367,11 +370,18 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	var resp any
 
+	// Add source node to context for ownership tracking
+	sourceNode, _ := utils.ParseFullPortName(msg.From)
+	if sourceNode != "" {
+		ctx = utils.WithSourceNode(ctx, sourceNode)
+	}
+
 	handleStart := time.Now()
 	c.log.Info("runner msg handler: calling component.Handle",
 		"port", port,
 		"node", c.name,
 		"from", msg.From,
+		"sourceNode", sourceNode,
 		"ctxErrBeforeHandle", ctx.Err(),
 	)
 
@@ -429,6 +439,38 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 
 	return func(outputCtx context.Context, outputPort string, outputData any) any {
 		if outputPort == v1alpha1.ReconcilePort {
+			// Check if this is a state update
+			if stateUpdate, ok := outputData.(v1alpha1.StateUpdate); ok {
+				// nil Data means delete state
+				if stateUpdate.Data == nil {
+					c.log.Info("data handler: deleting state",
+						"node", c.name,
+					)
+					err := c.manager.DeleteState(outputCtx, c.name, c.node.Namespace)
+					if err != nil {
+						c.log.Error(err, "data handler: failed to delete state",
+							"node", c.name,
+						)
+					}
+					return err
+				}
+
+				c.log.Info("data handler: processing state update",
+					"node", c.name,
+					"dataSize", len(stateUpdate.Data),
+					"ownerNode", stateUpdate.OwnerNode,
+				)
+				err := c.manager.UpsertState(outputCtx, c.name, c.node.Namespace, stateUpdate.Data, stateUpdate.OwnerNode)
+				if err != nil {
+					c.log.Error(err, "data handler: failed to upsert state",
+						"node", c.name,
+						"ownerNode", stateUpdate.OwnerNode,
+					)
+				}
+				return err
+			}
+
+			// Legacy: node updater function
 			nodeUpdater, _ := outputData.(func(node *v1alpha1.TinyNode) error)
 
 			err := c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {

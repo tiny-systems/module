@@ -18,16 +18,16 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
-	errors2 "github.com/pkg/errors"
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -36,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
@@ -58,118 +57,94 @@ const nodeFinalizer = "io.tinysystems/node-finalizer"
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinynodes/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the TinyNode object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
+// Reconcile moves the current state of the cluster closer to the desired state.
 func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
 	m, _, err := module.ParseFullName(req.Name)
 	if err != nil {
 		l.Error(err, "node has invalid name", "name", req.Name)
-		return reconcile.Result{}, err
+		return ctrl.Result{}, nil // Don't requeue invalid names
 	}
 
 	if m != r.Module.GetNameSanitised() {
-		// not us
-		return reconcile.Result{}, nil
+		return ctrl.Result{}, nil
 	}
 
 	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name)
 
 	node := &operatorv1alpha1.TinyNode{}
-
-	if err = r.Get(ctx, req.NamespacedName, node); err != nil {
-		l.Error(err, "get tinynode error")
+	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
 		if errors.IsNotFound(err) {
-			// look finalizer logic
-			return reconcile.Result{}, nil
+			return ctrl.Result{}, nil
 		}
-		// Error reading the object - requeue the request.
-		return reconcile.Result{}, errors2.Wrap(err, "get tinynode error")
+		return ctrl.Result{}, fmt.Errorf("get tinynode: %w", err)
 	}
 
+	// Handle deletion
 	if !node.ObjectMeta.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(node, nodeFinalizer) {
-
-			if err = r.Scheduler.Destroy(req.Name); err != nil {
-				return reconcile.Result{}, errors2.Wrap(err, "unable to destroy scheduler")
+			if err := r.Scheduler.Destroy(req.Name); err != nil {
+				return ctrl.Result{}, fmt.Errorf("destroy scheduler: %w", err)
 			}
 
 			controllerutil.RemoveFinalizer(node, nodeFinalizer)
 			if err := r.Update(ctx, node); err != nil {
-				return ctrl.Result{}, errors2.Wrap(err, "failed to remove finalizer")
+				return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
 			}
 		}
-
-		// Stop reconciliation as the item is being deleted.
 		return ctrl.Result{}, nil
 	}
 
+	// Add finalizer if needed
 	if !controllerutil.ContainsFinalizer(node, nodeFinalizer) {
 		controllerutil.AddFinalizer(node, nodeFinalizer)
 		if err := r.Update(ctx, node); err != nil {
-			return ctrl.Result{}, errors2.Wrap(err, "failed to add finalizer")
+			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
 		}
 	}
 
 	originNode := node.DeepCopy()
 
-	// update status with current module info
+	// Update status with current module info
 	node.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
 		Version: r.Module.Version,
 		Name:    r.Module.Name,
 	}
-
 	node.Status.Status = "OK"
 	node.Status.Error = false
 
 	ctx = utils.WithLeader(ctx, r.IsLeader.Load())
 
-	// upsert in scheduler
-	err = r.Scheduler.Update(ctx, node)
-	if err != nil {
-		return reconcile.Result{}, errors2.Wrap(err, "failed to update scheduler")
+	// Update scheduler
+	if err := r.Scheduler.Update(ctx, node); err != nil {
+		return ctrl.Result{}, fmt.Errorf("update scheduler: %w", err)
 	}
 
-	// Mark that we've processed this generation - clients can use this to know
-	// when the controller has processed a specific spec version (including settings)
+	// Mark observed generation
 	node.Status.ObservedGeneration = node.ObjectMeta.Generation
 
-	// Only leader updates status to avoid conflicts
+	// Only leader updates status
 	if !r.IsLeader.Load() {
 		return ctrl.Result{}, nil
 	}
 
-	// Always update LastUpdateTime for periodic heartbeat
-	t := v1.NewTime(time.Now())
+	// Update timestamp for periodic heartbeat
+	t := metav1.NewTime(time.Now())
 	node.Status.LastUpdateTime = &t
 
-	// update status
-	err = r.Status().Patch(ctx, node, client.MergeFrom(originNode))
-	if err != nil {
-		l.Error(err, "status update error")
-		return reconcile.Result{}, errors2.Wrap(err, "status update error")
+	if err := r.Status().Patch(ctx, node, client.MergeFrom(originNode)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("patch status: %w", err)
 	}
 
-	return ctrl.Result{
-		RequeueAfter: time.Minute * 5,
-	}, nil
+	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
 // RequeueAllOnLeadershipChange triggers requeue of all TinyNodes when this pod becomes leader.
-// This ensures nodes get their periodic reconciliation set up after leadership change.
 func (r *TinyNodeReconciler) RequeueAllOnLeadershipChange() {
 	if r.leadershipCh == nil {
 		return
 	}
-	// Non-blocking send - if channel already has an event pending, skip
 	select {
 	case r.leadershipCh <- event.GenericEvent{Object: &operatorv1alpha1.TinyNode{}}:
 	default:
@@ -182,26 +157,22 @@ func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinyNode{}).
-		// Reconcile on spec changes (generation) OR status.metadata changes
-		// This allows non-leaders to pick up metadata updates from the leader
 		WithEventFilter(GenerationOrMetadataChangedPredicate{}).
 		WatchesRawSource(source.Channel(
 			r.leadershipCh,
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
-				// List all TinyNodes and enqueue those belonging to this module
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []ctrl.Request {
 				var nodes operatorv1alpha1.TinyNodeList
 				if err := r.List(ctx, &nodes); err != nil {
 					return nil
 				}
 
-				var requests []reconcile.Request
+				var requests []ctrl.Request
 				for _, node := range nodes.Items {
-					// Only enqueue nodes for this module
 					m, _, err := module.ParseFullName(node.Name)
 					if err != nil || m != r.Module.GetNameSanitised() {
 						continue
 					}
-					requests = append(requests, reconcile.Request{
+					requests = append(requests, ctrl.Request{
 						NamespacedName: types.NamespacedName{
 							Name:      node.Name,
 							Namespace: node.Namespace,

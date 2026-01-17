@@ -8,7 +8,12 @@ import (
 
 // UpdateWithDefinitions parses schema and update all definitions in it by using map of ajson.nodes
 // definitions replacing preserves path and configurable properties
+// If the schema has no $defs, returns the original schema unchanged
 func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[string]*ajson.Node) ([]byte, error) {
+	if len(realSchema) == 0 {
+		return realSchema, nil
+	}
+
 	// status
 	realSchemaNode, err := ajson.Unmarshal(realSchema)
 	if err != nil {
@@ -17,7 +22,8 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 
 	realSchemaNodeDefs, err := realSchemaNode.GetKey("$defs")
 	if err != nil {
-		return nil, err
+		// Schema has no $defs, return original schema unchanged
+		return realSchema, nil
 	}
 
 	// go through status definitions

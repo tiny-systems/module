@@ -69,7 +69,14 @@ The SDK is built around several key abstractions:
 
 - **TinySignal**: External trigger mechanism for node execution
   - Specifies target node, port, and data payload
+  - One-off: deleted immediately after successful delivery
   - Works like webhooks or manual triggers
+
+- **TinyState**: Runtime state persistence for components
+  - Stores component runtime state (running/stopped, context data)
+  - Separate from TinyNode configuration
+  - Owned by TinyNode for cascade deletion
+  - Enables leader failover and multi-pod coordination
 
 - **TinyTracker**: Execution monitoring for detailed tracing
 
@@ -86,6 +93,7 @@ Components are the building blocks of workflows. Each component:
 
 #### Message Flow
 
+**Standard message flow:**
 ```
 External Trigger (TinySignal)
   → TinySignal Controller
@@ -94,6 +102,21 @@ External Trigger (TinySignal)
         → Component.Handle()
           → output() callback
             → Next node via edges
+  → TinySignal deleted (one-off)
+```
+
+**Stateful component flow (e.g., Signal, HTTP Server):**
+```
+TinySignal → _control port
+  → Component writes TinyState
+  → Returns immediately (non-blocking)
+  → TinySignal deleted
+
+TinyState change
+  → TinyStateReconciler
+    → Scheduler.SendState()
+      → Component._state port
+        → Leader starts/stops blocking handler
 ```
 
 #### Port System
@@ -106,6 +129,7 @@ Ports enable component communication:
   - `_client`: Receives Kubernetes client for resource operations
   - `_settings`: Configuration port
   - `_control`: Dashboard control port
+  - `_state`: Receives TinyState for runtime state synchronization
 
 Each port can have:
 - **Configuration**: JSON schema defining expected input structure
@@ -202,186 +226,223 @@ When nodes belong to different modules:
 ### Design Patterns
 
 1. **Eventual Consistency with Reconciliation**: Periodic reconciliation (every 5 minutes) plus signal-based immediate updates
-2. **Leader Election with Metadata Sync**: Leader handles metadata updates for control operations; all pods execute node logic and sync state from TinyNode metadata
+2. **Leader Election with TinyState Sync**: Leader handles control operations and blocking handlers; TinyState provides cross-pod state synchronization for failover
 3. **Schema-Driven Configuration**: Go structs automatically generate JSON schemas for UI integration
 4. **Expression-Based Transformation**: Mustache-style `{{expression}}` syntax with JSONPath enables flexible data mapping without code changes
 5. **Definition Sharing**: Components mark fields as `shared:true` or `configurable:true` for cross-node type safety
+6. **One-off Signals**: TinySignals are deleted after delivery; state persists in TinyState for reliability
 
 ### Scalability
 
-The SDK implements a **metadata-synchronization** pattern that enables horizontal scaling of module operators while maintaining consistency across replicas.
+The SDK implements a **TinyState-based synchronization** pattern that enables horizontal scaling of module operators while maintaining consistency across replicas.
 
 #### Core Scalability Mechanism
 
-**Leader Election (for TinySignal processing):**
+**Leader Election:**
 - Uses Kubernetes native leader election via `k8s.io/client-go/tools/leaderelection` with Lease resources
 - Configuration: 15s lease duration, 10s renew deadline, 2s retry period
 - Each pod identifies itself using the `HOSTNAME` environment variable
-- Leadership state tracked via `isLeader` and `leadershipKnown` atomic booleans
-- **Purpose**: TinySignal broadcasts reconcile events to ALL pods; only leader processes them to avoid N-fold multiplication
+- Leadership state tracked via `isLeader` atomic boolean
+- **Purpose**: Only leader runs blocking handlers (e.g., HTTP servers, long-running processes)
 
-**Metadata as Source of Truth:**
-- TinyNode `Status.Metadata` acts as distributed state store
-- Any pod can update metadata (not just leader)
-- All pods sync state from metadata via `ReconcilePort`
-- Non-leaders requeue reconciliation every 5 seconds for faster state sync
+**TinyState as Source of Truth:**
+- TinyState CRD stores component runtime state (running/stopped, context data)
+- Separate from TinyNode configuration - owned by TinyNode for cascade deletion
+- TinyStateReconciler sends state to components via `_state` port
+- On leadership change, all TinyStates are requeued so new leader can recreate runtime
 
-**Two Message Delivery Patterns:**
-1. **TinySignal → Reconcile**: Broadcast to all pods, only leader processes
-2. **gRPC (inter-component)**: Round-robin to any pod, receiving pod processes and updates CR
+**One-off TinySignals:**
+- TinySignals are deleted immediately after successful delivery
+- Control port handlers write TinyState and return immediately (non-blocking)
+- State changes trigger `_state` port delivery to start/stop blocking handlers
+
+**Message Flow:**
+1. **User clicks Send** → TinySignal created → delivered to `_control` port → writes TinyState → returns immediately → TinySignal deleted
+2. **TinyState change** → TinyStateReconciler → delivers to `_state` port → leader starts blocking handler
+3. **Leadership change** → all TinyStates requeued → new leader recreates runtime from persisted state
 
 #### Signal Component Scalability
 
-The Signal component (`common-module`) demonstrates leader filtering for TinySignal-triggered control operations.
+The Signal component (`common-module`) demonstrates the TinyState pattern for stateful components with blocking handlers.
 
-**Problem Solved:** TinySignal broadcasts to all pods; control commands (Send/Reset) should execute once, not N times.
+**Problem Solved:** Multiple pods need to coordinate so only the leader runs the blocking handler, while state persists across leader changes.
 
-**Why Leader Filtering Works Here:**
-- Signal's control port accepts configurable input data
-- Platform can create TinySignals targeting control ports with input types
-- TinySignal → reconcile → all pods receive → only leader processes
+**Architecture:**
 
-**Implementation:**
-
-```go
-// Only leader processes TinySignal-triggered control commands
-if !utils.IsLeader(ctx) {
-    return nil
-}
 ```
-
-**Metadata Keys:**
-- `signal-running`: Boolean string indicating if signal is active
-
-**Flow:**
-1. TinySignal created → reconcile broadcast to all Signal pods
-2. Only leader pod processes the control command
-3. Leader updates `Status.Metadata["signal-running"] = "true"` via ReconcilePort handler
-4. All pods receive ReconcilePort event with updated TinyNode
-5. All pods sync their local `isRunning` state from metadata
-6. UI shows consistent state across all replicas
-
-**State Synchronization:**
-```go
-case v1alpha1.ReconcilePort:
-    if node, ok := msg.(v1alpha1.TinyNode); ok {
-        t.isRunning = node.Status.Metadata["signal-running"] == "true"
-    }
-```
-
-**Benefits:**
-- Single execution of TinySignal-triggered commands (no N-fold multiplication)
-- Consistent UI state across all pods
-- Automatic state recovery on pod restart
-- Context data preserved in component state
-
-#### HTTP Server Component Scalability
-
-The HTTP Server component (`http-module`) demonstrates gRPC round-robin with metadata sync.
-
-**Key Difference from Signal:** HTTP Server's control port has no input type (buttons only), so platform cannot create TinySignals for it. Start requests arrive via gRPC from upstream components (e.g., Signal → gRPC → HTTP Server).
-
-**Problem Solved:** Multiple replicas need to serve HTTP traffic while coordinating startup/shutdown when any pod can receive the start request.
-
-**Message Flow:**
-```
-TinySignal → Signal (leader only) → gRPC → HTTP Server (any pod, round-robin)
-```
-
-**Implementation:**
-
-**First Pod to Receive Start (becomes "initiator"):**
-- Receives start request via gRPC (round-robin, could be any pod)
-- Starts server and updates metadata with actual listening port
-- Serializes full configuration to metadata for other pods
-
-**Other Pods (followers):**
-- See metadata update via ReconcilePort
-- Auto-discover port from metadata
-- Restore configuration from serialized metadata
-- Start their own server instance
-
-**Metadata Keys:**
-- `http-server-port`: The actual listening port (0 = stopped, >0 = running)
-- `http-server-config`: Serialized startup configuration (JSON)
-
-**Flow:**
-```
-┌─────────────────────────────────────────────────────┐
-│         TinyNode Status.Metadata                    │
-│  - http-server-port: [actual-port or 0]             │
-│  - http-server-config: {serialized config}          │
-└─────────────────────────────────────────────────────┘
-         ▲                                    ▲
-    updates first                        syncs & follows
-         │                                    │
+┌─────────────────────────────────────────────────────────────────┐
+│                        TinyState CRD                            │
+│  Spec:                                                          │
+│    node: "signal-xxx"                                           │
+│    data: {"running": true, "context": {...}}                    │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                                    │
+    writes state                         delivers to _state
+         │                                    ▼
     ┌────┴─────────────┐          ┌──────────┴─────────────┐
-    │  INITIATOR POD   │          │   FOLLOWER POD(s)      │
-    │  (receives gRPC) │          │  (sync from metadata)  │
+    │  _control port   │          │    _state port         │
+    │  (non-blocking)  │          │    (leader only)       │
     │                  │          │                        │
-    │ - Starts server  │          │ - Auto-discovers port  │
-    │ - Updates meta   │          │ - Restores config      │
-    │ - Sets config    │          │ - Starts own server    │
+    │ - Writes state   │          │ - Reads state          │
+    │ - Returns immed. │          │ - Starts/stops handler │
+    │ - Signal deleted │          │ - Blocking goroutine   │
     └──────────────────┘          └────────────────────────┘
 ```
 
-**Stop Behavior:**
-- Pod that initiated (listenPort was 0 at start) updates metadata to port=0 on stop
-- Follower pods (listenPort > 0) only stop locally, don't modify metadata
-- Restart flag prevents metadata corruption during restart sequences
+**Key Implementation Points:**
 
-**Benefits:**
-- Zero-downtime scaling (pods auto-discover and start from metadata)
-- Configuration consistency (initiator's config distributed via metadata)
-- Clean shutdown coordination (metadata ensures pod agreement)
-- Automatic recovery (pods auto-restart from ReconcilePort)
-
-#### Implementing Scalable Components
-
-**Choose the right pattern based on how your component receives messages:**
-
-**Pattern 1: TinySignal-triggered control ports (like Signal)**
-
-Use when: Control port accepts configurable input that users may trigger via TinySignal.
-
+1. **Non-blocking control port**: `_control` writes TinyState and returns immediately
 ```go
-// Filter TinySignal broadcasts - only leader processes
-if !utils.IsLeader(ctx) {
-    return nil
-}
-// Process command and update metadata
-handler(ctx, v1alpha1.ReconcilePort, v1alpha1.MetadataConfigPatch{
-    Metadata: map[string]string{"my-state": "value"},
-})
-```
-
-**Pattern 2: gRPC-triggered ports (like HTTP Server)**
-
-Use when: Port receives messages via gRPC from other components (round-robin delivery).
-
-```go
-// Any pod can receive - process and update metadata
-// Other pods will sync via ReconcilePort
-handler(ctx, v1alpha1.ReconcilePort, v1alpha1.MetadataConfigPatch{
-    Metadata: map[string]string{"my-state": "value"},
-})
-```
-
-**Common: Sync state from ReconcilePort (all patterns)**
-
-```go
-case v1alpha1.ReconcilePort:
-    if node, ok := msg.(v1alpha1.TinyNode); ok {
-        c.myState = node.Status.Metadata["my-state"]
-        // Start/configure based on metadata if needed
+case v1alpha1.ControlPort:
+    if !utils.IsLeader(ctx) {
+        return nil  // Only leader processes control
+    }
+    if in.Send {
+        newState := State{Running: true, Context: in.Context}
+        t.writeState(handler, newState)  // Creates/updates TinyState
+        return nil  // Don't block! TinySignal deleted after return
     }
 ```
 
-**Common: Use metadata for consistent status display**
+2. **State-driven handler**: `_state` port triggers blocking handler goroutine
+```go
+case v1alpha1.StatePort:
+    data := msg.([]byte)
+    var signalState State
+    json.Unmarshal(data, &signalState)
+
+    if !utils.IsLeader(ctx) {
+        return nil  // Only leader runs blocking handler
+    }
+
+    if signalState.Running && !hasActiveHandler {
+        go t.runBlockingHandler(ctx, signalState.Context)
+    }
+```
+
+3. **Leader failover**: New leader recreates runtime from TinyState
+```go
+// On leadership change, TinyStateReconciler requeues all states
+// New leader receives _state with running=true → starts handler
+```
+
+**Flow:**
+1. User clicks Send → TinySignal → `_control` → writes TinyState `{running: true}` → returns → TinySignal deleted
+2. TinyState created → TinyStateReconciler → `_state` port → leader starts blocking handler goroutine
+3. User clicks Reset → TinySignal → `_control` → writes TinyState `{running: false}` → cancels handler → returns
+4. If leader dies → new leader elected → TinyState requeued → `_state` port → recreates handler
+
+**Benefits:**
+- Clean separation: signals for delivery, state for persistence
+- Automatic failover: new leader recreates runtime from state
+- No signal accumulation: one-off signals don't pile up
+- Predictable lifecycle: state controls, handler runs
+
+#### HTTP Server Component Scalability
+
+The HTTP Server component (`http-module`) uses the same TinyState pattern as Signal for multi-pod coordination.
+
+**Key Difference from Signal:** HTTP Server receives start requests via gRPC from upstream components (e.g., Signal → gRPC → HTTP Server), but the coordination pattern is the same.
+
+**Problem Solved:** Multiple replicas need to serve HTTP traffic while coordinating startup/shutdown. Only leader should manage state; all pods should run servers when state says "running".
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        TinyState CRD                            │
+│  Spec:                                                          │
+│    node: "http-server-xxx"                                      │
+│    data: {"running": true, "port": 8080, "config": {...}}       │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                                    │
+    writes state                         delivers to _state
+    (leader)                                 (all pods)
+         │                                    ▼
+    ┌────┴─────────────┐          ┌──────────┴─────────────┐
+    │  Input port      │          │    _state port         │
+    │  (gRPC delivery) │          │    (all pods)          │
+    │                  │          │                        │
+    │ - Leader writes  │          │ - Start server if      │
+    │   TinyState      │          │   state says running   │
+    │ - Returns immed. │          │ - All pods serve HTTP  │
+    └──────────────────┘          └────────────────────────┘
+```
+
+**Flow:**
+1. Signal sends to HTTP Server → gRPC → leader pod receives and writes TinyState `{running: true, port: 8080, config: {...}}`
+2. TinyStateReconciler delivers to all pods via `_state` port
+3. All pods start HTTP server on the same port (Kubernetes Service handles load balancing)
+4. Stop request → leader writes TinyState `{running: false}` → all pods stop
+
+**Benefits:**
+- Zero-downtime scaling (new pods auto-start from TinyState)
+- Configuration consistency (config stored in TinyState)
+- Leader failover (new leader can update state if needed)
+- Automatic recovery (TinyState requeued on startup)
+
+#### Implementing Scalable Components
+
+**The TinyState Pattern for Stateful Components:**
+
+Components that maintain running state (servers, watchers, long-running processes) should follow this pattern:
+
+1. **Write state via ReconcilePort with StateUpdate**
+```go
+// In control/input port handler - write state and return immediately
+stateData, _ := json.Marshal(MyState{Running: true, Config: config})
+handler(ctx, v1alpha1.ReconcilePort, v1alpha1.StateUpdate{
+    Data: stateData,
+})
+return nil  // Don't block!
+```
+
+2. **React to state via StatePort**
+```go
+case v1alpha1.StatePort:
+    data := msg.([]byte)
+    var myState MyState
+    json.Unmarshal(data, &myState)
+
+    // Only leader runs blocking handlers
+    if !utils.IsLeader(ctx) {
+        return nil
+    }
+
+    if myState.Running && !hasActiveHandler {
+        go runBlockingHandler(ctx, myState.Config)
+    } else if !myState.Running && hasActiveHandler {
+        cancelHandler()
+    }
+```
+
+3. **Define the StatePort in Ports()**
+```go
+{
+    Name: v1alpha1.StatePort,
+    // Hidden port - receives TinyState for state sync
+}
+```
+
+**Key Principles:**
+- Control/input ports should NOT block - write state and return immediately
+- `_state` port handlers start/stop blocking goroutines based on state
+- Only leader runs blocking handlers (use `utils.IsLeader(ctx)`)
+- State is source of truth; new leader recreates runtime from state
+
+**Common: Use state for consistent status display**
 
 ```go
-// Use metadata as source of truth for UI, not local state
-isRunning := node.Status.Metadata["running"] == "true"
+func (c *MyComponent) Ports() []module.Port {
+    state := c.getState()  // Read from local cache synced via _state port
+    return []module.Port{
+        {
+            Name: v1alpha1.ControlPort,
+            Configuration: Control{
+                ShowStop: state.Running,  // UI reflects persisted state
+            },
+        },
+    }
+}
 ```
 
 ### Project Structure
@@ -795,6 +856,35 @@ case "_settings":
     // Store settings for later use
 ```
 
+##### `_state` Port
+Receives state data (`[]byte`) for runtime state synchronization. Used by stateful components to persist and restore running state across pod restarts and leader changes:
+
+```go
+case "_state":
+    data := message.([]byte)
+    var myState MyState
+    json.Unmarshal(data, &myState)
+
+    // Only leader runs blocking handlers
+    if !utils.IsLeader(ctx) {
+        return nil
+    }
+
+    // Start/stop based on state
+    if myState.Running && !c.hasActiveHandler {
+        go c.runBlockingHandler(ctx, myState.Config)
+    }
+```
+
+To write state, use ReconcilePort with StateUpdate:
+
+```go
+stateData, _ := json.Marshal(MyState{Running: true})
+handler(ctx, v1alpha1.ReconcilePort, v1alpha1.StateUpdate{
+    Data: stateData,
+})
+```
+
 #### Error Handling
 
 ##### Transient Errors
@@ -937,19 +1027,20 @@ func TestHello(t *testing.T) {
 #### Best Practices
 
 1. **Keep Components Focused**: Each component should do one thing well
-2. **Use System Ports**: Implement `_reconcile` for cleanup and state sync
+2. **Use System Ports**: Implement `_reconcile` for cleanup; use `_state` for stateful components
 3. **Handle Context Cancellation**: Respect `ctx.Done()` for graceful shutdown
 4. **Leverage Schemas**: Use struct tags to create great UI experiences
 5. **Share Definitions**: Mark output fields as `shared:true` for type-safe flows
 6. **Use Permanent Errors**: Don't retry validation errors or user mistakes
 7. **Add Observability**: Create spans for long operations
 8. **Document with Tags**: Use meaningful tags in `GetInfo()` for discoverability
+9. **Use TinyState for Stateful Components**: Components with running state (servers, watchers) should write to TinyState and react via `_state` port for proper leader failover
 
 #### Example Modules
 
 Check out these example modules for reference:
-- **common-module**: Basic utilities (delay, switch, merge)
-- **http-module**: HTTP client/server components
+- **common-module**: Basic utilities (delay, switch, merge, signal) - Signal component demonstrates TinyState pattern
+- **http-module**: HTTP client/server components - HTTP Server demonstrates multi-pod coordination with TinyState
 - **grpc-module**: gRPC service components
 
 #### CLI Reference

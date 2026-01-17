@@ -203,6 +203,13 @@ var runCmd = &cobra.Command{
 			IsLeader: isLeader,
 		}
 
+		// Create state reconciler early so we can use it in leader callbacks
+		// This reconciles TinyState for component runtime state persistence
+		stateReconciler := &controller.TinyStateReconciler{
+			Module:   moduleInfo,
+			IsLeader: isLeader,
+		}
+
 		lock, err := resourcelock.New(
 			resourcelock.LeasesResourceLock,
 			namespace,
@@ -228,6 +235,8 @@ var runCmd = &cobra.Command{
 				signalReconciler.RequeueAllOnLeadershipChange()
 				// Trigger requeue of all TinyNodes so they set up periodic reconciliation
 				nodeReconciler.RequeueAllOnLeadershipChange()
+				// Trigger requeue of all TinyStates so leader can recreate runtime
+				stateReconciler.RequeueAllOnLeadershipChange()
 			},
 			OnStoppedLeading: func() {
 				l.Info("stopped leading for status updates")
@@ -470,6 +479,16 @@ var runCmd = &cobra.Command{
 
 		if err = signalReconciler.SetupWithManager(mgr); err != nil {
 			l.Error(err, "unable to create tinysignal controller")
+			return
+		}
+
+		// Set remaining fields on state reconciler that weren't available earlier
+		stateReconciler.Client = mgr.GetClient()
+		stateReconciler.Scheme = mgr.GetScheme()
+		stateReconciler.Scheduler = scheduler
+
+		if err = stateReconciler.SetupWithManager(mgr); err != nil {
+			l.Error(err, "unable to create tinystate controller")
 			return
 		}
 

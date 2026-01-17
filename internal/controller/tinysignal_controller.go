@@ -18,437 +18,115 @@ package controller
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
-	"time"
 
+	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
 
-// runningProcess tracks a signal process that's currently executing
-type runningProcess struct {
-	cancel context.CancelFunc
-	nonce  string // the nonce this process was started with
-}
-
-// TinySignalReconciler reconciles a TinySignal object
+// TinySignalReconciler reconciles a TinySignal object.
+// TinySignals are one-off: delivered to the target port, then deleted immediately.
 type TinySignalReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
 	Scheduler scheduler.Scheduler
 	Module    module.Info
 	IsLeader  *atomic.Bool
-	//
-	mu               *sync.Mutex
-	runningProcesses map[types.NamespacedName]*runningProcess
-	// leadershipCh receives events when leadership changes to trigger requeue of all signals
-	leadershipCh chan event.GenericEvent
 }
-
-const signalFinalizer = "io.tinysystems/signal-finalizer"
 
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals/finalizers,verbs=update
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the TinySignal object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
+// Reconcile handles TinySignal delivery.
+// TinySignals are one-off: delivered to the target port, then deleted.
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
-	// tiny signal names after name of node it's signaling to
 
+	// Only leader processes signals
 	if !r.IsLeader.Load() {
-		return reconcile.Result{}, nil
+		return ctrl.Result{}, nil
 	}
-	// only leaders process signals
 
-	// to avoid making many queries to Kubernetes API we check name itself against current module
+	// Check if this signal belongs to our module
 	m, _, err := module.ParseFullName(req.Name)
 	if err != nil {
 		l.Error(err, "tinysignal has invalid name", "name", req.Name)
-		return reconcile.Result{}, err
+		return ctrl.Result{}, nil
 	}
 
 	if m != r.Module.GetNameSanitised() {
-		return reconcile.Result{}, nil
+		return ctrl.Result{}, nil
 	}
 
 	var signal operatorv1alpha1.TinySignal
-
 	if err := r.Get(ctx, req.NamespacedName, &signal); err != nil {
 		if errors.IsNotFound(err) {
-			// The resource was not found, likely deleted. The delete logic below in the
-			// finalizer section will have already run, or there's nothing for us to do.
-			l.Info("tinySignal not found. Ignoring since object must be deleted.")
 			return ctrl.Result{}, nil
 		}
-		// Error reading the object - requeue the request.
 		return ctrl.Result{}, err
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+	// Skip if being deleted
 	if !signal.ObjectMeta.DeletionTimestamp.IsZero() {
-		// The object is being deleted.
-		if controllerutil.ContainsFinalizer(&signal, signalFinalizer) {
-			l.Info("tinySignal is being deleted, stopping associated process.")
-
-			// Look up the process in our map.
-			if proc, ok := r.runningProcesses[req.NamespacedName]; ok {
-				// Call the cancel function to signal the goroutine to stop.
-				proc.cancel()
-				// Remove the entry from our map to clean up.
-				delete(r.runningProcesses, req.NamespacedName)
-				l.Info("process stopped successfully.")
-			}
-
-			// Now that our cleanup is done, remove the finalizer.
-			// This allows the Kubernetes garbage collector to actually delete the resource.
-			controllerutil.RemoveFinalizer(&signal, signalFinalizer)
-			if err := r.Update(ctx, &signal); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		// Stop reconciliation as the signal is being deleted.
 		return ctrl.Result{}, nil
 	}
 
-	// --- Add Finalizer if it doesn't exist ---
-	if !controllerutil.ContainsFinalizer(&signal, signalFinalizer) {
-		l.Info("adding finalizer to signal.")
-		controllerutil.AddFinalizer(&signal, signalFinalizer)
-		if err := r.Update(ctx, &signal); err != nil {
-			return ctrl.Result{}, err
-		}
-		// Return here - the Update will trigger another reconcile which will handle the goroutine
-		return ctrl.Result{}, nil
+	// Deliver the signal
+	targetPort := utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port)
+	l.Info("delivering signal", "targetPort", targetPort)
+
+	// Wait for target instance to exist (with context timeout)
+	if !r.Scheduler.HasInstance(signal.Spec.Node) {
+		l.Info("target instance not ready, requeuing", "node", signal.Spec.Node)
+		return ctrl.Result{Requeue: true}, nil
 	}
 
-	runningProc, isRunning := r.runningProcesses[req.NamespacedName]
-	lastProcessedNonce := signal.Status.ProcessedNonce
+	// Deliver - this is fast now since _control ports don't block
+	deliveryCtx := utils.WithLeader(ctx, true)
+	_, err = r.Scheduler.Handle(deliveryCtx, &runner.Msg{
+		From: runner.FromSignal,
+		To:   targetPort,
+		Data: signal.Spec.Data,
+	})
 
-	currentNonce := signal.Spec.Nonce
-
-	// Check if nonce changed from what's currently running (if running)
-	// or from what was last processed (if not running)
-	var nonceChanged bool
-	var compareNonce string
-	if isRunning {
-		compareNonce = runningProc.nonce
-		nonceChanged = currentNonce != runningProc.nonce
-	} else {
-		compareNonce = lastProcessedNonce
-		nonceChanged = currentNonce != lastProcessedNonce
+	if err != nil {
+		l.Error(err, "delivery failed, will retry")
+		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Determine if we need to process this signal
-	needsProcessing := lastProcessedNonce == "" || (currentNonce != lastProcessedNonce)
+	l.Info("signal delivered, deleting")
 
-	l.Info("signal controller: reconcile state",
-		"isRunning", isRunning,
-		"nonceChanged", nonceChanged,
-		"needsProcessing", needsProcessing,
-		"lastProcessedNonce", lastProcessedNonce,
-		"runningNonce", compareNonce,
-		"currentNonce", currentNonce,
-	)
-
-	// If already running and nonce changed from what we're processing, cancel
-	// Don't cancel if nonce hasn't changed - this would kill long-running handlers
-	if isRunning && nonceChanged {
-		l.Info("signal controller: nonce changed, cancelling previous in-flight request",
-			"runningNonce", runningProc.nonce,
-			"currentNonce", currentNonce,
-		)
-		runningProc.cancel()
-		delete(r.runningProcesses, req.NamespacedName)
-		isRunning = false // Allow new process to start
-	}
-
-	// Only start a new process if not running and needs processing
-	if !isRunning && needsProcessing {
-
-		// Create a new context that we can cancel later.
-		processCtx, cancel := context.WithCancel(utils.WithLeader(context.Background(), r.IsLeader.Load()))
-
-		r.runningProcesses[req.NamespacedName] = &runningProcess{
-			cancel: cancel,
-			nonce:  currentNonce,
-		}
-
-		go func(ctx context.Context, signalName types.NamespacedName, spec operatorv1alpha1.TinySignalSpec, nonce string) {
-			targetPort := utils.GetPortFullName(spec.Node, spec.Port)
-
-			l.Info("signal controller: process goroutine started",
-				"node", spec.Node,
-				"port", spec.Port,
-				"targetPort", targetPort,
-				"nonce", nonce,
-				"dataSize", len(spec.Data),
-			)
-
-			// Wait for target instance before sending
-			waitStart := time.Now()
-			waitAttempts := 0
-			for !r.Scheduler.HasInstance(spec.Node) {
-				waitAttempts++
-				if waitAttempts%10 == 0 {
-					l.Info("signal controller: still waiting for instance",
-						"node", spec.Node,
-						"waitAttempts", waitAttempts,
-						"waitDuration", time.Since(waitStart).String(),
-					)
-				}
-				select {
-				case <-ctx.Done():
-					l.Info("signal controller: context cancelled while waiting for instance",
-						"node", spec.Node,
-						"waitAttempts", waitAttempts,
-						"waitDuration", time.Since(waitStart).String(),
-						"ctxErr", ctx.Err(),
-					)
-					return
-				case <-time.After(500 * time.Millisecond):
-				}
-			}
-			l.Info("signal controller: instance found, proceeding to send signal",
-				"node", spec.Node,
-				"waitAttempts", waitAttempts,
-				"waitDuration", time.Since(waitStart).String(),
-			)
-
-			// Exponential backoff configuration for retries on failure.
-			initialBackoff := 2 * time.Second
-			maxBackoff := 30 * time.Second
-			maxAttempts := 10 // Stop retrying after this many consecutive failures
-			currentBackoff := initialBackoff
-			attempt := 0
-
-			for {
-				// Check if we should stop before attempting
-				if ctx.Err() != nil {
-					l.Info("signal controller: context cancelled, shutting down",
-						"targetPort", targetPort,
-						"attempt", attempt,
-					)
-					return
-				}
-
-				attempt++
-
-				l.Info("signal controller: sending signal to scheduler",
-					"targetPort", targetPort,
-					"attempt", attempt,
-					"ctxErrBeforeHandle", ctx.Err(),
-				)
-
-				handleStart := time.Now()
-
-				// Execute the actual business logic.
-				res, err := r.Scheduler.Handle(ctx, &runner.Msg{
-					From:  runner.FromSignal,
-					To:    targetPort,
-					Data:  spec.Data,
-					Nonce: nonce,
-				})
-
-				handleDuration := time.Since(handleStart)
-
-				if err != nil {
-					l.Info("signal controller: handle returned error",
-						"targetPort", targetPort,
-						"attempt", attempt,
-						"error", err.Error(),
-						"handleDuration", handleDuration.String(),
-						"ctxErrAfterHandle", ctx.Err(),
-					)
-
-					// Only stop if our process context was cancelled, not for internal context errors
-					if ctx.Err() != nil {
-						l.Info("signal controller: context cancelled after handle, shutting down",
-							"targetPort", targetPort,
-							"attempt", attempt,
-							"handleDuration", handleDuration.String(),
-						)
-						return
-					}
-
-					l.Error(err, "signal controller: scheduler handle failed, will retry with backoff",
-						"targetPort", targetPort,
-						"attempt", attempt,
-						"nextRetryIn", currentBackoff,
-						"handleDuration", handleDuration.String(),
-					)
-
-					// Check if we've exceeded max attempts
-					if attempt >= maxAttempts {
-						l.Error(err, "signal controller: max retry attempts reached, giving up. Port may not exist on target node.",
-							"targetPort", targetPort,
-							"maxAttempts", maxAttempts,
-						)
-						return
-					}
-
-					// Wait for the backoff period
-					time.Sleep(currentBackoff)
-					currentBackoff *= 2
-					if currentBackoff > maxBackoff {
-						currentBackoff = maxBackoff
-					}
-					continue
-				}
-
-				l.Info("signal controller: scheduler handle succeeded",
-					"targetPort", targetPort,
-					"attempt", attempt,
-					"hasResponse", res != nil,
-					"handleDuration", handleDuration.String(),
-				)
-
-				// For long-running handlers (like HTTP server), Handle() only returns when
-				// context is cancelled. In this case, we must NOT update processedNonce,
-				// so the signal will re-fire on pod restart.
-				if ctx.Err() != nil {
-					l.Info("signal controller: handler returned due to context cancellation, not marking as processed",
-						"targetPort", targetPort,
-						"nonce", nonce,
-						"ctxErr", ctx.Err(),
-					)
-					// Clean up from runningProcesses map
-					r.mu.Lock()
-					delete(r.runningProcesses, signalName)
-					r.mu.Unlock()
-					return
-				}
-
-				// Signal sent successfully with actual completion (not cancellation)
-				l.Info("signal controller: signal delivered successfully, updating status",
-					"targetPort", targetPort,
-					"nonce", nonce,
-				)
-
-				// Update the signal status with the processed nonce (HA-safe persistence)
-				if err := r.updateSignalStatus(signalName, nonce); err != nil {
-					l.Error(err, "signal controller: failed to update signal status",
-						"targetPort", targetPort,
-						"nonce", nonce,
-					)
-					// Don't return here - the signal was delivered, status update failure
-					// will cause a re-delivery on next reconcile which is acceptable
-				}
-
-				// Clean up from runningProcesses map
-				r.mu.Lock()
-				delete(r.runningProcesses, signalName)
-				r.mu.Unlock()
-
-				return
-			}
-		}(processCtx, req.NamespacedName, signal.Spec, currentNonce)
+	// Delete the signal (one-off)
+	if err := r.Delete(ctx, &signal); err != nil && !errors.IsNotFound(err) {
+		l.Error(err, "failed to delete signal after delivery")
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// updateSignalStatus updates the signal's status with the processed nonce.
-// This persists the nonce to Kubernetes for HA-safe operation across pod restarts.
-func (r *TinySignalReconciler) updateSignalStatus(name types.NamespacedName, nonce string) error {
-	ctx := context.Background()
-
-	var signal operatorv1alpha1.TinySignal
-	if err := r.Get(ctx, name, &signal); err != nil {
-		return err
-	}
-
-	signal.Status.ProcessedNonce = nonce
-	return r.Status().Update(ctx, &signal)
-}
-
-// RequeueAllOnLeadershipChange triggers requeue of all TinySignals when this pod becomes leader.
-// This ensures signals that were skipped while not leader get processed.
+// RequeueAllOnLeadershipChange is a no-op for one-off signals.
 func (r *TinySignalReconciler) RequeueAllOnLeadershipChange() {
-	if r.leadershipCh == nil {
-		return
-	}
-	// Non-blocking send - if channel already has an event pending, skip
-	select {
-	case r.leadershipCh <- event.GenericEvent{Object: &operatorv1alpha1.TinySignal{}}:
-	default:
-	}
+	// No-op: TinySignals are one-off and don't need requeue on leadership change
 }
 
-// CancelAllRunningProcesses cancels all running signal processes.
-// This should be called when the pod loses leadership to ensure clean handoff.
+// CancelAllRunningProcesses is a no-op since delivery is now synchronous.
 func (r *TinySignalReconciler) CancelAllRunningProcesses() {
-	if r.mu == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	for name, proc := range r.runningProcesses {
-		proc.cancel()
-		delete(r.runningProcesses, name)
-	}
+	// No-op: delivery is synchronous now
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinySignalReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.mu = &sync.Mutex{}
-	r.runningProcesses = make(map[types.NamespacedName]*runningProcess)
-	r.leadershipCh = make(chan event.GenericEvent, 1)
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinySignal{}).
-		WatchesRawSource(source.Channel(
-			r.leadershipCh,
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
-				// List all TinySignals and enqueue those belonging to this module
-				var signals operatorv1alpha1.TinySignalList
-				if err := r.List(ctx, &signals); err != nil {
-					return nil
-				}
-
-				var requests []reconcile.Request
-				for _, sig := range signals.Items {
-					// Only enqueue signals for this module
-					m, _, err := module.ParseFullName(sig.Name)
-					if err != nil || m != r.Module.GetNameSanitised() {
-						continue
-					}
-					requests = append(requests, reconcile.Request{
-						NamespacedName: types.NamespacedName{
-							Name:      sig.Name,
-							Namespace: sig.Namespace,
-						},
-					})
-				}
-				return requests
-			}),
-		)).
 		Complete(r)
 }

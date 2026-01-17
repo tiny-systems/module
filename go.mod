@@ -1,6 +1,6 @@
 module github.com/tiny-systems/module
 
-go 1.24.0
+go 1.24.2
 
 toolchain go1.24.9
 
@@ -48,7 +48,7 @@ require (
 	golang.org/x/text v0.30.0
 	golang.org/x/time v0.12.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/protobuf v1.36.5
+	google.golang.org/protobuf v1.36.6
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.34.0
@@ -61,20 +61,24 @@ require (
 )
 
 require (
+	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/docker/docker v28.5.1+incompatible
 	github.com/go-logr/zerologr v1.2.3
 	github.com/goccy/go-json v0.10.2
 	github.com/microcosm-cc/bluemonday v1.0.27
+	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/mittwald/go-helm-client v0.12.19
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/rogpeppe/go-internal v1.13.1
 	github.com/rs/zerolog v1.31.0
+	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/spf13/cobra v1.10.1
 	github.com/spyzhov/ajson v0.9.4
 	github.com/swaggest/jsonschema-go v0.3.70
 	github.com/tiny-systems/errorpanic v0.7.1
+	github.com/tiny-systems/otel-collector v0.5.1
 	github.com/tiny-systems/platform-api v0.0.14
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.46.1
@@ -84,8 +88,8 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.34.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.32.0
 	go.opentelemetry.io/otel/metric v1.35.0
-	go.opentelemetry.io/otel/sdk v1.34.0
-	go.opentelemetry.io/otel/sdk/metric v1.34.0
+	go.opentelemetry.io/otel/sdk v1.35.0
+	go.opentelemetry.io/otel/sdk/metric v1.35.0
 	go.opentelemetry.io/otel/trace v1.35.0
 	golang.org/x/mod v0.28.0
 	golang.org/x/sync v0.17.0
@@ -184,8 +188,8 @@ require (
 	golang.org/x/crypto v0.42.0 // indirect
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 	golang.org/x/tools v0.37.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250303144028-a0af3efb3deb // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250303144028-a0af3efb3deb // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20250428153025-10db94c68c34 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250428153025-10db94c68c34 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gotest.tools/v3 v3.5.1 // indirect
 	k8s.io/apiserver v0.34.0 // indirect
