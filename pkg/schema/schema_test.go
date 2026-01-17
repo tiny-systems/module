@@ -18,20 +18,22 @@ func TestUpdateWithDefinitions(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "empty schema should cause error",
+			name: "empty schema returns empty schema unchanged",
 			args: args{
 				realSchema:                  []byte(``),
 				configurableDefinitionNodes: map[string]*ajson.Node{},
 			},
-			wantErr: true,
+			wantErr: false,
+			want:    []byte(``),
 		},
 		{
-			name: "schema with no $defs should cause error",
+			name: "schema with no $defs returns original schema unchanged",
 			args: args{
 				realSchema:                  []byte(`{}`),
 				configurableDefinitionNodes: map[string]*ajson.Node{},
 			},
-			wantErr: true,
+			wantErr: false,
+			want:    []byte(`{}`),
 		},
 		{
 			name: "empty defs returns as it is, no error",
