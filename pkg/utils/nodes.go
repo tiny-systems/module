@@ -153,10 +153,12 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 			continue
 		}
 
+		// Try to update schema with configurable definitions
+		// If updating fails (e.g., schema has no $defs), use the original schema
 		s, err := schema.UpdateWithDefinitions(v.Schema, defs)
 		if err != nil {
-			log.Error().Err(err).Msg("unable to update conf definitions")
-			continue
+			log.Debug().Err(err).Str("port", v.Name).Msg("unable to update conf definitions, using original schema")
+			s = v.Schema
 		}
 
 		ma["schema"] = json.RawMessage(s)
@@ -173,7 +175,8 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 			}
 			updatedConfigSchema, err := schema.UpdateWithDefinitions(pc.Schema, defs)
 			if err != nil {
-				log.Error().Err(err).Msg("unable to update definitions")
+				log.Debug().Err(err).Str("port", v.Name).Msg("unable to update spec port definitions, using original schema")
+				ma["schema"] = json.RawMessage(pc.Schema)
 				continue
 			}
 			ma["schema"] = json.RawMessage(updatedConfigSchema)

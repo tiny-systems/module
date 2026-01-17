@@ -2,12 +2,22 @@ package module
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/util/version"
-	"strings"
 )
 
 const nameSeparator = "."
+
+// ParseFullName parses a full node name (module.node) into its components.
+func ParseFullName(fullName string) (module string, node string, err error) {
+	parts := strings.Split(fullName, nameSeparator)
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("node name is invalid, separator not found")
+	}
+	return parts[0], parts[1], nil
+}
 
 type Info struct {
 	Name      string
@@ -37,16 +47,4 @@ func (i Info) GetMajorNameSanitised() string {
 
 func (i Info) GetNameSanitised() string {
 	return utils.SanitizeResourceName(i.Name)
-}
-
-func GetNodeFullName(prefix string, module string, component string) string {
-	return fmt.Sprintf("%s%s%s%s%s", prefix, nameSeparator, module, nameSeparator, component)
-}
-
-func ParseFullName(fullName string) (module string, component string, err error) {
-	parts := strings.Split(fullName, nameSeparator)
-	if len(parts) < 3 {
-		return "", "", fmt.Errorf("node name %s is invalid, separator not found", fullName)
-	}
-	return parts[1], parts[2], nil
 }
