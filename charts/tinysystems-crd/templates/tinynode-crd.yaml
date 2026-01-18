@@ -148,8 +148,8 @@ spec:
                 items:
                   properties:
                     blocking:
-                      description: 'Blocking: when true, use TinyState instead of
-                        gRPC for blocking edges'
+                      description: 'Blocking: when true, use TinyState instead of gRPC
+                        for blocking edges'
                       type: boolean
                     configuration:
                       format: byte
