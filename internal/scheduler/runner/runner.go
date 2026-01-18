@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -791,7 +792,10 @@ func (c *Runner) getPortByName(portName string) *m.Port {
 // sendBlockingEdge creates a TinyState for the destination node and blocks until it's deleted.
 // This is used for blocking edges (Blocking: true on source port).
 func (c *Runner) sendBlockingEdge(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort string, data []byte) (any, error) {
-	stateName := fmt.Sprintf("blocking-%s", edge.ID)
+	// Sanitize edge.ID for Kubernetes resource naming (RFC 1123 subdomain)
+	// Replace underscores with dashes since underscores are not allowed
+	sanitizedEdgeID := strings.ReplaceAll(edge.ID, "_", "-")
+	stateName := fmt.Sprintf("blocking-%s", sanitizedEdgeID)
 
 	// Parse target node and port from edge.To
 	targetNode, targetPort := utils.ParseFullPortName(edge.To)
