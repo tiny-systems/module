@@ -289,6 +289,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		}
 		portData = portInputData.Interface()
 
+	} else if msg.From == FromState {
+		// State messages pass raw []byte data directly to the component
+		// The component expects []byte and handles unmarshaling itself
+		portData = msg.Data
+
 	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
