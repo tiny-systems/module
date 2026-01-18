@@ -171,6 +171,27 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	})
 	if err != nil {
 		l.Error(err, "failed to send state to component")
+
+		// For blocking states, update status with error and delete so Signal unblocks
+		if isBlockingState && r.IsLeader.Load() {
+			l.Info("blocking state failed, updating status and deleting", "error", err.Error())
+
+			// Update status with error info
+			originState := state.DeepCopy()
+			state.Status.Result = "error"
+			if state.Status.Metadata == nil {
+				state.Status.Metadata = make(map[string]string)
+			}
+			state.Status.Metadata["error"] = err.Error()
+			_ = r.Status().Patch(ctx, state, client.MergeFrom(originState))
+
+			// Delete the TinyState so Signal's watch unblocks
+			if err := r.Delete(ctx, state); err != nil {
+				l.Error(err, "failed to delete blocking state after error")
+			}
+			return ctrl.Result{}, nil
+		}
+
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, fmt.Errorf("send state: %w", err)
 	}
 
