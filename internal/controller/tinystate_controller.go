@@ -57,24 +57,15 @@ type TinyStateReconciler struct {
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinystates/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinystates/finalizers,verbs=update
 
-// Reconcile handles TinyState changes and sends state to components via _state port.
+// Reconcile handles TinyState changes and sends state to components.
+// For normal states (no TargetPort): sends to _state port
+// For blocking states (TargetPort set): sends to the target port, blocks, then requeues
 // On leader change, all states are requeued so the new leader can recreate runtime.
 func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	// Check if this state belongs to a node in our module
-	m, _, err := module.ParseFullName(req.Name)
-	if err != nil {
-		l.Error(err, "tinystate has invalid name", "name", req.Name)
-		return ctrl.Result{}, nil
-	}
-
-	if m != r.Module.GetNameSanitised() {
-		return ctrl.Result{}, nil
-	}
-
-	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name)
-
+	// For blocking states, parse target node name; for normal states, parse from state name
+	// Blocking state names are "blocking-{edgeID}", normal state names are "{nodeName}"
 	state := &operatorv1alpha1.TinyState{}
 	if err := r.Get(ctx, req.NamespacedName, state); err != nil {
 		if errors.IsNotFound(err) {
@@ -84,18 +75,48 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	// Check if this state's target node belongs to our module
+	targetNode := state.Spec.Node
+	m, _, err := module.ParseFullName(targetNode)
+	if err != nil {
+		// Try parsing from state name (for normal states)
+		m, _, err = module.ParseFullName(req.Name)
+		if err != nil {
+			l.Error(err, "tinystate has invalid name", "name", req.Name)
+			return ctrl.Result{}, nil
+		}
+	}
+
+	if m != r.Module.GetNameSanitised() {
+		return ctrl.Result{}, nil
+	}
+
+	isBlockingState := state.Spec.TargetPort != ""
+	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name, "blocking", isBlockingState)
+
 	// Handle deletion - send nil to component to signal state was deleted
 	if !state.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(state, tinyStateFinalizer) {
-			l.Info("tinystate being deleted, notifying component", "node", state.Spec.Node)
+			l.Info("tinystate being deleted, notifying component", "node", state.Spec.Node, "blocking", isBlockingState)
 
 			// Only notify if instance exists
 			if r.Scheduler.HasInstance(state.Spec.Node) {
 				leaderCtx := utils.WithLeader(ctx, r.IsLeader.Load())
-				targetPort := utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
+
+				// Determine which port to send deletion notification to
+				var targetPort string
+				var from string
+				if isBlockingState {
+					targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
+					from = operatorv1alpha1.BlockingStateFrom
+				} else {
+					targetPort = utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
+					from = runner.FromState
+				}
+
 				// Send nil to signal state deletion
 				_, _ = r.Scheduler.Handle(leaderCtx, &runner.Msg{
-					From: runner.FromState,
+					From: from,
 					To:   targetPort,
 					Data: nil,
 				})
@@ -122,22 +143,35 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Skip if instance doesn't exist yet
 	if !r.Scheduler.HasInstance(state.Spec.Node) {
 		l.Info("instance not ready, requeuing", "node", state.Spec.Node)
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Add leader context so components know if they're the leader
 	ctx = utils.WithLeader(ctx, r.IsLeader.Load())
 
-	// Send state data to the component via _state port using Handle
-	targetPort := utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
+	// Determine target port and from field
+	var targetPort string
+	var from string
+	if isBlockingState {
+		// Blocking state - deliver to specific port
+		targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
+		from = operatorv1alpha1.BlockingStateFrom
+		l.Info("delivering blocking state", "targetPort", targetPort, "sourceNode", state.Spec.SourceNode)
+	} else {
+		// Normal state - deliver to _state port
+		targetPort = utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
+		from = runner.FromState
+	}
+
+	// Send state data to the component
 	_, err = r.Scheduler.Handle(ctx, &runner.Msg{
-		From: runner.FromState,
+		From: from,
 		To:   targetPort,
 		Data: state.Spec.Data,
 	})
 	if err != nil {
 		l.Error(err, "failed to send state to component")
-		return ctrl.Result{}, fmt.Errorf("send state: %w", err)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, fmt.Errorf("send state: %w", err)
 	}
 
 	// Update status if leader
@@ -150,6 +184,13 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := r.Status().Patch(ctx, state, client.MergeFrom(originState)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("patch status: %w", err)
 		}
+	}
+
+	// For blocking states, requeue with backoff to ensure continuous reconciliation
+	// This ensures the server keeps running while the TinyState exists
+	if isBlockingState {
+		l.Info("blocking state delivered, requeuing for continuous reconciliation")
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	return ctrl.Result{}, nil
