@@ -38,6 +38,23 @@ type Manager struct {
 	lock      *sync.Mutex
 }
 
+// BlockingStateRequest contains parameters for creating a blocking TinyState
+type BlockingStateRequest struct {
+	StateName    string // name of the TinyState (usually "blocking-{edgeID}")
+	Namespace    string
+	TargetNode   string
+	TargetPort   string
+	SourceNode   string // owner for cascade deletion
+	SourceEdgeID string
+	Data         []byte
+}
+
+// BlockingStateResult contains the result from a completed blocking state
+type BlockingStateResult struct {
+	Result   string            // completed/cancelled/error
+	Metadata map[string]string // e.g., HTTP port
+}
+
 type ManagerInterface interface {
 	CreateModule(ctx context.Context, mod module.Info) error
 	PatchNode(ctx context.Context, node v1alpha1.TinyNode, update func(node *v1alpha1.TinyNode) error) error
@@ -49,6 +66,12 @@ type ManagerInterface interface {
 	UpsertState(ctx context.Context, nodeName, namespace string, data []byte, ownerNode string) error
 	DeleteState(ctx context.Context, nodeName, namespace string) error
 	GetState(ctx context.Context, nodeName, namespace string) (*v1alpha1.TinyState, error)
+	// Blocking state methods for blocking edges
+	CreateBlockingState(ctx context.Context, req BlockingStateRequest) error
+	WatchBlockingState(ctx context.Context, stateName, namespace string) (*BlockingStateResult, error)
+	DeleteBlockingState(ctx context.Context, stateName, namespace, result string) error
+	// ListBlockingStates lists blocking states by source node
+	ListBlockingStates(ctx context.Context, sourceNode, namespace string) ([]v1alpha1.TinyState, error)
 }
 
 func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
@@ -1244,4 +1267,157 @@ func (m Manager) DeleteState(ctx context.Context, nodeName, namespace string) er
 		return err
 	}
 	return m.client.Delete(ctx, state)
+}
+
+// CreateBlockingState creates a TinyState for a blocking edge.
+// The state is owned by the source node for cascade deletion.
+func (m Manager) CreateBlockingState(ctx context.Context, req BlockingStateRequest) error {
+	// Get the source node to set owner reference
+	sourceNode, err := m.GetNode(ctx, req.SourceNode, req.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get source node for blocking state: %w", err)
+	}
+
+	state := &v1alpha1.TinyState{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.StateName,
+			Namespace: req.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: sourceNode.APIVersion,
+					Kind:       sourceNode.Kind,
+					Name:       sourceNode.Name,
+					UID:        sourceNode.UID,
+					Controller: func() *bool { b := true; return &b }(),
+				},
+			},
+		},
+		Spec: v1alpha1.TinyStateSpec{
+			Node:         req.TargetNode,
+			Data:         req.Data,
+			TargetPort:   req.TargetPort,
+			SourceEdgeID: req.SourceEdgeID,
+			SourceNode:   req.SourceNode,
+		},
+	}
+
+	err = m.client.Create(ctx, state)
+	if errors.IsAlreadyExists(err) {
+		// Update existing state
+		existing, getErr := m.getBlockingState(ctx, req.StateName, req.Namespace)
+		if getErr != nil {
+			return getErr
+		}
+		existing.Spec = state.Spec
+		return m.client.Update(ctx, existing)
+	}
+	return err
+}
+
+// getBlockingState retrieves a blocking TinyState by name
+func (m Manager) getBlockingState(ctx context.Context, stateName, namespace string) (*v1alpha1.TinyState, error) {
+	state := &v1alpha1.TinyState{}
+	if err := m.client.Get(ctx, client.ObjectKey{
+		Namespace: namespace,
+		Name:      stateName,
+	}, state); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+// WatchBlockingState watches a blocking TinyState until it's deleted.
+// Returns the result from status when the state is deleted.
+func (m Manager) WatchBlockingState(ctx context.Context, stateName, namespace string) (*BlockingStateResult, error) {
+	stateList := &v1alpha1.TinyStateList{}
+
+	watcher, err := m.client.Watch(ctx, stateList, client.InNamespace(namespace), client.MatchingFields{"metadata.name": stateName})
+	if err != nil {
+		return nil, fmt.Errorf("failed to watch blocking state: %w", err)
+	}
+	defer watcher.Stop()
+
+	// First check if state still exists
+	state, err := m.getBlockingState(ctx, stateName, namespace)
+	if errors.IsNotFound(err) {
+		// Already deleted
+		return &BlockingStateResult{Result: "completed"}, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	// Watch for deletion
+	for {
+		select {
+		case <-ctx.Done():
+			return &BlockingStateResult{Result: "cancelled"}, ctx.Err()
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				// Watcher closed, re-check state
+				_, err := m.getBlockingState(ctx, stateName, namespace)
+				if errors.IsNotFound(err) {
+					return &BlockingStateResult{Result: "completed", Metadata: state.Status.Metadata}, nil
+				}
+				// Restart watcher
+				watcher, err = m.client.Watch(ctx, stateList, client.InNamespace(namespace), client.MatchingFields{"metadata.name": stateName})
+				if err != nil {
+					return nil, fmt.Errorf("failed to restart watch: %w", err)
+				}
+				continue
+			}
+
+			if event.Type == watch.Deleted {
+				deletedState, ok := event.Object.(*v1alpha1.TinyState)
+				if ok && deletedState.Name == stateName {
+					return &BlockingStateResult{
+						Result:   deletedState.Status.Result,
+						Metadata: deletedState.Status.Metadata,
+					}, nil
+				}
+			}
+
+			// Update our reference for metadata
+			if updatedState, ok := event.Object.(*v1alpha1.TinyState); ok && updatedState.Name == stateName {
+				state = updatedState
+			}
+		}
+	}
+}
+
+// DeleteBlockingState updates the status result and then deletes the blocking TinyState.
+func (m Manager) DeleteBlockingState(ctx context.Context, stateName, namespace, result string) error {
+	state, err := m.getBlockingState(ctx, stateName, namespace)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil // Already deleted
+		}
+		return err
+	}
+
+	// Update status with result before deletion
+	if result != "" {
+		originState := state.DeepCopy()
+		state.Status.Result = result
+		if err := m.client.Status().Patch(ctx, state, client.MergeFrom(originState)); err != nil {
+			log.Warn().Err(err).Str("state", stateName).Msg("failed to update blocking state result before deletion")
+		}
+	}
+
+	return m.client.Delete(ctx, state)
+}
+
+// ListBlockingStates lists all blocking TinyStates created by a source node
+func (m Manager) ListBlockingStates(ctx context.Context, sourceNode, namespace string) ([]v1alpha1.TinyState, error) {
+	stateList := &v1alpha1.TinyStateList{}
+	if err := m.client.List(ctx, stateList, client.InNamespace(namespace)); err != nil {
+		return nil, err
+	}
+
+	var result []v1alpha1.TinyState
+	for _, state := range stateList.Items {
+		if state.Spec.SourceNode == sourceNode {
+			result = append(result, state)
+		}
+	}
+	return result, nil
 }

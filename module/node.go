@@ -28,4 +28,9 @@ type Port struct {
 
 	// Response conf
 	ResponseConfiguration interface{}
+
+	// Blocking: when true, use TinyState instead of gRPC for blocking edges.
+	// The scheduler creates a TinyState for the destination node and blocks
+	// until the TinyState is deleted.
+	Blocking bool
 }
