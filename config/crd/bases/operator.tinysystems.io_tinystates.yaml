@@ -61,6 +61,11 @@ spec:
                   SourceNode is the owner node that created this blocking state
                   Used for cascade deletion when source node is deleted
                 type: string
+              sourcePort:
+                description: |-
+                  SourcePort is the full port name (node:port) that created this blocking state
+                  Used for edge configuration lookup when delivering the data
+                type: string
               targetPort:
                 description: |-
                   TargetPort is the port to deliver to instead of _state (for blocking edges)

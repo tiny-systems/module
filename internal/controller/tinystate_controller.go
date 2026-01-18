@@ -155,8 +155,13 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if isBlockingState {
 		// Blocking state - deliver to specific port
 		targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
-		from = operatorv1alpha1.BlockingStateFrom
-		l.Info("delivering blocking state", "targetPort", targetPort, "sourceNode", state.Spec.SourceNode)
+		// Use SourcePort for edge config lookup, fall back to BlockingStateFrom for backwards compatibility
+		if state.Spec.SourcePort != "" {
+			from = state.Spec.SourcePort
+		} else {
+			from = operatorv1alpha1.BlockingStateFrom
+		}
+		l.Info("delivering blocking state", "targetPort", targetPort, "from", from, "sourceNode", state.Spec.SourceNode)
 	} else {
 		// Normal state - deliver to _state port
 		targetPort = utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
