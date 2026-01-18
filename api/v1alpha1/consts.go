@@ -15,6 +15,10 @@ const (
 	// Components use this to persist and restore runtime state (e.g., running, context).
 	// Delivered on state changes and leader changes.
 	StatePort = "_state"
+
+	// BlockingStateFrom is the value of From field for blocking state messages
+	// delivered by the TinyStateController via blocking TinyState
+	BlockingStateFrom = "blocking"
 )
 
 // StateUpdate is passed to ReconcilePort handler to update TinyState.

@@ -3,6 +3,11 @@ package runner
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"sort"
+	"sync"
+	"time"
+
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
 	"github.com/goccy/go-json"
@@ -26,10 +31,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
-	"reflect"
-	"sort"
-	"sync"
-	"time"
 )
 
 type Runner struct {
@@ -177,6 +178,7 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 			Label:    np.Label,
 			Position: v1alpha1.Position(np.Position),
 			Source:   np.Source,
+			Blocking: np.Blocking,
 		}
 
 		if np.Configuration != nil {
@@ -685,7 +687,17 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		}
 
 		wg.Go(func() error {
-			res, err := c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
+			var res any
+			var err error
+
+			// Check if source port has Blocking: true
+			if sourcePort.Blocking {
+				// Use blocking edge via TinyState
+				res, err = c.sendBlockingEdge(ctx, edge, fromPort, dataBytes)
+			} else {
+				// Use normal gRPC edge with retry
+				res, err = c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
+			}
 
 			resultLock.Lock()
 			defer resultLock.Unlock()
@@ -764,4 +776,97 @@ func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
 		time.Sleep(time.Second * 6)
 		_ = r.Unregister()
 	}()
+}
+
+// getPortByName returns the port configuration by name
+func (c *Runner) getPortByName(portName string) *m.Port {
+	for _, p := range c.getPorts() {
+		if p.Name == portName {
+			return &p
+		}
+	}
+	return nil
+}
+
+// sendBlockingEdge creates a TinyState for the destination node and blocks until it's deleted.
+// This is used for blocking edges (Blocking: true on source port).
+func (c *Runner) sendBlockingEdge(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort string, data []byte) (any, error) {
+	stateName := fmt.Sprintf("blocking-%s", edge.ID)
+
+	// Parse target node and port from edge.To
+	targetNode, targetPort := utils.ParseFullPortName(edge.To)
+	if targetNode == "" || targetPort == "" {
+		return nil, fmt.Errorf("invalid edge target: %s", edge.To)
+	}
+
+	c.log.Info("sendBlockingEdge: creating blocking state",
+		"stateName", stateName,
+		"targetNode", targetNode,
+		"targetPort", targetPort,
+		"sourceNode", c.name,
+		"edgeID", edge.ID,
+	)
+
+	// Start gauge metrics for edge animation
+	gaugeCtx, gaugeCancel := context.WithCancel(ctx)
+	defer gaugeCancel()
+
+	go func() {
+		ticker := time.NewTicker(time.Second * 3)
+		defer ticker.Stop()
+
+		c.setGauge(time.Now().Unix(), edge.ID, metrics.MetricEdgeBusy)
+
+		for {
+			select {
+			case <-gaugeCtx.Done():
+				return
+			case t := <-ticker.C:
+				c.setGauge(t.Unix(), edge.ID, metrics.MetricEdgeBusy)
+			}
+		}
+	}()
+
+	// Create blocking TinyState
+	c.nodeLock.Lock()
+	namespace := c.node.Namespace
+	c.nodeLock.Unlock()
+
+	err := c.manager.CreateBlockingState(ctx, resource.BlockingStateRequest{
+		StateName:    stateName,
+		Namespace:    namespace,
+		TargetNode:   targetNode,
+		TargetPort:   targetPort,
+		SourceNode:   c.name,
+		SourceEdgeID: edge.ID,
+		Data:         data,
+	})
+	if err != nil {
+		c.log.Error(err, "sendBlockingEdge: failed to create blocking state",
+			"stateName", stateName,
+		)
+		return nil, err
+	}
+
+	c.log.Info("sendBlockingEdge: watching blocking state",
+		"stateName", stateName,
+	)
+
+	// Block until TinyState is deleted
+	result, err := c.manager.WatchBlockingState(ctx, stateName, namespace)
+	if err != nil {
+		c.log.Error(err, "sendBlockingEdge: watch error",
+			"stateName", stateName,
+		)
+		return nil, err
+	}
+
+	c.log.Info("sendBlockingEdge: blocking state completed",
+		"stateName", stateName,
+		"result", result.Result,
+		"metadata", result.Metadata,
+	)
+
+	// Return metadata from the completed state (e.g., HTTP port info)
+	return result.Metadata, nil
 }

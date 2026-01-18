@@ -30,6 +30,21 @@ type TinyStateSpec struct {
 	// Components can store any structure they need (e.g., {running: true, context: {...}})
 	// +kubebuilder:validation:Optional
 	Data []byte `json:"data,omitempty"`
+
+	// TargetPort is the port to deliver to instead of _state (for blocking edges)
+	// When set, the controller delivers the data to this specific port
+	// +kubebuilder:validation:Optional
+	TargetPort string `json:"targetPort,omitempty"`
+
+	// SourceEdgeID is the edge that created this blocking state
+	// Used for cleanup when edges are removed
+	// +kubebuilder:validation:Optional
+	SourceEdgeID string `json:"sourceEdgeID,omitempty"`
+
+	// SourceNode is the owner node that created this blocking state
+	// Used for cascade deletion when source node is deleted
+	// +kubebuilder:validation:Optional
+	SourceNode string `json:"sourceNode,omitempty"`
 }
 
 // TinyStateStatus defines the observed state of TinyState
@@ -42,6 +57,14 @@ type TinyStateStatus struct {
 	// +kubebuilder:validation:Format:date-time
 	// +kubebuilder:validation:Optional
 	LastUpdateTime *metav1.Time `json:"lastUpdateTime,omitempty"`
+
+	// Result is the completion status for blocking states (completed/cancelled/error)
+	// +kubebuilder:validation:Optional
+	Result string `json:"result,omitempty"`
+
+	// Metadata contains additional data returned from the target component (e.g., HTTP port)
+	// +kubebuilder:validation:Optional
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 //+kubebuilder:object:root=true

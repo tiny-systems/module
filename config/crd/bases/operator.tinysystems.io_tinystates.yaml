@@ -51,6 +51,21 @@ spec:
               node:
                 description: Node is the name of the TinyNode this state belongs to
                 type: string
+              sourceEdgeID:
+                description: |-
+                  SourceEdgeID is the edge that created this blocking state
+                  Used for cleanup when edges are removed
+                type: string
+              sourceNode:
+                description: |-
+                  SourceNode is the owner node that created this blocking state
+                  Used for cascade deletion when source node is deleted
+                type: string
+              targetPort:
+                description: |-
+                  TargetPort is the port to deliver to instead of _state (for blocking edges)
+                  When set, the controller delivers the data to this specific port
+                type: string
             required:
             - node
             type: object
@@ -61,11 +76,20 @@ spec:
                 description: LastUpdateTime is when the state was last updated
                 format: date-time
                 type: string
+              metadata:
+                additionalProperties:
+                  type: string
+                description: Metadata contains additional data returned from the target
+                  component (e.g., HTTP port)
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
                 type: integer
+              result:
+                description: Result is the completion status for blocking states (completed/cancelled/error)
+                type: string
             type: object
         type: object
     served: true

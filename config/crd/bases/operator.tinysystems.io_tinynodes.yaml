@@ -146,6 +146,10 @@ spec:
               ports:
                 items:
                   properties:
+                    blocking:
+                      description: 'Blocking: when true, use TinyState instead of
+                        gRPC for blocking edges'
+                      type: boolean
                     configuration:
                       format: byte
                       type: string
