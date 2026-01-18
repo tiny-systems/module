@@ -292,8 +292,8 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		}
 		portData = portInputData.Interface()
 
-	} else if msg.From == FromState || msg.From == v1alpha1.BlockingStateFrom {
-		// State and blocking state messages pass raw []byte data directly to the component
+	} else if msg.From == FromState {
+		// State messages pass raw []byte data directly to the component
 		// The component expects []byte and handles unmarshaling itself
 		portData = msg.Data
 
@@ -842,6 +842,7 @@ func (c *Runner) sendBlockingEdge(ctx context.Context, edge v1alpha1.TinyNodeEdg
 		TargetNode:   targetNode,
 		TargetPort:   targetPort,
 		SourceNode:   c.name,
+		SourcePort:   fromPort, // full port name (node:port) for edge config lookup
 		SourceEdgeID: edge.ID,
 		Data:         data,
 	})

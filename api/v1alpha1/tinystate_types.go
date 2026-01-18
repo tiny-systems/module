@@ -45,6 +45,11 @@ type TinyStateSpec struct {
 	// Used for cascade deletion when source node is deleted
 	// +kubebuilder:validation:Optional
 	SourceNode string `json:"sourceNode,omitempty"`
+
+	// SourcePort is the full port name (node:port) that created this blocking state
+	// Used for edge configuration lookup when delivering the data
+	// +kubebuilder:validation:Optional
+	SourcePort string `json:"sourcePort,omitempty"`
 }
 
 // TinyStateStatus defines the observed state of TinyState

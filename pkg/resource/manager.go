@@ -45,6 +45,7 @@ type BlockingStateRequest struct {
 	TargetNode   string
 	TargetPort   string
 	SourceNode   string // owner for cascade deletion
+	SourcePort   string // full port name (node:port) for edge config lookup
 	SourceEdgeID string
 	Data         []byte
 }
@@ -1298,6 +1299,7 @@ func (m Manager) CreateBlockingState(ctx context.Context, req BlockingStateReque
 			TargetPort:   req.TargetPort,
 			SourceEdgeID: req.SourceEdgeID,
 			SourceNode:   req.SourceNode,
+			SourcePort:   req.SourcePort,
 		},
 	}
 
