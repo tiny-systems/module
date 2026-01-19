@@ -188,8 +188,10 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Send state data to the component
 	// For blocking states, run in goroutine so reconcile can return and handle deletion
 	if isBlockingState {
+		// Create fresh context with leader flag (can't use reconcile ctx - it gets cancelled)
+		handlerCtx := utils.WithLeader(context.Background(), isLeader)
 		go func() {
-			_, err := r.Scheduler.Handle(context.Background(), &runner.Msg{
+			_, err := r.Scheduler.Handle(handlerCtx, &runner.Msg{
 				From: from,
 				To:   targetPort,
 				Data: state.Spec.Data,
