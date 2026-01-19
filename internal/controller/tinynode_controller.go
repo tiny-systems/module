@@ -162,6 +162,7 @@ func (r *TinyNodeReconciler) RequeueAllOnLeadershipChange() {
 }
 
 // cleanupOrphanedBlockingStates deletes blocking TinyStates for edges that no longer exist
+// or when the source node is no longer in "running" state (e.g., Signal was reset)
 func (r *TinyNodeReconciler) cleanupOrphanedBlockingStates(ctx context.Context, node *operatorv1alpha1.TinyNode) error {
 	l := log.FromContext(ctx)
 
@@ -177,6 +178,12 @@ func (r *TinyNodeReconciler) cleanupOrphanedBlockingStates(ctx context.Context, 
 		currentEdgeIDs[edge.ID] = struct{}{}
 	}
 
+	// Check if this node is in "running" state (Signal sets "signal-running" metadata)
+	isRunning := false
+	if node.Status.Metadata != nil {
+		_, isRunning = node.Status.Metadata["signal-running"]
+	}
+
 	// Find and delete orphaned blocking states
 	for _, state := range stateList.Items {
 		// Skip if not a blocking state from this node
@@ -184,19 +191,34 @@ func (r *TinyNodeReconciler) cleanupOrphanedBlockingStates(ctx context.Context, 
 			continue
 		}
 
+		shouldDelete := false
+		reason := ""
+
 		// Check if the edge still exists
-		if _, exists := currentEdgeIDs[state.Spec.SourceEdgeID]; exists {
+		if _, exists := currentEdgeIDs[state.Spec.SourceEdgeID]; !exists {
+			shouldDelete = true
+			reason = "edge removed"
+		}
+
+		// Check if the source node (Signal) is no longer running (was reset)
+		if !isRunning {
+			shouldDelete = true
+			reason = "source node not running (reset)"
+		}
+
+		if !shouldDelete {
 			continue
 		}
 
-		// Edge was removed - delete the blocking state
-		l.Info("cleaning up orphaned blocking state",
+		// Delete the blocking state
+		l.Info("cleaning up blocking state",
 			"stateName", state.Name,
 			"sourceEdgeID", state.Spec.SourceEdgeID,
+			"reason", reason,
 		)
 
 		if err := r.Delete(ctx, &state); err != nil && !errors.IsNotFound(err) {
-			l.Error(err, "failed to delete orphaned blocking state", "stateName", state.Name)
+			l.Error(err, "failed to delete blocking state", "stateName", state.Name)
 		}
 	}
 
