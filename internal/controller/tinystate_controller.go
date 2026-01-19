@@ -186,11 +186,25 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Send state data to the component
-	_, err = r.Scheduler.Handle(ctx, &runner.Msg{
-		From: from,
-		To:   targetPort,
-		Data: state.Spec.Data,
-	})
+	// For blocking states, run in goroutine so reconcile can return and handle deletion
+	if isBlockingState {
+		go func() {
+			_, err := r.Scheduler.Handle(context.Background(), &runner.Msg{
+				From: from,
+				To:   targetPort,
+				Data: state.Spec.Data,
+			})
+			if err != nil {
+				l.Error(err, "blocking state handler failed")
+			}
+		}()
+	} else {
+		_, err = r.Scheduler.Handle(ctx, &runner.Msg{
+			From: from,
+			To:   targetPort,
+			Data: state.Spec.Data,
+		})
+	}
 	if err != nil {
 		l.Error(err, "failed to send state to component")
 
