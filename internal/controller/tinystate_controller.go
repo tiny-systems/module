@@ -99,6 +99,13 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if controllerutil.ContainsFinalizer(state, tinyStateFinalizer) {
 			l.Info("tinystate being deleted, notifying component", "node", state.Spec.Node, "blocking", isBlockingState)
 
+			// For blocking states, clear target node's metadata
+			if isBlockingState && r.IsLeader.Load() {
+				if err := r.clearNodeMetadata(ctx, state.Spec.Node, state.Namespace); err != nil {
+					l.Error(err, "failed to clear target node metadata")
+				}
+			}
+
 			// Only notify if instance exists
 			if r.Scheduler.HasInstance(state.Spec.Node) {
 				leaderCtx := utils.WithLeader(ctx, r.IsLeader.Load())
@@ -272,4 +279,23 @@ func (r *TinyStateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		)).
 		Complete(r)
+}
+
+// clearNodeMetadata clears all metadata on a node
+func (r *TinyStateReconciler) clearNodeMetadata(ctx context.Context, nodeName, namespace string) error {
+	var node operatorv1alpha1.TinyNode
+	if err := r.Get(ctx, types.NamespacedName{Name: nodeName, Namespace: namespace}, &node); err != nil {
+		return err
+	}
+
+	if node.Status.Metadata == nil || len(node.Status.Metadata) == 0 {
+		return nil
+	}
+
+	l := log.FromContext(ctx)
+	l.Info("clearing node metadata", "node", nodeName)
+
+	originNode := node.DeepCopy()
+	node.Status.Metadata = nil
+	return r.Status().Patch(ctx, &node, client.MergeFrom(originNode))
 }
