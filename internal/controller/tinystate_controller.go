@@ -94,47 +94,50 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	isBlockingState := state.Spec.TargetPort != ""
 	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name, "blocking", isBlockingState)
 
-	// Handle deletion - send nil to component to signal state was deleted
+	// Handle deletion
 	if !state.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(state, tinyStateFinalizer) {
-			l.Info("tinystate being deleted, notifying component", "node", state.Spec.Node, "blocking", isBlockingState)
+		// Only leader handles deletion to ensure metadata cleanup
+		if !r.IsLeader.Load() {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 
-			// For blocking states, clear target node's metadata
-			if isBlockingState && r.IsLeader.Load() {
-				if err := r.clearNodeMetadata(ctx, state.Spec.Node, state.Namespace); err != nil {
-					l.Error(err, "failed to clear target node metadata")
-				}
-			}
+		if !controllerutil.ContainsFinalizer(state, tinyStateFinalizer) {
+			return ctrl.Result{}, nil
+		}
 
-			// Only notify if instance exists
-			if r.Scheduler.HasInstance(state.Spec.Node) {
-				leaderCtx := utils.WithLeader(ctx, r.IsLeader.Load())
+		l.Info("tinystate being deleted, notifying component", "node", state.Spec.Node, "blocking", isBlockingState)
 
-				// Determine which port to send deletion notification to
-				var targetPort string
-				var from string
-				if isBlockingState {
-					targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
-					from = operatorv1alpha1.BlockingStateFrom
-				} else {
-					targetPort = utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
-					from = runner.FromState
-				}
-
-				// Send nil to signal state deletion
-				_, _ = r.Scheduler.Handle(leaderCtx, &runner.Msg{
-					From: from,
-					To:   targetPort,
-					Data: nil,
-				})
-			}
-
-			// Remove finalizer
-			controllerutil.RemoveFinalizer(state, tinyStateFinalizer)
-			if err := r.Update(ctx, state); err != nil {
-				return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+		// For blocking states, clear target node's metadata
+		if isBlockingState {
+			if err := r.clearNodeMetadata(ctx, state.Spec.Node, state.Namespace); err != nil {
+				l.Error(err, "failed to clear target node metadata")
 			}
 		}
+
+		// Send nil to signal state deletion
+		if r.Scheduler.HasInstance(state.Spec.Node) {
+			var targetPort, from string
+			if isBlockingState {
+				targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
+				from = operatorv1alpha1.BlockingStateFrom
+			} else {
+				targetPort = utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
+				from = runner.FromState
+			}
+
+			_, _ = r.Scheduler.Handle(ctx, &runner.Msg{
+				From: from,
+				To:   targetPort,
+				Data: nil,
+			})
+		}
+
+		// Remove finalizer
+		controllerutil.RemoveFinalizer(state, tinyStateFinalizer)
+		if err := r.Update(ctx, state); err != nil {
+			return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+		}
+
 		return ctrl.Result{}, nil
 	}
 
