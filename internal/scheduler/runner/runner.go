@@ -297,6 +297,17 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		// The component expects []byte and handles unmarshaling itself
 		portData = msg.Data
 
+	} else if msg.From == v1alpha1.BlockingStateFrom {
+		// Blocking state from TinyState - unmarshal to port's expected type
+		if msg.Data == nil {
+			portData = nil
+		} else {
+			if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
+				return nil, err
+			}
+			portData = portInputData.Interface()
+		}
+
 	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
