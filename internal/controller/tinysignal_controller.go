@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
@@ -51,9 +52,10 @@ type TinySignalReconciler struct {
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	// Only leader processes signals
+	// Only leader processes signals - requeue if not leader so we don't miss signals
 	if !r.IsLeader.Load() {
-		return ctrl.Result{}, nil
+		l.V(1).Info("non-leader skipping signal, will requeue", "name", req.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Check if this signal belongs to our module
