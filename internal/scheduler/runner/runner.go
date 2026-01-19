@@ -859,6 +859,22 @@ func (c *Runner) sendBlockingEdge(ctx context.Context, edge v1alpha1.TinyNodeEdg
 
 	// Block until TinyState is deleted
 	result, err := c.manager.WatchBlockingState(ctx, stateName, namespace)
+
+	// If context was cancelled (e.g., Reset clicked), delete the blocking state
+	// to stop the destination component (e.g., HTTP server)
+	if err != nil && ctx.Err() != nil {
+		c.log.Info("sendBlockingEdge: context cancelled, deleting blocking state",
+			"stateName", stateName,
+		)
+		// Use background context since our context is cancelled
+		if delErr := c.manager.DeleteBlockingState(context.Background(), stateName, namespace, "cancelled"); delErr != nil {
+			c.log.Error(delErr, "sendBlockingEdge: failed to delete blocking state after cancellation",
+				"stateName", stateName,
+			)
+		}
+		return nil, err
+	}
+
 	if err != nil {
 		c.log.Error(err, "sendBlockingEdge: watch error",
 			"stateName", stateName,
