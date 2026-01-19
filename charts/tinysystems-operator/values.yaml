@@ -21,6 +21,7 @@ controllerManager:
       repository: registry.gitlab.com/tiny-systems/public-containers/controller
       tag: latest
     imagePullPolicy: Always
+    podAnnotations: {}
     resources:
       limits:
         cpu: 500m
