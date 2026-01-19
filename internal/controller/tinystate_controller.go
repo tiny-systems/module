@@ -96,26 +96,12 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Handle deletion
 	if !state.DeletionTimestamp.IsZero() {
-		// Only leader handles deletion to ensure metadata cleanup
-		if !r.IsLeader.Load() {
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
+		isLeader := r.IsLeader.Load()
 
-		if !controllerutil.ContainsFinalizer(state, tinyStateFinalizer) {
-			return ctrl.Result{}, nil
-		}
-
-		l.Info("tinystate being deleted, notifying component", "node", state.Spec.Node, "blocking", isBlockingState)
-
-		// For blocking states, clear target node's metadata
-		if isBlockingState {
-			if err := r.clearNodeMetadata(ctx, state.Spec.Node, state.Namespace); err != nil {
-				l.Error(err, "failed to clear target node metadata")
-			}
-		}
-
-		// Send nil to signal state deletion
+		// All pods send nil to stop their local server instance
 		if r.Scheduler.HasInstance(state.Spec.Node) {
+			l.Info("tinystate being deleted, stopping local instance", "node", state.Spec.Node, "blocking", isBlockingState, "isLeader", isLeader)
+
 			var targetPort, from string
 			if isBlockingState {
 				targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
@@ -130,6 +116,22 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				To:   targetPort,
 				Data: nil,
 			})
+		}
+
+		// Only leader handles metadata cleanup and finalizer removal
+		if !isLeader {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+
+		if !controllerutil.ContainsFinalizer(state, tinyStateFinalizer) {
+			return ctrl.Result{}, nil
+		}
+
+		// Clear target node's metadata for blocking states
+		if isBlockingState {
+			if err := r.clearNodeMetadata(ctx, state.Spec.Node, state.Namespace); err != nil {
+				l.Error(err, "failed to clear target node metadata")
+			}
 		}
 
 		// Remove finalizer
