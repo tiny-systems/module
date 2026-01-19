@@ -151,9 +151,8 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	ctx = utils.WithLeader(ctx, isLeader)
 
 	// For blocking states, only leader delivers to StartPort
-	// Non-leaders will start from metadata written by leader
 	if isBlockingState && !isLeader {
-		l.Info("non-leader skipping blocking state delivery, will start from metadata", "node", state.Spec.Node)
+		l.Info("non-leader skipping blocking state delivery", "node", state.Spec.Node)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
