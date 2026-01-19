@@ -1,5 +1,11 @@
 # Claude Code Rules for TinySystems
 
+## Thinking
+
+- Think through solutions completely before proposing
+- Consider edge cases and flow implications
+- Don't give half-baked answers that need revision when questioned
+
 ## Code Style
 
 - Early returns, no nested ifs
