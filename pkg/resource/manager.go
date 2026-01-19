@@ -1281,8 +1281,9 @@ func (m Manager) CreateBlockingState(ctx context.Context, req BlockingStateReque
 
 	state := &v1alpha1.TinyState{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      req.StateName,
-			Namespace: req.Namespace,
+			Name:       req.StateName,
+			Namespace:  req.Namespace,
+			Finalizers: []string{"tinysystems.io/state-cleanup"},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: sourceNode.APIVersion,
