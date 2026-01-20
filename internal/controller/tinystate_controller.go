@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -27,10 +28,15 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -190,18 +196,10 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Send state data to the component
 	// For blocking states, run in goroutine so reconcile can return and handle deletion
 	if isBlockingState {
-		// Create fresh context with leader flag (can't use reconcile ctx - it gets cancelled)
-		handlerCtx := utils.WithLeader(context.Background(), isLeader)
-		go func() {
-			_, err := r.Scheduler.Handle(handlerCtx, &runner.Msg{
-				From: from,
-				To:   targetPort,
-				Data: state.Spec.Data,
-			})
-			if err != nil {
-				l.Error(err, "blocking state handler failed")
-			}
-		}()
+		// Extract trace context from annotation to link spans
+		handlerCtx := r.createTracedContext(state, isLeader)
+
+		go r.deliverBlockingStateWithRetry(handlerCtx, l, state, from, targetPort)
 	} else {
 		_, err = r.Scheduler.Handle(ctx, &runner.Msg{
 			From: from,
@@ -255,6 +253,108 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// createTracedContext extracts trace context from TinyState annotation and creates
+// a linked context for span propagation across the blocking state delivery.
+func (r *TinyStateReconciler) createTracedContext(state *operatorv1alpha1.TinyState, isLeader bool) context.Context {
+	ctx := utils.WithLeader(context.Background(), isLeader)
+
+	// Extract traceparent from annotation
+	traceparent := ""
+	if state.Annotations != nil {
+		traceparent = state.Annotations["tinysystems.io/traceparent"]
+	}
+	if traceparent == "" {
+		return ctx
+	}
+
+	// Parse W3C traceparent: version-traceid-spanid-flags
+	parts := strings.Split(traceparent, "-")
+	if len(parts) != 4 {
+		return ctx
+	}
+
+	traceID, err := trace.TraceIDFromHex(parts[1])
+	if err != nil {
+		return ctx
+	}
+	spanID, err := trace.SpanIDFromHex(parts[2])
+	if err != nil {
+		return ctx
+	}
+
+	// Create span context with remote parent
+	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+		Remote:     true,
+	})
+
+	return trace.ContextWithSpanContext(ctx, spanCtx)
+}
+
+// deliverBlockingStateWithRetry delivers a blocking state with exponential backoff retry.
+// Errors are reported to the trace span for observability.
+func (r *TinyStateReconciler) deliverBlockingStateWithRetry(
+	ctx context.Context,
+	l interface{ Error(error, string, ...any); Info(string, ...any) },
+	state *operatorv1alpha1.TinyState,
+	from, targetPort string,
+) {
+	tracer := otel.Tracer("tinystate-controller")
+
+	// Create child span linked to parent trace
+	ctx, span := tracer.Start(ctx, "blocking-state-delivery",
+		trace.WithAttributes(
+			attribute.String("state.name", state.Name),
+			attribute.String("state.targetPort", targetPort),
+			attribute.String("state.sourceNode", state.Spec.SourceNode),
+		),
+	)
+	defer span.End()
+
+	var lastErr error
+	backoff := wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Factor:   2.0,
+		Jitter:   0.1,
+		Steps:    10, // Max ~51 seconds total
+		Cap:      10 * time.Second,
+	}
+
+	err := wait.ExponentialBackoff(backoff, func() (bool, error) {
+		_, lastErr = r.Scheduler.Handle(ctx, &runner.Msg{
+			From: from,
+			To:   targetPort,
+			Data: state.Spec.Data,
+		})
+		if lastErr == nil {
+			return true, nil // Success
+		}
+
+		l.Info("blocking state delivery failed, retrying",
+			"error", lastErr.Error(),
+			"state", state.Name,
+		)
+		span.AddEvent("retry", trace.WithAttributes(
+			attribute.String("error", lastErr.Error()),
+		))
+
+		return false, nil // Retry
+	})
+
+	if err != nil {
+		// Backoff exhausted
+		finalErr := fmt.Errorf("blocking state delivery failed after retries: %w", lastErr)
+		l.Error(finalErr, "blocking state handler failed permanently",
+			"state", state.Name,
+			"targetPort", targetPort,
+		)
+		span.RecordError(finalErr)
+		span.SetStatus(codes.Error, finalErr.Error())
+	}
 }
 
 // RequeueAllOnLeadershipChange triggers requeue of all TinyStates when leadership changes.

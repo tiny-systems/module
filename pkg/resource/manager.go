@@ -16,6 +16,7 @@ import (
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
+	"go.opentelemetry.io/otel/trace"
 	"helm.sh/helm/v3/pkg/release"
 	v1core "k8s.io/api/core/v1"
 	v1ingress "k8s.io/api/networking/v1"
@@ -1279,11 +1280,23 @@ func (m Manager) CreateBlockingState(ctx context.Context, req BlockingStateReque
 		return fmt.Errorf("failed to get source node for blocking state: %w", err)
 	}
 
+	// Extract trace context to propagate through TinyState
+	annotations := make(map[string]string)
+	span := trace.SpanFromContext(ctx)
+	if span.SpanContext().IsValid() {
+		// Store W3C traceparent format: version-traceid-spanid-flags
+		annotations["tinysystems.io/traceparent"] = fmt.Sprintf("00-%s-%s-01",
+			span.SpanContext().TraceID().String(),
+			span.SpanContext().SpanID().String(),
+		)
+	}
+
 	state := &v1alpha1.TinyState{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       req.StateName,
-			Namespace:  req.Namespace,
-			Finalizers: []string{"tinysystems.io/state-cleanup"},
+			Name:        req.StateName,
+			Namespace:   req.Namespace,
+			Annotations: annotations,
+			Finalizers:  []string{"tinysystems.io/state-cleanup"},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: sourceNode.APIVersion,
