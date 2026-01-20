@@ -1036,6 +1036,45 @@ func TestHello(t *testing.T) {
 8. **Document with Tags**: Use meaningful tags in `GetInfo()` for discoverability
 9. **Use TinyState for Stateful Components**: Components with running state (servers, watchers) should write to TinyState and react via `_state` port for proper leader failover
 
+#### Component Naming Convention
+
+All component names must follow a consistent naming pattern using `snake_case`:
+
+**Pattern:** `[technology_][resource]_[action]` or `[resource]_[action]`
+
+**Rules:**
+1. Always use `snake_case` (lowercase with underscores)
+2. Resource/noun comes before action/verb
+3. Include technology prefix when multiple implementations exist
+4. Keep names concise (2-3 words max)
+
+**Examples by category:**
+
+| Category | Name | Description |
+|----------|------|-------------|
+| **HTTP** | `http_server` | HTTP server |
+| | `http_request` | Make HTTP request |
+| | `http_auth_parse` | Parse auth header |
+| **Encoding** | `json_encode` | Encode to JSON |
+| | `json_decode` | Decode from JSON |
+| | `go_template` | Render Go template |
+| **Email** | `smtp_send` | Send email via SMTP |
+| | `sendgrid_send` | Send email via SendGrid API |
+| **Messaging** | `slack_send` | Send Slack message |
+| | `slack_command` | Receive Slack command |
+| **Kubernetes** | `pod_status_get` | Get pod status |
+| | `pod_logs_get` | Get pod logs |
+| | `deployment_restart` | Restart deployment |
+| | `resource_watch` | Watch K8s resources |
+| **Utilities** | `transform` | Transform/passthrough data |
+| | `delay` | Delay execution |
+| | `router` | Route messages |
+
+**When to include technology prefix:**
+- Multiple implementations of same concept (e.g., `smtp_send` vs `sendgrid_send`)
+- Technology-specific behavior (e.g., `go_template` vs `handlebars_template`)
+- Clarity about protocol/API used (e.g., `grpc_call` vs `http_request`)
+
 #### Example Modules
 
 Check out these example modules for reference:
