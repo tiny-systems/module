@@ -1075,6 +1075,135 @@ All component names must follow a consistent naming pattern using `snake_case`:
 - Technology-specific behavior (e.g., `go_template` vs `handlebars_template`)
 - Clarity about protocol/API used (e.g., `grpc_call` vs `http_request`)
 
+#### Code Style
+
+Follow idiomatic Go patterns:
+
+1. **Early returns** - Avoid nested ifs, return early on errors
+2. **Flat structure** - Extract logic into small, focused functions
+3. **Error handling** - Use `if err != nil { return }` pattern
+4. **No deep nesting** - Maximum 2-3 levels of indentation
+
+```go
+// Good - early return
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) error {
+    if port != "request" {
+        return fmt.Errorf("unknown port: %s", port)
+    }
+
+    req, ok := msg.(Request)
+    if !ok {
+        return errors.New("invalid request")
+    }
+
+    result, err := c.process(ctx, req)
+    if err != nil {
+        return c.handleError(ctx, handler, req, err)
+    }
+
+    return handler(ctx, "output", result)
+}
+
+// Bad - nested ifs
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) error {
+    if port == "request" {
+        if req, ok := msg.(Request); ok {
+            if result, err := c.process(ctx, req); err == nil {
+                return handler(ctx, "output", result)
+            } else {
+                return c.handleError(ctx, handler, req, err)
+            }
+        }
+    }
+    return fmt.Errorf("unknown port: %s", port)
+}
+```
+
+#### Component Design Principles
+
+**1. Minimize Settings**
+
+Settings should ONLY contain:
+- **Port flags** - `EnableErrorPort`, `EnableStatusPort` (affect port visibility)
+- **Precompiled resources** - Go templates, JS code (compiled once on change)
+- **Defaults** - Rarely-changing default values
+
+Settings should NOT contain:
+- Credentials (API keys, tokens, signing secrets)
+- Runtime URLs/endpoints
+- Per-request parameters
+- Anything that varies between executions
+
+```go
+// Good - minimal settings
+type Settings struct {
+    EnableErrorPort bool  `json:"enableErrorPort" title:"Enable Error Port"`
+    DefaultLines    int64 `json:"defaultLines" title:"Default Lines"`
+}
+
+// Bad - credentials and runtime config in settings
+type Settings struct {
+    APIKey      string `json:"apiKey"`       // Should be in request
+    Endpoint    string `json:"endpoint"`     // Should be in request
+    Namespace   string `json:"namespace"`    // Should be in request
+}
+```
+
+**2. Credentials via Input Ports**
+
+All credentials and runtime configuration come through input ports:
+
+```go
+type Request struct {
+    Context   any    `json:"context,omitempty" configurable:"true"`
+
+    // Credentials - from upstream (e.g., secret manager)
+    APIKey    string `json:"apiKey" required:"true" configurable:"true"`
+
+    // Runtime config - varies per execution
+    Endpoint  string `json:"endpoint" required:"true" configurable:"true"`
+    Namespace string `json:"namespace" required:"true" configurable:"true"`
+}
+```
+
+**Why:** Settings are spread across flows, not programmatically configurable, and storing credentials in settings is a security anti-pattern.
+
+**3. Context Passthrough**
+
+Every component MUST pass context through for correlation:
+
+```go
+type Request struct {
+    Context any `json:"context,omitempty" configurable:"true" title:"Context" description:"Arbitrary data passed through to output"`
+    // ... other fields
+}
+
+type Response struct {
+    Context any `json:"context,omitempty" title:"Context"`
+    // ... other fields
+}
+
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) error {
+    req := msg.(Request)
+
+    result := c.process(req)
+
+    // Always pass context through
+    handler(ctx, "output", Response{
+        Context: req.Context,  // Pass through!
+        Data:    result,
+    })
+    return nil
+}
+```
+
+**4. Flow-Driven Configuration**
+
+Everything should be configurable via edges/signals, not the settings panel:
+- Credentials mapped from upstream components (secret managers, vaults)
+- Runtime parameters from user input or TinyState
+- Makes flows self-contained, portable, and version-controllable
+
 #### Example Modules
 
 Check out these example modules for reference:
