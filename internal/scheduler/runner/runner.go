@@ -76,6 +76,9 @@ type Runner struct {
 	// dedupLock protects the dedup check-and-set operation to ensure atomicity.
 	// Without this, concurrent signals could race between checking and setting cache values.
 	dedupLock *sync.Mutex
+
+	// reconcileDebouncer coalesces rapid reconcile requests to protect K8s API server
+	reconcileDebouncer *ReconcileDebouncer
 }
 
 const (
@@ -100,6 +103,9 @@ func NewRunner(component m.Component) *Runner {
 		portNonce: cmap.New[string](),
 		// dedup lock for atomic check-and-set
 		dedupLock: &sync.Mutex{},
+
+		// debounce reconcile requests to protect K8s API (100ms window)
+		reconcileDebouncer: NewReconcileDebouncer(100 * time.Millisecond),
 
 		closeCh: make(chan struct{}),
 	}
@@ -547,28 +553,41 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			// Legacy: node updater function
 			nodeUpdater, _ := outputData.(func(node *v1alpha1.TinyNode) error)
 
-			err := c.manager.PatchNode(outputCtx, c.node, func(node *v1alpha1.TinyNode) error {
-				// Apply component's metadata updates FIRST
-				if nodeUpdater != nil {
-					if err := nodeUpdater(node); err != nil {
+			// Capture current node state for debounced execution
+			currentNode := c.node
+
+			// Debounce node patch to protect K8s API from high RPS
+			// Use background context since the debounced func executes async
+			debounced := c.reconcileDebouncer.Debounce(outputCtx, func() {
+				err := c.manager.PatchNode(context.Background(), currentNode, func(node *v1alpha1.TinyNode) error {
+					// Apply component's metadata updates FIRST
+					if nodeUpdater != nil {
+						if err := nodeUpdater(node); err != nil {
+							return err
+						}
+					}
+					// THEN read status (so getControl() sees updated metadata)
+					if err := c.ReadStatus(&node.Status); err != nil {
+						c.log.Error(err, "data handler: failed to read node status",
+							"node", c.name,
+						)
 						return err
 					}
-				}
-				// THEN read status (so getControl() sees updated metadata)
-				if err := c.ReadStatus(&node.Status); err != nil {
-					c.log.Error(err, "data handler: failed to read node status",
+					return nil
+				})
+				if err != nil {
+					c.log.Error(err, "data handler: failed to patch node",
 						"node", c.name,
 					)
-					return err
 				}
-				return nil
 			})
-			if err != nil {
-				c.log.Error(err, "data handler: failed to patch node",
+
+			if debounced {
+				c.log.Info("data handler: reconcile request debounced",
 					"node", c.name,
 				)
 			}
-			return err
+			return nil
 		}
 
 		u, err := uuid.NewUUID()
@@ -633,6 +652,10 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 
 // Stop cancels all ongoing requests
 func (c *Runner) Stop() {
+	// Flush any pending reconcile updates before stopping
+	if c.reconcileDebouncer != nil {
+		c.reconcileDebouncer.Flush()
+	}
 	close(c.closeCh)
 }
 
