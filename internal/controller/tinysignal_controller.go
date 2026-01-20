@@ -106,9 +106,10 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		deliveryCtx = utils.WithLeader(deliveryCtx, true)
 
 		_, err := r.Scheduler.Handle(deliveryCtx, &runner.Msg{
-			From: runner.FromSignal,
-			To:   targetPort,
-			Data: signal.Spec.Data,
+			From:  runner.FromSignal,
+			To:    targetPort,
+			Data:  signal.Spec.Data,
+			Nonce: signal.Spec.Nonce,
 		})
 		if err != nil {
 			l.Error(err, "signal delivery failed", "targetPort", targetPort)
