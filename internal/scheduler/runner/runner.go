@@ -104,8 +104,8 @@ func NewRunner(component m.Component) *Runner {
 		// dedup lock for atomic check-and-set
 		dedupLock: &sync.Mutex{},
 
-		// debounce reconcile requests to protect K8s API (100ms window)
-		reconcileDebouncer: NewReconcileDebouncer(100 * time.Millisecond),
+		// debounce reconcile requests to protect K8s API (1s window)
+		reconcileDebouncer: NewReconcileDebouncer(time.Second),
 
 		closeCh: make(chan struct{}),
 	}
