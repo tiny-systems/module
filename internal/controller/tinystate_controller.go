@@ -196,6 +196,12 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Send state data to the component
 	// For blocking states, run in goroutine so reconcile can return and handle deletion
 	if isBlockingState {
+		// Skip if already delivered (ObservedGeneration matches current Generation)
+		if state.Status.ObservedGeneration == state.ObjectMeta.Generation {
+			l.Info("blocking state already delivered, skipping re-delivery")
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
 		// Extract trace context from annotation to link spans
 		handlerCtx := r.createTracedContext(state, isLeader)
 
