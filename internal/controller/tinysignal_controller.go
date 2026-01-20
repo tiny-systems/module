@@ -92,26 +92,30 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Deliver - this is fast now since _control ports don't block
-	deliveryCtx := utils.WithLeader(ctx, true)
-	_, err = r.Scheduler.Handle(deliveryCtx, &runner.Msg{
-		From: runner.FromSignal,
-		To:   targetPort,
-		Data: signal.Spec.Data,
-	})
-
-	if err != nil {
-		l.Error(err, "delivery failed, will retry")
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	l.Info("signal delivered, deleting")
-
-	// Delete the signal (one-off)
+	// Delete the signal first (fire-and-forget pattern)
+	// This prevents blocking if the handler takes too long
 	if err := r.Delete(ctx, &signal); err != nil && !errors.IsNotFound(err) {
-		l.Error(err, "failed to delete signal after delivery")
+		l.Error(err, "failed to delete signal")
 		return ctrl.Result{}, err
 	}
+
+	// Deliver in goroutine with timeout so one slow component can't block others
+	go func() {
+		deliveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		deliveryCtx = utils.WithLeader(deliveryCtx, true)
+
+		_, err := r.Scheduler.Handle(deliveryCtx, &runner.Msg{
+			From: runner.FromSignal,
+			To:   targetPort,
+			Data: signal.Spec.Data,
+		})
+		if err != nil {
+			l.Error(err, "signal delivery failed", "targetPort", targetPort)
+			return
+		}
+		l.Info("signal delivered", "targetPort", targetPort)
+	}()
 
 	return ctrl.Result{}, nil
 }
