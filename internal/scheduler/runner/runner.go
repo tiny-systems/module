@@ -72,6 +72,10 @@ type Runner struct {
 	portRes   cmap.ConcurrentMap[string, any]
 	portErr   cmap.ConcurrentMap[string, error]
 	portNonce cmap.ConcurrentMap[string, string]
+
+	// dedupLock protects the dedup check-and-set operation to ensure atomicity.
+	// Without this, concurrent signals could race between checking and setting cache values.
+	dedupLock *sync.Mutex
 }
 
 const (
@@ -94,6 +98,8 @@ func NewRunner(component m.Component) *Runner {
 		portErr: cmap.New[error](),
 		// last port message nonce
 		portNonce: cmap.New[string](),
+		// dedup lock for atomic check-and-set
+		dedupLock: &sync.Mutex{},
 
 		closeCh: make(chan struct{}),
 	}
@@ -148,6 +154,15 @@ func (c *Runner) getNodePorts() []m.Port {
 
 	c.nodePorts = c.component.Ports()
 	return c.nodePorts
+}
+
+// InvalidatePortCache clears the port cache so the next getPorts call
+// will fetch fresh ports from the component. This should be called when
+// the node spec changes, as port availability may depend on component state.
+func (c *Runner) InvalidatePortCache() {
+	c.nodePortsLock.Lock()
+	defer c.nodePortsLock.Unlock()
+	c.nodePorts = nil
 }
 
 // getPortNames returns list of port names for debugging
@@ -380,7 +395,10 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	// we do not send data from signals if they are not changed to prevent work disruptions due to periodic reconciliations
 	if msg.From == FromSignal || port == v1alpha1.SettingsPort {
-		//
+		// Lock to ensure atomic check-and-set of dedup cache.
+		// Without this, concurrent signals could race: one checks cache, another updates it,
+		// leading to incorrect dedup decisions or inconsistent cache state.
+		c.dedupLock.Lock()
 		if prevPortData, ok := c.portMsg.Get(port); ok && cmp.Equal(portData, prevPortData) {
 			if prevPortNonce, ok := c.portNonce.Get(port); ok && msg.Nonce == prevPortNonce {
 				c.log.Info("runner msg handler: skipping duplicate signal (same data and nonce)",
@@ -390,11 +408,13 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 				)
 				prevResp, _ := c.portRes.Get(port)
 				prevErr, _ := c.portErr.Get(port)
+				c.dedupLock.Unlock()
 				return prevResp, prevErr
 			}
 		}
 		c.portMsg.Set(port, portData)
 		c.portNonce.Set(port, msg.Nonce)
+		c.dedupLock.Unlock()
 	}
 
 	u, err := uuid.NewUUID()
@@ -603,6 +623,10 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 
 	//
 	c.node = node
+
+	// Invalidate port cache when node spec changes, as component may now
+	// expose different ports based on the new configuration
+	c.InvalidatePortCache()
 
 	return c
 }
