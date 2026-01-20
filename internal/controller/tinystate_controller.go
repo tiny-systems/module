@@ -361,6 +361,21 @@ func (r *TinyStateReconciler) deliverBlockingStateWithRetry(
 		span.RecordError(finalErr)
 		span.SetStatus(codes.Error, finalErr.Error())
 	}
+
+	// Handle() returned - component finished processing (success or failure)
+	// Delete the blocking state to unblock the caller (true blocking semantics)
+	// This enables patterns like Ticker -> HTTP Server where Ticker supervises/restarts
+	l.Info("blocking state completed, deleting to unblock caller",
+		"state", state.Name,
+		"hadError", err != nil,
+	)
+
+	if delErr := r.Delete(context.Background(), state); delErr != nil && !errors.IsNotFound(delErr) {
+		l.Error(delErr, "failed to delete blocking state after completion",
+			"state", state.Name,
+		)
+		span.RecordError(delErr)
+	}
 }
 
 // RequeueAllOnLeadershipChange triggers requeue of all TinyStates when leadership changes.
