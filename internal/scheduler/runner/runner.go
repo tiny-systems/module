@@ -150,6 +150,16 @@ func (c *Runner) getNodePorts() []m.Port {
 	return c.nodePorts
 }
 
+// getPortNames returns list of port names for debugging
+func (c *Runner) getPortNames() []string {
+	ports := c.getPorts()
+	names := make([]string, len(ports))
+	for i, p := range ports {
+		names[i] = p.Name
+	}
+	return names
+}
+
 // ReadStatus reads status
 func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 
@@ -275,7 +285,22 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		}
 	}
 
-	if nodePort == nil || nodePort.Configuration == nil {
+	if nodePort == nil {
+		c.log.Info("runner msg handler: port not found in component ports",
+			"requestedPort", port,
+			"availablePorts", c.getPortNames(),
+			"from", msg.From,
+			"node", c.name,
+		)
+		return nil, nil
+	}
+
+	if nodePort.Configuration == nil {
+		c.log.Info("runner msg handler: port has nil configuration",
+			"port", port,
+			"from", msg.From,
+			"node", c.name,
+		)
 		return nil, nil
 	}
 
@@ -288,6 +313,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	if msg.From == FromSignal {
 		if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
+			c.log.Error(err, "runner msg handler: failed to unmarshal signal data",
+				"port", port,
+				"node", c.name,
+				"dataSize", len(msg.Data),
+			)
 			return nil, err
 		}
 		portData = portInputData.Interface()
@@ -353,6 +383,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		//
 		if prevPortData, ok := c.portMsg.Get(port); ok && cmp.Equal(portData, prevPortData) {
 			if prevPortNonce, ok := c.portNonce.Get(port); ok && msg.Nonce == prevPortNonce {
+				c.log.Info("runner msg handler: skipping duplicate signal (same data and nonce)",
+					"port", port,
+					"node", c.name,
+					"nonce", msg.Nonce,
+				)
 				prevResp, _ := c.portRes.Get(port)
 				prevErr, _ := c.portErr.Get(port)
 				return prevResp, prevErr
