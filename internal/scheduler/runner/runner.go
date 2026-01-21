@@ -79,6 +79,10 @@ type Runner struct {
 
 	// reconcileDebouncer coalesces rapid reconcile requests to protect K8s API server
 	reconcileDebouncer *ReconcileDebouncer
+
+	// pendingNodeUpdaters accumulates metadata update functions during debounce window
+	pendingNodeUpdaters   []func(*v1alpha1.TinyNode) error
+	pendingNodeUpdatersLock *sync.Mutex
 }
 
 const (
@@ -106,6 +110,9 @@ func NewRunner(component m.Component) *Runner {
 
 		// debounce reconcile requests to protect K8s API (1s window)
 		reconcileDebouncer: NewReconcileDebouncer(time.Second),
+
+		// accumulate metadata updaters during debounce window
+		pendingNodeUpdatersLock: &sync.Mutex{},
 
 		closeCh: make(chan struct{}),
 	}
@@ -550,8 +557,12 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 				return err
 			}
 
-			// Legacy: node updater function
-			nodeUpdater, _ := outputData.(func(node *v1alpha1.TinyNode) error)
+			// Legacy: node updater function - accumulate for batched execution
+			if nodeUpdater, ok := outputData.(func(node *v1alpha1.TinyNode) error); ok && nodeUpdater != nil {
+				c.pendingNodeUpdatersLock.Lock()
+				c.pendingNodeUpdaters = append(c.pendingNodeUpdaters, nodeUpdater)
+				c.pendingNodeUpdatersLock.Unlock()
+			}
 
 			// Capture current node state for debounced execution
 			currentNode := c.node
@@ -559,10 +570,16 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			// Debounce node patch to protect K8s API from high RPS
 			// Use background context since the debounced func executes async
 			debounced := c.reconcileDebouncer.Debounce(outputCtx, func() {
+				// Collect all pending updaters atomically
+				c.pendingNodeUpdatersLock.Lock()
+				updaters := c.pendingNodeUpdaters
+				c.pendingNodeUpdaters = nil
+				c.pendingNodeUpdatersLock.Unlock()
+
 				err := c.manager.PatchNode(context.Background(), currentNode, func(node *v1alpha1.TinyNode) error {
-					// Apply component's metadata updates FIRST
-					if nodeUpdater != nil {
-						if err := nodeUpdater(node); err != nil {
+					// Apply ALL accumulated metadata updates
+					for _, updater := range updaters {
+						if err := updater(node); err != nil {
 							return err
 						}
 					}
@@ -585,6 +602,7 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			if debounced {
 				c.log.Info("data handler: reconcile request debounced",
 					"node", c.name,
+					"pendingUpdaters", len(c.pendingNodeUpdaters),
 				)
 			}
 			return nil
