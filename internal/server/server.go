@@ -12,6 +12,7 @@ import (
 	modulepb "github.com/tiny-systems/module/internal/server/api/module-go"
 	"github.com/tiny-systems/module/internal/server/services/health"
 	"github.com/tiny-systems/module/internal/server/services/module"
+	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -78,6 +79,11 @@ func (s *server) Start(globalCtx context.Context, handler runner.Handler, listen
 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+
+		// If result is nil (including typed nils), return empty response
+		if utils.IsNil(res) {
+			return &modulepb.MessageResponse{Data: nil}, nil
 		}
 
 		if resData, ok := res.([]byte); ok {
