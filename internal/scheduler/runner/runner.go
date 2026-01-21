@@ -818,7 +818,8 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 				errors = append(errors, err)
 				return nil
 			}
-			if res != nil {
+			// Use IsNil to catch typed nils (e.g., (*T)(nil)) which != nil but are meaningless
+			if !utils.IsNil(res) {
 				results = append(results, res)
 			}
 			return nil
