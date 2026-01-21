@@ -381,14 +381,6 @@ var runCmd = &cobra.Command{
 				return nil, err
 			}
 
-			// If response is JSON "null", treat as nil (component returned nil)
-			if string(resp) == "null" {
-				l.Info("grpc response: received null, treating as nil",
-					"to", msg.To,
-				)
-				return nil, nil
-			}
-
 			if msg.Resp == nil {
 				l.Info("grpc response: no ResponseConfiguration, returning raw bytes",
 					"to", msg.To,
