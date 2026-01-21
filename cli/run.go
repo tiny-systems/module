@@ -382,13 +382,33 @@ var runCmd = &cobra.Command{
 			}
 
 			if msg.Resp == nil {
+				l.Info("grpc response: no ResponseConfiguration, returning raw bytes",
+					"to", msg.To,
+					"bytesLen", len(resp),
+				)
 				return resp, nil
 			}
 
+			l.Info("grpc response: deserializing into ResponseConfiguration",
+				"to", msg.To,
+				"respType", fmt.Sprintf("%T", msg.Resp),
+				"bytesLen", len(resp),
+				"bytesPreview", string(resp[:min(len(resp), 200)]),
+			)
+
 			respData := reflect.New(reflect.TypeOf(msg.Resp)).Elem()
 			if err = json.Unmarshal(resp, respData.Addr().Interface()); err != nil {
+				l.Error(err, "grpc response: failed to unmarshal",
+					"to", msg.To,
+					"bytes", string(resp),
+				)
 				return nil, err
 			}
+
+			l.Info("grpc response: deserialized successfully",
+				"to", msg.To,
+				"result", fmt.Sprintf("%+v", respData.Interface()),
+			)
 			return respData.Interface(), nil
 		}).
 			SetLogger(l).
