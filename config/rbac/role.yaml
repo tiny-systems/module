@@ -45,12 +45,13 @@ rules:
 - apiGroups:
   - operator.tinysystems.io
   resources:
-  - tinyflows
-  - tinyprojects
-  - tinysignals
+  - tinymodules
+  - tinynodes
+  - tinytrackers
   verbs:
   - create
   - delete
+  - deletecollection
   - get
   - list
   - patch
@@ -59,10 +60,8 @@ rules:
 - apiGroups:
   - operator.tinysystems.io
   resources:
-  - tinyflows/finalizers
   - tinymodules/finalizers
   - tinynodes/finalizers
-  - tinyprojects/finalizers
   - tinysignals/finalizers
   - tinytrackers/finalizers
   verbs:
@@ -70,10 +69,8 @@ rules:
 - apiGroups:
   - operator.tinysystems.io
   resources:
-  - tinyflows/status
   - tinymodules/status
   - tinynodes/status
-  - tinyprojects/status
   - tinysignals/status
   - tinytrackers/status
   verbs:
@@ -83,13 +80,10 @@ rules:
 - apiGroups:
   - operator.tinysystems.io
   resources:
-  - tinymodules
-  - tinynodes
-  - tinytrackers
+  - tinysignals
   verbs:
   - create
   - delete
-  - deletecollection
   - get
   - list
   - patch
