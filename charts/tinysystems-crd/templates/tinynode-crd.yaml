@@ -1,11 +1,10 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: tinynodes.operator.tinysystems.io
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.1
-  labels:
-  {{- include "tinysystems-crd.labels" . | nindent 4 }}
+  name: tinynodes.operator.tinysystems.io
 spec:
   group: operator.tinysystems.io
   names:
@@ -147,10 +146,6 @@ spec:
               ports:
                 items:
                   properties:
-                    blocking:
-                      description: 'Blocking: when true, use TinyState instead of gRPC
-                        for blocking edges'
-                      type: boolean
                     configuration:
                       format: byte
                       type: string
@@ -185,9 +180,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: []
-  storedVersions: []
