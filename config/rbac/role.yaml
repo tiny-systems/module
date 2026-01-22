@@ -48,7 +48,6 @@ rules:
   - tinyflows
   - tinyprojects
   - tinysignals
-  - tinystates
   verbs:
   - create
   - delete
@@ -65,7 +64,6 @@ rules:
   - tinynodes/finalizers
   - tinyprojects/finalizers
   - tinysignals/finalizers
-  - tinystates/finalizers
   - tinytrackers/finalizers
   verbs:
   - update
@@ -77,7 +75,6 @@ rules:
   - tinynodes/status
   - tinyprojects/status
   - tinysignals/status
-  - tinystates/status
   - tinytrackers/status
   verbs:
   - get
