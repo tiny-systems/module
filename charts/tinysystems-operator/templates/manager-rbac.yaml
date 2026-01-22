@@ -161,32 +161,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinystates
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinystates/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinystates/status
-  verbs:
-  - get
-  - patch
-  - update
 {{- with .Values.rbac.extraRules }}
 {{- toYaml . | nindent 0 }}
 {{- end }}
