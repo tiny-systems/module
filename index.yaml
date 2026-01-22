@@ -3,6 +3,16 @@ entries:
   tinysystems-crd:
   - apiVersion: v2
     appVersion: 0.1.1
+    created: "2026-01-22T11:03:06.590336529Z"
+    description: TinySystems CRD Helm chart
+    digest: ca2127625e7d4eeeecd386dd80f004df9ada54da1de0a5aacb5763a2afe7adb2
+    name: tinysystems-crd
+    type: application
+    urls:
+    - https://github.com/tiny-systems/module/releases/download/tinysystems-crd-0.1.34/tinysystems-crd-0.1.34.tgz
+    version: 0.1.34
+  - apiVersion: v2
+    appVersion: 0.1.1
     created: "2026-01-18T23:44:35.87776843Z"
     description: TinySystems CRD Helm chart
     digest: 43bb9d6cb6cdfc9f49655dfa0768c368723ce7fe33e1705b3eae3208764036b2
@@ -977,4 +987,4 @@ entries:
     urls:
     - https://github.com/tiny-systems/module/releases/download/tinysystems-otel-collector-0.1.0/tinysystems-otel-collector-0.1.0.tgz
     version: 0.1.0
-generated: "2026-01-19T18:12:02.456882725Z"
+generated: "2026-01-22T11:03:06.590661624Z"
