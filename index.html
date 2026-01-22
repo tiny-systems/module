@@ -179,15 +179,6 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
         </ul>
       </li>
       <li>
-        <p><strong>TinyState</strong>: Runtime state persistence for components</p>
-        <ul>
-          <li>Stores component runtime state (running/stopped, context data)</li>
-          <li>Separate from TinyNode configuration</li>
-          <li>Owned by TinyNode for cascade deletion</li>
-          <li>Enables leader failover and multi-pod coordination</li>
-        </ul>
-      </li>
-      <li>
         <p><strong>TinyTracker</strong>: Execution monitoring for detailed tracing</p>
       </li>
       <li>
@@ -221,28 +212,6 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
             → Next node via edges
   → TinySignal deleted (one-off)
 " class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <p><strong>Stateful component flow (e.g., Signal, HTTP Server):</strong></p>
-    <pre><code class="code-highlight"><span class="code-line line-number" line="1">TinySignal → _control port
-</span><span class="code-line line-number" line="2">  → Component writes TinyState
-</span><span class="code-line line-number" line="3">  → Returns immediately (non-blocking)
-</span><span class="code-line line-number" line="4">  → TinySignal deleted
-</span><span class="code-line line-number" line="5">
-</span><span class="code-line line-number" line="6">TinyState change
-</span><span class="code-line line-number" line="7">  → TinyStateReconciler
-</span><span class="code-line line-number" line="8">    → Scheduler.SendState()
-</span><span class="code-line line-number" line="9">      → Component._state port
-</span><span class="code-line line-number" line="10">        → Leader starts/stops blocking handler
-</span></code><div onclick="copied(this)" data-code="TinySignal → _control port
-  → Component writes TinyState
-  → Returns immediately (non-blocking)
-  → TinySignal deleted
-
-TinyState change
-  → TinyStateReconciler
-    → Scheduler.SendState()
-      → Component._state port
-        → Leader starts/stops blocking handler
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
     <h4 id="port-system"><a class="anchor" aria-hidden="true" tabindex="-1" href="#port-system"><span class="octicon octicon-link"></span></a>Port System</h4>
     <p>Ports enable component communication:</p>
     <ul>
@@ -254,7 +223,6 @@ TinyState change
           <li><code>_client</code>: Receives Kubernetes client for resource operations</li>
           <li><code>_settings</code>: Configuration port</li>
           <li><code>_control</code>: Dashboard control port</li>
-          <li><code>_state</code>: Receives TinyState for runtime state synchronization</li>
         </ul>
       </li>
     </ul>
@@ -363,16 +331,15 @@ TinyState change
     <h3 id="design-patterns"><a class="anchor" aria-hidden="true" tabindex="-1" href="#design-patterns"><span class="octicon octicon-link"></span></a>Design Patterns</h3>
     <ol>
       <li><strong>Eventual Consistency with Reconciliation</strong>: Periodic reconciliation (every 5 minutes) plus signal-based immediate updates</li>
-      <li><strong>Leader Election with TinyState Sync</strong>: Leader handles control operations and blocking handlers; TinyState provides cross-pod state synchronization for failover</li>
+      <li><strong>Leader Election</strong>: Leader handles control operations and blocking handlers for multi-pod coordination</li>
       <li><strong>Schema-Driven Configuration</strong>: Go structs automatically generate JSON schemas for UI integration</li>
       <li><strong>Expression-Based Transformation</strong>: Mustache-style <code>{{expression}}</code> syntax with JSONPath enables flexible data mapping without code changes</li>
       <li><strong>Definition Sharing</strong>: Components mark fields as <code>shared:true</code> or <code>configurable:true</code> for cross-node type safety</li>
-      <li><strong>One-off Signals</strong>: TinySignals are deleted after delivery; state persists in TinyState for reliability</li>
+      <li><strong>One-off Signals</strong>: TinySignals are deleted after delivery for clean trigger semantics</li>
     </ol>
     <h3 id="scalability"><a class="anchor" aria-hidden="true" tabindex="-1" href="#scalability"><span class="octicon octicon-link"></span></a>Scalability</h3>
-    <p>The SDK implements a <strong>TinyState-based synchronization</strong> pattern that enables horizontal scaling of module operators while maintaining consistency across replicas.</p>
-    <h4 id="core-scalability-mechanism"><a class="anchor" aria-hidden="true" tabindex="-1" href="#core-scalability-mechanism"><span class="octicon octicon-link"></span></a>Core Scalability Mechanism</h4>
-    <p><strong>Leader Election:</strong></p>
+    <p>The SDK supports horizontal scaling of module operators with leader election for coordination.</p>
+    <h4 id="leader-election"><a class="anchor" aria-hidden="true" tabindex="-1" href="#leader-election"><span class="octicon octicon-link"></span></a>Leader Election</h4>
     <ul>
       <li>Uses Kubernetes native leader election via <code>k8s.io/client-go/tools/leaderelection</code> with Lease resources</li>
       <li>Configuration: 15s lease duration, 10s renew deadline, 2s retry period</li>
@@ -380,289 +347,11 @@ TinyState change
       <li>Leadership state tracked via <code>isLeader</code> atomic boolean</li>
       <li><strong>Purpose</strong>: Only leader runs blocking handlers (e.g., HTTP servers, long-running processes)</li>
     </ul>
-    <p><strong>TinyState as Source of Truth:</strong></p>
-    <ul>
-      <li>TinyState CRD stores component runtime state (running/stopped, context data)</li>
-      <li>Separate from TinyNode configuration - owned by TinyNode for cascade deletion</li>
-      <li>TinyStateReconciler sends state to components via <code>_state</code> port</li>
-      <li>On leadership change, all TinyStates are requeued so new leader can recreate runtime</li>
-    </ul>
-    <p><strong>One-off TinySignals:</strong></p>
+    <h4 id="one-off-tinysignals"><a class="anchor" aria-hidden="true" tabindex="-1" href="#one-off-tinysignals"><span class="octicon octicon-link"></span></a>One-off TinySignals</h4>
     <ul>
       <li>TinySignals are deleted immediately after successful delivery</li>
-      <li>Control port handlers write TinyState and return immediately (non-blocking)</li>
-      <li>State changes trigger <code>_state</code> port delivery to start/stop blocking handlers</li>
+      <li>Clean trigger semantics without signal accumulation</li>
     </ul>
-    <p><strong>Message Flow:</strong></p>
-    <ol>
-      <li><strong>User clicks Send</strong> → TinySignal created → delivered to <code>_control</code> port → writes TinyState → returns immediately → TinySignal deleted</li>
-      <li><strong>TinyState change</strong> → TinyStateReconciler → delivers to <code>_state</code> port → leader starts blocking handler</li>
-      <li><strong>Leadership change</strong> → all TinyStates requeued → new leader recreates runtime from persisted state</li>
-    </ol>
-    <h4 id="signal-component-scalability"><a class="anchor" aria-hidden="true" tabindex="-1" href="#signal-component-scalability"><span class="octicon octicon-link"></span></a>Signal Component Scalability</h4>
-    <p>The Signal component (<code>common-module</code>) demonstrates the TinyState pattern for stateful components with blocking handlers.</p>
-    <p><strong>Problem Solved:</strong> Multiple pods need to coordinate so only the leader runs the blocking handler, while state persists across leader changes.</p>
-    <p><strong>Architecture:</strong></p>
-    <pre><code class="code-highlight"><span class="code-line line-number" line="1">┌─────────────────────────────────────────────────────────────────┐
-</span><span class="code-line line-number" line="2">│                        TinyState CRD                            │
-</span><span class="code-line line-number" line="3">│  Spec:                                                          │
-</span><span class="code-line line-number" line="4">│    node: "signal-xxx"                                           │
-</span><span class="code-line line-number" line="5">│    data: {"running": true, "context": {...}}                    │
-</span><span class="code-line line-number" line="6">└─────────────────────────────────────────────────────────────────┘
-</span><span class="code-line line-number" line="7">         ▲                                    │
-</span><span class="code-line line-number" line="8">    writes state                         delivers to _state
-</span><span class="code-line line-number" line="9">         │                                    ▼
-</span><span class="code-line line-number" line="10">    ┌────┴─────────────┐          ┌──────────┴─────────────┐
-</span><span class="code-line line-number" line="11">    │  _control port   │          │    _state port         │
-</span><span class="code-line line-number" line="12">    │  (non-blocking)  │          │    (leader only)       │
-</span><span class="code-line line-number" line="13">    │                  │          │                        │
-</span><span class="code-line line-number" line="14">    │ - Writes state   │          │ - Reads state          │
-</span><span class="code-line line-number" line="15">    │ - Returns immed. │          │ - Starts/stops handler │
-</span><span class="code-line line-number" line="16">    │ - Signal deleted │          │ - Blocking goroutine   │
-</span><span class="code-line line-number" line="17">    └──────────────────┘          └────────────────────────┘
-</span></code><div onclick="copied(this)" data-code="┌─────────────────────────────────────────────────────────────────┐
-│                        TinyState CRD                            │
-│  Spec:                                                          │
-│    node: &#x22;signal-xxx&#x22;                                           │
-│    data: {&#x22;running&#x22;: true, &#x22;context&#x22;: {...}}                    │
-└─────────────────────────────────────────────────────────────────┘
-         ▲                                    │
-    writes state                         delivers to _state
-         │                                    ▼
-    ┌────┴─────────────┐          ┌──────────┴─────────────┐
-    │  _control port   │          │    _state port         │
-    │  (non-blocking)  │          │    (leader only)       │
-    │                  │          │                        │
-    │ - Writes state   │          │ - Reads state          │
-    │ - Returns immed. │          │ - Starts/stops handler │
-    │ - Signal deleted │          │ - Blocking goroutine   │
-    └──────────────────┘          └────────────────────────┘
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <p><strong>Key Implementation Points:</strong></p>
-    <ol>
-      <li><strong>Non-blocking control port</strong>: <code>_control</code> writes TinyState and returns immediately</li>
-    </ol>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">case</span> v1alpha1<span class="token punctuation">.</span>ControlPort<span class="token punctuation">:</span>
-</span><span class="code-line line-number" line="2">    <span class="token keyword">if</span> <span class="token operator">!</span>utils<span class="token punctuation">.</span><span class="token function">IsLeader</span><span class="token punctuation">(</span>ctx<span class="token punctuation">)</span> <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="3">        <span class="token keyword">return</span> <span class="token boolean">nil</span>  <span class="token comment">// Only leader processes control</span>
-</span><span class="code-line line-number" line="4">    <span class="token punctuation">}</span>
-</span><span class="code-line line-number" line="5">    <span class="token keyword">if</span> in<span class="token punctuation">.</span>Send <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="6">        newState <span class="token operator">:=</span> State<span class="token punctuation">{</span>Running<span class="token punctuation">:</span> <span class="token boolean">true</span><span class="token punctuation">,</span> Context<span class="token punctuation">:</span> in<span class="token punctuation">.</span>Context<span class="token punctuation">}</span>
-</span><span class="code-line line-number" line="7">        t<span class="token punctuation">.</span><span class="token function">writeState</span><span class="token punctuation">(</span>handler<span class="token punctuation">,</span> newState<span class="token punctuation">)</span>  <span class="token comment">// Creates/updates TinyState</span>
-</span><span class="code-line line-number" line="8">        <span class="token keyword">return</span> <span class="token boolean">nil</span>  <span class="token comment">// Don't block! TinySignal deleted after return</span>
-</span><span class="code-line line-number" line="9">    <span class="token punctuation">}</span>
-</span></code><div onclick="copied(this)" data-code="case v1alpha1.ControlPort:
-    if !utils.IsLeader(ctx) {
-        return nil  // Only leader processes control
-    }
-    if in.Send {
-        newState := State{Running: true, Context: in.Context}
-        t.writeState(handler, newState)  // Creates/updates TinyState
-        return nil  // Don&#x27;t block! TinySignal deleted after return
-    }
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <ol start="2">
-      <li><strong>State-driven handler</strong>: <code>_state</code> port triggers blocking handler goroutine</li>
-    </ol>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">case</span> v1alpha1<span class="token punctuation">.</span>StatePort<span class="token punctuation">:</span>
-</span><span class="code-line line-number" line="2">    data <span class="token operator">:=</span> msg<span class="token punctuation">.</span><span class="token punctuation">(</span><span class="token punctuation">[</span><span class="token punctuation">]</span><span class="token builtin">byte</span><span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="3">    <span class="token keyword">var</span> signalState State
-</span><span class="code-line line-number" line="4">    json<span class="token punctuation">.</span><span class="token function">Unmarshal</span><span class="token punctuation">(</span>data<span class="token punctuation">,</span> <span class="token operator">&#x26;</span>signalState<span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="5">
-</span><span class="code-line line-number" line="6">    <span class="token keyword">if</span> <span class="token operator">!</span>utils<span class="token punctuation">.</span><span class="token function">IsLeader</span><span class="token punctuation">(</span>ctx<span class="token punctuation">)</span> <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="7">        <span class="token keyword">return</span> <span class="token boolean">nil</span>  <span class="token comment">// Only leader runs blocking handler</span>
-</span><span class="code-line line-number" line="8">    <span class="token punctuation">}</span>
-</span><span class="code-line line-number" line="9">
-</span><span class="code-line line-number" line="10">    <span class="token keyword">if</span> signalState<span class="token punctuation">.</span>Running <span class="token operator">&#x26;&#x26;</span> <span class="token operator">!</span>hasActiveHandler <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="11">        <span class="token keyword">go</span> t<span class="token punctuation">.</span><span class="token function">runBlockingHandler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> signalState<span class="token punctuation">.</span>Context<span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="12">    <span class="token punctuation">}</span>
-</span></code><div onclick="copied(this)" data-code="case v1alpha1.StatePort:
-    data := msg.([]byte)
-    var signalState State
-    json.Unmarshal(data, &#x26;signalState)
-
-    if !utils.IsLeader(ctx) {
-        return nil  // Only leader runs blocking handler
-    }
-
-    if signalState.Running &#x26;&#x26; !hasActiveHandler {
-        go t.runBlockingHandler(ctx, signalState.Context)
-    }
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <ol start="3">
-      <li><strong>Leader failover</strong>: New leader recreates runtime from TinyState</li>
-    </ol>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token comment">// On leadership change, TinyStateReconciler requeues all states</span>
-</span><span class="code-line line-number" line="2"><span class="token comment">// New leader receives _state with running=true → starts handler</span>
-</span></code><div onclick="copied(this)" data-code="// On leadership change, TinyStateReconciler requeues all states
-// New leader receives _state with running=true → starts handler
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <p><strong>Flow:</strong></p>
-    <ol>
-      <li>User clicks Send → TinySignal → <code>_control</code> → writes TinyState <code>{running: true}</code> → returns → TinySignal deleted</li>
-      <li>TinyState created → TinyStateReconciler → <code>_state</code> port → leader starts blocking handler goroutine</li>
-      <li>User clicks Reset → TinySignal → <code>_control</code> → writes TinyState <code>{running: false}</code> → cancels handler → returns</li>
-      <li>If leader dies → new leader elected → TinyState requeued → <code>_state</code> port → recreates handler</li>
-    </ol>
-    <p><strong>Benefits:</strong></p>
-    <ul>
-      <li>Clean separation: signals for delivery, state for persistence</li>
-      <li>Automatic failover: new leader recreates runtime from state</li>
-      <li>No signal accumulation: one-off signals don't pile up</li>
-      <li>Predictable lifecycle: state controls, handler runs</li>
-    </ul>
-    <h4 id="http-server-component-scalability"><a class="anchor" aria-hidden="true" tabindex="-1" href="#http-server-component-scalability"><span class="octicon octicon-link"></span></a>HTTP Server Component Scalability</h4>
-    <p>The HTTP Server component (<code>http-module</code>) uses the same TinyState pattern as Signal for multi-pod coordination.</p>
-    <p><strong>Key Difference from Signal:</strong> HTTP Server receives start requests via gRPC from upstream components (e.g., Signal → gRPC → HTTP Server), but the coordination pattern is the same.</p>
-    <p><strong>Problem Solved:</strong> Multiple replicas need to serve HTTP traffic while coordinating startup/shutdown. Only leader should manage state; all pods should run servers when state says "running".</p>
-    <p><strong>Architecture:</strong></p>
-    <pre><code class="code-highlight"><span class="code-line line-number" line="1">┌─────────────────────────────────────────────────────────────────┐
-</span><span class="code-line line-number" line="2">│                        TinyState CRD                            │
-</span><span class="code-line line-number" line="3">│  Spec:                                                          │
-</span><span class="code-line line-number" line="4">│    node: "http-server-xxx"                                      │
-</span><span class="code-line line-number" line="5">│    data: {"running": true, "port": 8080, "config": {...}}       │
-</span><span class="code-line line-number" line="6">└─────────────────────────────────────────────────────────────────┘
-</span><span class="code-line line-number" line="7">         ▲                                    │
-</span><span class="code-line line-number" line="8">    writes state                         delivers to _state
-</span><span class="code-line line-number" line="9">    (leader)                                 (all pods)
-</span><span class="code-line line-number" line="10">         │                                    ▼
-</span><span class="code-line line-number" line="11">    ┌────┴─────────────┐          ┌──────────┴─────────────┐
-</span><span class="code-line line-number" line="12">    │  Input port      │          │    _state port         │
-</span><span class="code-line line-number" line="13">    │  (gRPC delivery) │          │    (all pods)          │
-</span><span class="code-line line-number" line="14">    │                  │          │                        │
-</span><span class="code-line line-number" line="15">    │ - Leader writes  │          │ - Start server if      │
-</span><span class="code-line line-number" line="16">    │   TinyState      │          │   state says running   │
-</span><span class="code-line line-number" line="17">    │ - Returns immed. │          │ - All pods serve HTTP  │
-</span><span class="code-line line-number" line="18">    └──────────────────┘          └────────────────────────┘
-</span></code><div onclick="copied(this)" data-code="┌─────────────────────────────────────────────────────────────────┐
-│                        TinyState CRD                            │
-│  Spec:                                                          │
-│    node: &#x22;http-server-xxx&#x22;                                      │
-│    data: {&#x22;running&#x22;: true, &#x22;port&#x22;: 8080, &#x22;config&#x22;: {...}}       │
-└─────────────────────────────────────────────────────────────────┘
-         ▲                                    │
-    writes state                         delivers to _state
-    (leader)                                 (all pods)
-         │                                    ▼
-    ┌────┴─────────────┐          ┌──────────┴─────────────┐
-    │  Input port      │          │    _state port         │
-    │  (gRPC delivery) │          │    (all pods)          │
-    │                  │          │                        │
-    │ - Leader writes  │          │ - Start server if      │
-    │   TinyState      │          │   state says running   │
-    │ - Returns immed. │          │ - All pods serve HTTP  │
-    └──────────────────┘          └────────────────────────┘
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <p><strong>Flow:</strong></p>
-    <ol>
-      <li>Signal sends to HTTP Server → gRPC → leader pod receives and writes TinyState <code>{running: true, port: 8080, config: {...}}</code></li>
-      <li>TinyStateReconciler delivers to all pods via <code>_state</code> port</li>
-      <li>All pods start HTTP server on the same port (Kubernetes Service handles load balancing)</li>
-      <li>Stop request → leader writes TinyState <code>{running: false}</code> → all pods stop</li>
-    </ol>
-    <p><strong>Benefits:</strong></p>
-    <ul>
-      <li>Zero-downtime scaling (new pods auto-start from TinyState)</li>
-      <li>Configuration consistency (config stored in TinyState)</li>
-      <li>Leader failover (new leader can update state if needed)</li>
-      <li>Automatic recovery (TinyState requeued on startup)</li>
-    </ul>
-    <h4 id="implementing-scalable-components"><a class="anchor" aria-hidden="true" tabindex="-1" href="#implementing-scalable-components"><span class="octicon octicon-link"></span></a>Implementing Scalable Components</h4>
-    <p><strong>The TinyState Pattern for Stateful Components:</strong></p>
-    <p>Components that maintain running state (servers, watchers, long-running processes) should follow this pattern:</p>
-    <ol>
-      <li><strong>Write state via ReconcilePort with StateUpdate</strong></li>
-    </ol>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token comment">// In control/input port handler - write state and return immediately</span>
-</span><span class="code-line line-number" line="2">stateData<span class="token punctuation">,</span> <span class="token boolean">_</span> <span class="token operator">:=</span> json<span class="token punctuation">.</span><span class="token function">Marshal</span><span class="token punctuation">(</span>MyState<span class="token punctuation">{</span>Running<span class="token punctuation">:</span> <span class="token boolean">true</span><span class="token punctuation">,</span> Config<span class="token punctuation">:</span> config<span class="token punctuation">}</span><span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="3"><span class="token function">handler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>ReconcilePort<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>StateUpdate<span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="4">    Data<span class="token punctuation">:</span> stateData<span class="token punctuation">,</span>
-</span><span class="code-line line-number" line="5"><span class="token punctuation">}</span><span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="6"><span class="token keyword">return</span> <span class="token boolean">nil</span>  <span class="token comment">// Don't block!</span>
-</span></code><div onclick="copied(this)" data-code="// In control/input port handler - write state and return immediately
-stateData, _ := json.Marshal(MyState{Running: true, Config: config})
-handler(ctx, v1alpha1.ReconcilePort, v1alpha1.StateUpdate{
-    Data: stateData,
-})
-return nil  // Don&#x27;t block!
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <ol start="2">
-      <li><strong>React to state via StatePort</strong></li>
-    </ol>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">case</span> v1alpha1<span class="token punctuation">.</span>StatePort<span class="token punctuation">:</span>
-</span><span class="code-line line-number" line="2">    data <span class="token operator">:=</span> msg<span class="token punctuation">.</span><span class="token punctuation">(</span><span class="token punctuation">[</span><span class="token punctuation">]</span><span class="token builtin">byte</span><span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="3">    <span class="token keyword">var</span> myState MyState
-</span><span class="code-line line-number" line="4">    json<span class="token punctuation">.</span><span class="token function">Unmarshal</span><span class="token punctuation">(</span>data<span class="token punctuation">,</span> <span class="token operator">&#x26;</span>myState<span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="5">
-</span><span class="code-line line-number" line="6">    <span class="token comment">// Only leader runs blocking handlers</span>
-</span><span class="code-line line-number" line="7">    <span class="token keyword">if</span> <span class="token operator">!</span>utils<span class="token punctuation">.</span><span class="token function">IsLeader</span><span class="token punctuation">(</span>ctx<span class="token punctuation">)</span> <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="8">        <span class="token keyword">return</span> <span class="token boolean">nil</span>
-</span><span class="code-line line-number" line="9">    <span class="token punctuation">}</span>
-</span><span class="code-line line-number" line="10">
-</span><span class="code-line line-number" line="11">    <span class="token keyword">if</span> myState<span class="token punctuation">.</span>Running <span class="token operator">&#x26;&#x26;</span> <span class="token operator">!</span>hasActiveHandler <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="12">        <span class="token keyword">go</span> <span class="token function">runBlockingHandler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> myState<span class="token punctuation">.</span>Config<span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="13">    <span class="token punctuation">}</span> <span class="token keyword">else</span> <span class="token keyword">if</span> <span class="token operator">!</span>myState<span class="token punctuation">.</span>Running <span class="token operator">&#x26;&#x26;</span> hasActiveHandler <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="14">        <span class="token function">cancelHandler</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="15">    <span class="token punctuation">}</span>
-</span></code><div onclick="copied(this)" data-code="case v1alpha1.StatePort:
-    data := msg.([]byte)
-    var myState MyState
-    json.Unmarshal(data, &#x26;myState)
-
-    // Only leader runs blocking handlers
-    if !utils.IsLeader(ctx) {
-        return nil
-    }
-
-    if myState.Running &#x26;&#x26; !hasActiveHandler {
-        go runBlockingHandler(ctx, myState.Config)
-    } else if !myState.Running &#x26;&#x26; hasActiveHandler {
-        cancelHandler()
-    }
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <ol start="3">
-      <li><strong>Define the StatePort in Ports()</strong></li>
-    </ol>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="2">    Name<span class="token punctuation">:</span> v1alpha1<span class="token punctuation">.</span>StatePort<span class="token punctuation">,</span>
-</span><span class="code-line line-number" line="3">    <span class="token comment">// Hidden port - receives TinyState for state sync</span>
-</span><span class="code-line line-number" line="4"><span class="token punctuation">}</span>
-</span></code><div onclick="copied(this)" data-code="{
-    Name: v1alpha1.StatePort,
-    // Hidden port - receives TinyState for state sync
-}
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <p><strong>Key Principles:</strong></p>
-    <ul>
-      <li>Control/input ports should NOT block - write state and return immediately</li>
-      <li><code>_state</code> port handlers start/stop blocking goroutines based on state</li>
-      <li>Only leader runs blocking handlers (use <code>utils.IsLeader(ctx)</code>)</li>
-      <li>State is source of truth; new leader recreates runtime from state</li>
-    </ul>
-    <p><strong>Common: Use state for consistent status display</strong></p>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">func</span> <span class="token punctuation">(</span>c <span class="token operator">*</span>MyComponent<span class="token punctuation">)</span> <span class="token function">Ports</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">[</span><span class="token punctuation">]</span>module<span class="token punctuation">.</span>Port <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="2">    state <span class="token operator">:=</span> c<span class="token punctuation">.</span><span class="token function">getState</span><span class="token punctuation">(</span><span class="token punctuation">)</span>  <span class="token comment">// Read from local cache synced via _state port</span>
-</span><span class="code-line line-number" line="3">    <span class="token keyword">return</span> <span class="token punctuation">[</span><span class="token punctuation">]</span>module<span class="token punctuation">.</span>Port<span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="4">        <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="5">            Name<span class="token punctuation">:</span> v1alpha1<span class="token punctuation">.</span>ControlPort<span class="token punctuation">,</span>
-</span><span class="code-line line-number" line="6">            Configuration<span class="token punctuation">:</span> Control<span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="7">                ShowStop<span class="token punctuation">:</span> state<span class="token punctuation">.</span>Running<span class="token punctuation">,</span>  <span class="token comment">// UI reflects persisted state</span>
-</span><span class="code-line line-number" line="8">            <span class="token punctuation">}</span><span class="token punctuation">,</span>
-</span><span class="code-line line-number" line="9">        <span class="token punctuation">}</span><span class="token punctuation">,</span>
-</span><span class="code-line line-number" line="10">    <span class="token punctuation">}</span>
-</span><span class="code-line line-number" line="11"><span class="token punctuation">}</span>
-</span></code><div onclick="copied(this)" data-code="func (c *MyComponent) Ports() []module.Port {
-    state := c.getState()  // Read from local cache synced via _state port
-    return []module.Port{
-        {
-            Name: v1alpha1.ControlPort,
-            Configuration: Control{
-                ShowStop: state.Running,  // UI reflects persisted state
-            },
-        },
-    }
-}
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
     <h3 id="project-structure"><a class="anchor" aria-hidden="true" tabindex="-1" href="#project-structure"><span class="octicon octicon-link"></span></a>Project Structure</h3>
     <pre><code class="code-highlight"><span class="code-line line-number" line="1">.
 </span><span class="code-line line-number" line="2">├── api/v1alpha1/          # CRD definitions (TinyNode, TinyModule, TinyFlow, etc.)
@@ -1248,47 +937,6 @@ helm install my-module \
     settings := message.(*MyConfig)
     // Store settings for later use
 " class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <h5 id="_state-port"><a class="anchor" aria-hidden="true" tabindex="-1" href="#_state-port"><span class="octicon octicon-link"></span></a><code>_state</code> Port</h5>
-    <p>Receives state data (<code>[]byte</code>) for runtime state synchronization. Used by stateful components to persist and restore running state across pod restarts and leader changes:</p>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">case</span> <span class="token string">"_state"</span><span class="token punctuation">:</span>
-</span><span class="code-line line-number" line="2">    data <span class="token operator">:=</span> message<span class="token punctuation">.</span><span class="token punctuation">(</span><span class="token punctuation">[</span><span class="token punctuation">]</span><span class="token builtin">byte</span><span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="3">    <span class="token keyword">var</span> myState MyState
-</span><span class="code-line line-number" line="4">    json<span class="token punctuation">.</span><span class="token function">Unmarshal</span><span class="token punctuation">(</span>data<span class="token punctuation">,</span> <span class="token operator">&#x26;</span>myState<span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="5">
-</span><span class="code-line line-number" line="6">    <span class="token comment">// Only leader runs blocking handlers</span>
-</span><span class="code-line line-number" line="7">    <span class="token keyword">if</span> <span class="token operator">!</span>utils<span class="token punctuation">.</span><span class="token function">IsLeader</span><span class="token punctuation">(</span>ctx<span class="token punctuation">)</span> <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="8">        <span class="token keyword">return</span> <span class="token boolean">nil</span>
-</span><span class="code-line line-number" line="9">    <span class="token punctuation">}</span>
-</span><span class="code-line line-number" line="10">
-</span><span class="code-line line-number" line="11">    <span class="token comment">// Start/stop based on state</span>
-</span><span class="code-line line-number" line="12">    <span class="token keyword">if</span> myState<span class="token punctuation">.</span>Running <span class="token operator">&#x26;&#x26;</span> <span class="token operator">!</span>c<span class="token punctuation">.</span>hasActiveHandler <span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="13">        <span class="token keyword">go</span> c<span class="token punctuation">.</span><span class="token function">runBlockingHandler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> myState<span class="token punctuation">.</span>Config<span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="14">    <span class="token punctuation">}</span>
-</span></code><div onclick="copied(this)" data-code="case &#x22;_state&#x22;:
-    data := message.([]byte)
-    var myState MyState
-    json.Unmarshal(data, &#x26;myState)
-
-    // Only leader runs blocking handlers
-    if !utils.IsLeader(ctx) {
-        return nil
-    }
-
-    // Start/stop based on state
-    if myState.Running &#x26;&#x26; !c.hasActiveHandler {
-        go c.runBlockingHandler(ctx, myState.Config)
-    }
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
-    <p>To write state, use ReconcilePort with StateUpdate:</p>
-    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1">stateData<span class="token punctuation">,</span> <span class="token boolean">_</span> <span class="token operator">:=</span> json<span class="token punctuation">.</span><span class="token function">Marshal</span><span class="token punctuation">(</span>MyState<span class="token punctuation">{</span>Running<span class="token punctuation">:</span> <span class="token boolean">true</span><span class="token punctuation">}</span><span class="token punctuation">)</span>
-</span><span class="code-line line-number" line="2"><span class="token function">handler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>ReconcilePort<span class="token punctuation">,</span> v1alpha1<span class="token punctuation">.</span>StateUpdate<span class="token punctuation">{</span>
-</span><span class="code-line line-number" line="3">    Data<span class="token punctuation">:</span> stateData<span class="token punctuation">,</span>
-</span><span class="code-line line-number" line="4"><span class="token punctuation">}</span><span class="token punctuation">)</span>
-</span></code><div onclick="copied(this)" data-code="stateData, _ := json.Marshal(MyState{Running: true})
-handler(ctx, v1alpha1.ReconcilePort, v1alpha1.StateUpdate{
-    Data: stateData,
-})
-" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
     <h4 id="error-handling"><a class="anchor" aria-hidden="true" tabindex="-1" href="#error-handling"><span class="octicon octicon-link"></span></a>Error Handling</h4>
     <h5 id="transient-errors"><a class="anchor" aria-hidden="true" tabindex="-1" href="#transient-errors"><span class="octicon octicon-link"></span></a>Transient Errors</h5>
     <p>Return regular errors for automatic retry with exponential backoff:</p>
@@ -1519,14 +1167,13 @@ func TestHello(t *testing.T) {
     <h4 id="best-practices"><a class="anchor" aria-hidden="true" tabindex="-1" href="#best-practices"><span class="octicon octicon-link"></span></a>Best Practices</h4>
     <ol>
       <li><strong>Keep Components Focused</strong>: Each component should do one thing well</li>
-      <li><strong>Use System Ports</strong>: Implement <code>_reconcile</code> for cleanup; use <code>_state</code> for stateful components</li>
+      <li><strong>Use System Ports</strong>: Implement <code>_reconcile</code> for cleanup</li>
       <li><strong>Handle Context Cancellation</strong>: Respect <code>ctx.Done()</code> for graceful shutdown</li>
       <li><strong>Leverage Schemas</strong>: Use struct tags to create great UI experiences</li>
       <li><strong>Share Definitions</strong>: Mark output fields as <code>shared:true</code> for type-safe flows</li>
       <li><strong>Use Permanent Errors</strong>: Don't retry validation errors or user mistakes</li>
       <li><strong>Add Observability</strong>: Create spans for long operations</li>
       <li><strong>Document with Tags</strong>: Use meaningful tags in <code>GetInfo()</code> for discoverability</li>
-      <li><strong>Use TinyState for Stateful Components</strong>: Components with running state (servers, watchers) should write to TinyState and react via <code>_state</code> port for proper leader failover</li>
     </ol>
     <h4 id="component-naming-convention"><a class="anchor" aria-hidden="true" tabindex="-1" href="#component-naming-convention"><span class="octicon octicon-link"></span></a>Component Naming Convention</h4>
     <p>All component names must follow a consistent naming pattern using <code>snake_case</code>:</p>
@@ -1829,14 +1476,14 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
     <p>Everything should be configurable via edges/signals, not the settings panel:</p>
     <ul>
       <li>Credentials mapped from upstream components (secret managers, vaults)</li>
-      <li>Runtime parameters from user input or TinyState</li>
+      <li>Runtime parameters from user input</li>
       <li>Makes flows self-contained, portable, and version-controllable</li>
     </ul>
     <h4 id="example-modules"><a class="anchor" aria-hidden="true" tabindex="-1" href="#example-modules"><span class="octicon octicon-link"></span></a>Example Modules</h4>
     <p>Check out these example modules for reference:</p>
     <ul>
-      <li><strong>common-module</strong>: Basic utilities (delay, switch, merge, signal) - Signal component demonstrates TinyState pattern</li>
-      <li><strong>http-module</strong>: HTTP client/server components - HTTP Server demonstrates multi-pod coordination with TinyState</li>
+      <li><strong>common-module</strong>: Basic utilities (delay, switch, merge, signal)</li>
+      <li><strong>http-module</strong>: HTTP client/server components</li>
       <li><strong>grpc-module</strong>: gRPC service components</li>
     </ul>
     <h4 id="cli-reference"><a class="anchor" aria-hidden="true" tabindex="-1" href="#cli-reference"><span class="octicon octicon-link"></span></a>CLI Reference</h4>
