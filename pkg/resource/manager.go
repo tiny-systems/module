@@ -46,9 +46,6 @@ type ManagerInterface interface {
 	DeleteNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	GetNode(ctx context.Context, name, namespace string) (*v1alpha1.TinyNode, error)
 	CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte) error
-	UpsertState(ctx context.Context, nodeName, namespace string, data []byte, ownerNode string) error
-	DeleteState(ctx context.Context, nodeName, namespace string) error
-	GetState(ctx context.Context, nodeName, namespace string) (*v1alpha1.TinyState, error)
 }
 
 func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
@@ -1170,78 +1167,3 @@ func (m Manager) WaitForNodeDeletion(ctx context.Context, name, namespace string
 	})
 }
 
-// GetState retrieves the TinyState for a node
-func (m Manager) GetState(ctx context.Context, nodeName, namespace string) (*v1alpha1.TinyState, error) {
-	state := &v1alpha1.TinyState{}
-	// TinyState name matches the node name
-	if err := m.client.Get(ctx, client.ObjectKey{
-		Namespace: namespace,
-		Name:      nodeName,
-	}, state); err != nil {
-		return nil, err
-	}
-	return state, nil
-}
-
-// UpsertState creates or updates TinyState for a node.
-// If ownerNode is provided, the state will be owned by that node's TinyState for cascade deletion.
-// If ownerNode is empty, the state is owned by its own TinyNode.
-func (m Manager) UpsertState(ctx context.Context, nodeName, namespace string, data []byte, ownerNode string) error {
-	// Determine which node should be the owner
-	ownerNodeName := nodeName
-	if ownerNode != "" {
-		ownerNodeName = ownerNode
-	}
-
-	// Get the owner node to set owner reference
-	node, err := m.GetNode(ctx, ownerNodeName, namespace)
-	if err != nil {
-		return fmt.Errorf("failed to get node for state owner reference: %w", err)
-	}
-
-	// Try to get existing state
-	state, err := m.GetState(ctx, nodeName, namespace)
-	if err != nil {
-		if !errors.IsNotFound(err) {
-			return err
-		}
-
-		// Create new state
-		state = &v1alpha1.TinyState{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      nodeName,
-				Namespace: namespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: node.APIVersion,
-						Kind:       node.Kind,
-						Name:       node.Name,
-						UID:        node.UID,
-						Controller: func() *bool { b := true; return &b }(),
-					},
-				},
-			},
-			Spec: v1alpha1.TinyStateSpec{
-				Node: nodeName,
-				Data: data,
-			},
-		}
-		return m.client.Create(ctx, state)
-	}
-
-	// Update existing state
-	state.Spec.Data = data
-	return m.client.Update(ctx, state)
-}
-
-// DeleteState deletes TinyState for a node
-func (m Manager) DeleteState(ctx context.Context, nodeName, namespace string) error {
-	state, err := m.GetState(ctx, nodeName, namespace)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil // Already deleted
-		}
-		return err
-	}
-	return m.client.Delete(ctx, state)
-}
