@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -28,15 +27,10 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -64,14 +58,10 @@ type TinyStateReconciler struct {
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinystates/finalizers,verbs=update
 
 // Reconcile handles TinyState changes and sends state to components.
-// For normal states (no TargetPort): sends to _state port
-// For blocking states (TargetPort set): sends to the target port, blocks, then requeues
 // On leader change, all states are requeued so the new leader can recreate runtime.
 func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	// For blocking states, parse target node name; for normal states, parse from state name
-	// Blocking state names are "blocking-{edgeID}", normal state names are "{nodeName}"
 	state := &operatorv1alpha1.TinyState{}
 	if err := r.Get(ctx, req.NamespacedName, state); err != nil {
 		if errors.IsNotFound(err) {
@@ -97,8 +87,7 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	isBlockingState := state.Spec.TargetPort != ""
-	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name, "blocking", isBlockingState)
+	l.Info("reconcile", "namespace", req.Namespace, "name", req.Name)
 
 	// Handle deletion
 	if !state.DeletionTimestamp.IsZero() {
@@ -106,16 +95,10 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		// All pods send nil to stop their local server instance
 		if r.Scheduler.HasInstance(state.Spec.Node) {
-			l.Info("tinystate being deleted, stopping local instance", "node", state.Spec.Node, "blocking", isBlockingState, "isLeader", isLeader)
+			l.Info("tinystate being deleted, stopping local instance", "node", state.Spec.Node, "isLeader", isLeader)
 
-			var targetPort, from string
-			if isBlockingState {
-				targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
-				from = operatorv1alpha1.BlockingStateFrom
-			} else {
-				targetPort = utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
-				from = runner.FromState
-			}
+			targetPort := utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
+			from := runner.FromState
 
 			_, _ = r.Scheduler.Handle(ctx, &runner.Msg{
 				From: from,
@@ -124,20 +107,13 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			})
 		}
 
-		// Only leader handles metadata cleanup and finalizer removal
+		// Only leader handles finalizer removal
 		if !isLeader {
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 
 		if !controllerutil.ContainsFinalizer(state, tinyStateFinalizer) {
 			return ctrl.Result{}, nil
-		}
-
-		// Clear target node's metadata for blocking states
-		if isBlockingState {
-			if err := r.clearNodeMetadata(ctx, state.Spec.Node, state.Namespace); err != nil {
-				l.Error(err, "failed to clear target node metadata")
-			}
 		}
 
 		// Remove finalizer
@@ -168,74 +144,17 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	isLeader := r.IsLeader.Load()
 	ctx = utils.WithLeader(ctx, isLeader)
 
-	// For blocking states, only leader delivers to StartPort
-	if isBlockingState && !isLeader {
-		l.Info("non-leader skipping blocking state delivery", "node", state.Spec.Node)
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
+	// Deliver to _state port
+	targetPort := utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
+	from := runner.FromState
 
-	// Determine target port and from field
-	var targetPort string
-	var from string
-	if isBlockingState {
-		// Blocking state - deliver to specific port
-		targetPort = utils.GetPortFullName(state.Spec.Node, state.Spec.TargetPort)
-		// Use SourcePort for edge config lookup, fall back to BlockingStateFrom for backwards compatibility
-		if state.Spec.SourcePort != "" {
-			from = state.Spec.SourcePort
-		} else {
-			from = operatorv1alpha1.BlockingStateFrom
-		}
-		l.Info("delivering blocking state", "targetPort", targetPort, "from", from, "sourceNode", state.Spec.SourceNode)
-	} else {
-		// Normal state - deliver to _state port
-		targetPort = utils.GetPortFullName(state.Spec.Node, operatorv1alpha1.StatePort)
-		from = runner.FromState
-	}
-
-	// Send state data to the component
-	// For blocking states, run in goroutine so reconcile can return and handle deletion
-	if isBlockingState {
-		// Skip if already delivered (ObservedGeneration matches current Generation)
-		if state.Status.ObservedGeneration == state.ObjectMeta.Generation {
-			l.Info("blocking state already delivered, skipping re-delivery")
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		// Extract trace context from annotation to link spans
-		handlerCtx := r.createTracedContext(state, isLeader)
-
-		go r.deliverBlockingStateWithRetry(handlerCtx, l, state, from, targetPort)
-	} else {
-		_, err = r.Scheduler.Handle(ctx, &runner.Msg{
-			From: from,
-			To:   targetPort,
-			Data: state.Spec.Data,
-		})
-	}
+	_, err = r.Scheduler.Handle(ctx, &runner.Msg{
+		From: from,
+		To:   targetPort,
+		Data: state.Spec.Data,
+	})
 	if err != nil {
 		l.Error(err, "failed to send state to component")
-
-		// For blocking states, update status with error and delete so Signal unblocks
-		if isBlockingState && r.IsLeader.Load() {
-			l.Info("blocking state failed, updating status and deleting", "error", err.Error())
-
-			// Update status with error info
-			originState := state.DeepCopy()
-			state.Status.Result = "error"
-			if state.Status.Metadata == nil {
-				state.Status.Metadata = make(map[string]string)
-			}
-			state.Status.Metadata["error"] = err.Error()
-			_ = r.Status().Patch(ctx, state, client.MergeFrom(originState))
-
-			// Delete the TinyState so Signal's watch unblocks
-			if err := r.Delete(ctx, state); err != nil {
-				l.Error(err, "failed to delete blocking state after error")
-			}
-			return ctrl.Result{}, nil
-		}
-
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, fmt.Errorf("send state: %w", err)
 	}
 
@@ -251,131 +170,7 @@ func (r *TinyStateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// For blocking states, requeue with backoff to ensure continuous reconciliation
-	// This ensures the server keeps running while the TinyState exists
-	if isBlockingState {
-		l.Info("blocking state delivered, requeuing for continuous reconciliation")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
 	return ctrl.Result{}, nil
-}
-
-// createTracedContext extracts trace context from TinyState annotation and creates
-// a linked context for span propagation across the blocking state delivery.
-func (r *TinyStateReconciler) createTracedContext(state *operatorv1alpha1.TinyState, isLeader bool) context.Context {
-	ctx := utils.WithLeader(context.Background(), isLeader)
-
-	// Extract traceparent from annotation
-	traceparent := ""
-	if state.Annotations != nil {
-		traceparent = state.Annotations["tinysystems.io/traceparent"]
-	}
-	if traceparent == "" {
-		return ctx
-	}
-
-	// Parse W3C traceparent: version-traceid-spanid-flags
-	parts := strings.Split(traceparent, "-")
-	if len(parts) != 4 {
-		return ctx
-	}
-
-	traceID, err := trace.TraceIDFromHex(parts[1])
-	if err != nil {
-		return ctx
-	}
-	spanID, err := trace.SpanIDFromHex(parts[2])
-	if err != nil {
-		return ctx
-	}
-
-	// Create span context with remote parent
-	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     spanID,
-		TraceFlags: trace.FlagsSampled,
-		Remote:     true,
-	})
-
-	return trace.ContextWithSpanContext(ctx, spanCtx)
-}
-
-// deliverBlockingStateWithRetry delivers a blocking state with exponential backoff retry.
-// Errors are reported to the trace span for observability.
-func (r *TinyStateReconciler) deliverBlockingStateWithRetry(
-	ctx context.Context,
-	l interface{ Error(error, string, ...any); Info(string, ...any) },
-	state *operatorv1alpha1.TinyState,
-	from, targetPort string,
-) {
-	tracer := otel.Tracer("tinystate-controller")
-
-	// Create child span linked to parent trace
-	ctx, span := tracer.Start(ctx, "blocking-state-delivery",
-		trace.WithAttributes(
-			attribute.String("state.name", state.Name),
-			attribute.String("state.targetPort", targetPort),
-			attribute.String("state.sourceNode", state.Spec.SourceNode),
-		),
-	)
-	defer span.End()
-
-	var lastErr error
-	backoff := wait.Backoff{
-		Duration: 100 * time.Millisecond,
-		Factor:   2.0,
-		Jitter:   0.1,
-		Steps:    10, // Max ~51 seconds total
-		Cap:      10 * time.Second,
-	}
-
-	err := wait.ExponentialBackoff(backoff, func() (bool, error) {
-		_, lastErr = r.Scheduler.Handle(ctx, &runner.Msg{
-			From: from,
-			To:   targetPort,
-			Data: state.Spec.Data,
-		})
-		if lastErr == nil {
-			return true, nil // Success
-		}
-
-		l.Info("blocking state delivery failed, retrying",
-			"error", lastErr.Error(),
-			"state", state.Name,
-		)
-		span.AddEvent("retry", trace.WithAttributes(
-			attribute.String("error", lastErr.Error()),
-		))
-
-		return false, nil // Retry
-	})
-
-	if err != nil {
-		// Backoff exhausted
-		finalErr := fmt.Errorf("blocking state delivery failed after retries: %w", lastErr)
-		l.Error(finalErr, "blocking state handler failed permanently",
-			"state", state.Name,
-			"targetPort", targetPort,
-		)
-		span.RecordError(finalErr)
-		span.SetStatus(codes.Error, finalErr.Error())
-	}
-
-	// Handle() returned - component finished processing (success or failure)
-	// Delete the blocking state to unblock the caller (true blocking semantics)
-	// This enables patterns like Ticker -> HTTP Server where Ticker supervises/restarts
-	l.Info("blocking state completed, deleting to unblock caller",
-		"state", state.Name,
-		"hadError", err != nil,
-	)
-
-	if delErr := r.Delete(context.Background(), state); delErr != nil && !errors.IsNotFound(delErr) {
-		l.Error(delErr, "failed to delete blocking state after completion",
-			"state", state.Name,
-		)
-		span.RecordError(delErr)
-	}
 }
 
 // RequeueAllOnLeadershipChange triggers requeue of all TinyStates when leadership changes.
@@ -421,23 +216,4 @@ func (r *TinyStateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		)).
 		Complete(r)
-}
-
-// clearNodeMetadata clears all metadata on a node
-func (r *TinyStateReconciler) clearNodeMetadata(ctx context.Context, nodeName, namespace string) error {
-	var node operatorv1alpha1.TinyNode
-	if err := r.Get(ctx, types.NamespacedName{Name: nodeName, Namespace: namespace}, &node); err != nil {
-		return err
-	}
-
-	if node.Status.Metadata == nil || len(node.Status.Metadata) == 0 {
-		return nil
-	}
-
-	l := log.FromContext(ctx)
-	l.Info("clearing node metadata", "node", nodeName)
-
-	originNode := node.DeepCopy()
-	node.Status.Metadata = nil
-	return r.Status().Patch(ctx, &node, client.MergeFrom(originNode))
 }

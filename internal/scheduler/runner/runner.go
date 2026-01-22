@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -217,7 +216,6 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 			Label:    np.Label,
 			Position: v1alpha1.Position(np.Position),
 			Source:   np.Source,
-			Blocking: np.Blocking,
 		}
 
 		if np.Configuration != nil {
@@ -354,17 +352,6 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		// State messages pass raw []byte data directly to the component
 		// The component expects []byte and handles unmarshaling itself
 		portData = msg.Data
-
-	} else if msg.From == v1alpha1.BlockingStateFrom {
-		// Blocking state from TinyState - unmarshal to port's expected type
-		if msg.Data == nil {
-			portData = nil
-		} else {
-			if err = json.Unmarshal(msg.Data, portInputData.Addr().Interface()); err != nil {
-				return nil, err
-			}
-			portData = portInputData.Interface()
-		}
 
 	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
@@ -799,17 +786,7 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 		}
 
 		wg.Go(func() error {
-			var res any
-			var err error
-
-			// Check if source port has Blocking: true
-			if sourcePort.Blocking {
-				// Use blocking edge via TinyState
-				res, err = c.sendBlockingEdge(ctx, edge, fromPort, dataBytes)
-			} else {
-				// Use normal gRPC edge with retry
-				res, err = c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
-			}
+			res, err := c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
 
 			resultLock.Lock()
 			defer resultLock.Unlock()
@@ -899,107 +876,4 @@ func (c *Runner) getPortByName(portName string) *m.Port {
 		}
 	}
 	return nil
-}
-
-// sendBlockingEdge creates a TinyState for the destination node and blocks until it's deleted.
-// This is used for blocking edges (Blocking: true on source port).
-func (c *Runner) sendBlockingEdge(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort string, data []byte) (any, error) {
-	// Sanitize edge.ID for Kubernetes resource naming (RFC 1123 subdomain)
-	// Replace underscores with dashes since underscores are not allowed
-	sanitizedEdgeID := strings.ReplaceAll(edge.ID, "_", "-")
-	stateName := fmt.Sprintf("blocking-%s", sanitizedEdgeID)
-
-	// Parse target node and port from edge.To
-	targetNode, targetPort := utils.ParseFullPortName(edge.To)
-	if targetNode == "" || targetPort == "" {
-		return nil, fmt.Errorf("invalid edge target: %s", edge.To)
-	}
-
-	c.log.Info("sendBlockingEdge: creating blocking state",
-		"stateName", stateName,
-		"targetNode", targetNode,
-		"targetPort", targetPort,
-		"sourceNode", c.name,
-		"edgeID", edge.ID,
-	)
-
-	// Start gauge metrics for edge animation
-	gaugeCtx, gaugeCancel := context.WithCancel(ctx)
-	defer gaugeCancel()
-
-	go func() {
-		ticker := time.NewTicker(time.Second * 3)
-		defer ticker.Stop()
-
-		c.setGauge(time.Now().Unix(), edge.ID, metrics.MetricEdgeBusy)
-
-		for {
-			select {
-			case <-gaugeCtx.Done():
-				return
-			case t := <-ticker.C:
-				c.setGauge(t.Unix(), edge.ID, metrics.MetricEdgeBusy)
-			}
-		}
-	}()
-
-	// Create blocking TinyState
-	c.nodeLock.Lock()
-	namespace := c.node.Namespace
-	c.nodeLock.Unlock()
-
-	err := c.manager.CreateBlockingState(ctx, resource.BlockingStateRequest{
-		StateName:    stateName,
-		Namespace:    namespace,
-		TargetNode:   targetNode,
-		TargetPort:   targetPort,
-		SourceNode:   c.name,
-		SourcePort:   fromPort, // full port name (node:port) for edge config lookup
-		SourceEdgeID: edge.ID,
-		Data:         data,
-	})
-	if err != nil {
-		c.log.Error(err, "sendBlockingEdge: failed to create blocking state",
-			"stateName", stateName,
-		)
-		return nil, err
-	}
-
-	c.log.Info("sendBlockingEdge: watching blocking state",
-		"stateName", stateName,
-	)
-
-	// Block until TinyState is deleted
-	result, err := c.manager.WatchBlockingState(ctx, stateName, namespace)
-
-	// If context was cancelled (e.g., Reset clicked), delete the blocking state
-	// to stop the destination component (e.g., HTTP server)
-	if err != nil && ctx.Err() != nil {
-		c.log.Info("sendBlockingEdge: context cancelled, deleting blocking state",
-			"stateName", stateName,
-		)
-		// Use background context since our context is cancelled
-		if delErr := c.manager.DeleteBlockingState(context.Background(), stateName, namespace, "cancelled"); delErr != nil {
-			c.log.Error(delErr, "sendBlockingEdge: failed to delete blocking state after cancellation",
-				"stateName", stateName,
-			)
-		}
-		return nil, err
-	}
-
-	if err != nil {
-		c.log.Error(err, "sendBlockingEdge: watch error",
-			"stateName", stateName,
-		)
-		return nil, err
-	}
-
-	c.log.Info("sendBlockingEdge: blocking state completed",
-		"stateName", stateName,
-		"result", result.Result,
-		"metadata", result.Metadata,
-	)
-
-	// Return metadata from the completed state (e.g., HTTP port info)
-	return result.Metadata, nil
 }

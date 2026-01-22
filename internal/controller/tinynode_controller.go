@@ -123,14 +123,6 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, fmt.Errorf("update scheduler: %w", err)
 	}
 
-	// Cleanup orphaned blocking states (edges that were removed)
-	if r.IsLeader.Load() {
-		if err := r.cleanupOrphanedBlockingStates(ctx, node); err != nil {
-			l.Error(err, "failed to cleanup orphaned blocking states")
-			// Don't fail reconcile for cleanup errors
-		}
-	}
-
 	// Mark observed generation
 	node.Status.ObservedGeneration = node.ObjectMeta.Generation
 
@@ -159,70 +151,6 @@ func (r *TinyNodeReconciler) RequeueAllOnLeadershipChange() {
 	case r.leadershipCh <- event.GenericEvent{Object: &operatorv1alpha1.TinyNode{}}:
 	default:
 	}
-}
-
-// cleanupOrphanedBlockingStates deletes blocking TinyStates for edges that no longer exist
-// or when the source node is no longer in "running" state (e.g., Signal was reset)
-func (r *TinyNodeReconciler) cleanupOrphanedBlockingStates(ctx context.Context, node *operatorv1alpha1.TinyNode) error {
-	l := log.FromContext(ctx)
-
-	// List all TinyStates
-	var stateList operatorv1alpha1.TinyStateList
-	if err := r.List(ctx, &stateList, client.InNamespace(node.Namespace)); err != nil {
-		return fmt.Errorf("list states: %w", err)
-	}
-
-	// Build a set of current edge IDs
-	currentEdgeIDs := make(map[string]struct{})
-	for _, edge := range node.Spec.Edges {
-		currentEdgeIDs[edge.ID] = struct{}{}
-	}
-
-	// Check if this node is in "running" state (Signal sets "signal-running" metadata)
-	isRunning := false
-	if node.Status.Metadata != nil {
-		_, isRunning = node.Status.Metadata["signal-running"]
-	}
-
-	// Find and delete orphaned blocking states
-	for _, state := range stateList.Items {
-		// Skip if not a blocking state from this node
-		if state.Spec.SourceNode != node.Name || state.Spec.SourceEdgeID == "" {
-			continue
-		}
-
-		shouldDelete := false
-		reason := ""
-
-		// Check if the edge still exists
-		if _, exists := currentEdgeIDs[state.Spec.SourceEdgeID]; !exists {
-			shouldDelete = true
-			reason = "edge removed"
-		}
-
-		// Check if the source node (Signal) is no longer running (was reset)
-		if !isRunning {
-			shouldDelete = true
-			reason = "source node not running (reset)"
-		}
-
-		if !shouldDelete {
-			continue
-		}
-
-		// Delete the blocking state
-		l.Info("cleaning up blocking state",
-			"stateName", state.Name,
-			"sourceEdgeID", state.Spec.SourceEdgeID,
-			"reason", reason,
-		)
-
-		if err := r.Delete(ctx, &state); err != nil && !errors.IsNotFound(err) {
-			l.Error(err, "failed to delete blocking state", "stateName", state.Name)
-		}
-	}
-
-	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

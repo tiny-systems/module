@@ -113,8 +113,6 @@ type TinyNodePortStatus struct {
 	Source        bool     `json:"source"`
 	Schema        []byte   `json:"schema"`
 	Configuration []byte   `json:"configuration"`
-	// Blocking: when true, use TinyState instead of gRPC for blocking edges
-	Blocking bool `json:"blocking,omitempty"`
 }
 
 type TinyNodePortConfig struct {
