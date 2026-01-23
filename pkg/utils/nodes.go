@@ -688,9 +688,12 @@ func ApiNodeToMapMinimal(node v1alpha1.TinyNode, data map[string]interface{}) ma
 
 	data["component"] = bm.Sanitize(node.Spec.Component)
 	data["module"] = bm.Sanitize(node.Spec.Module)
+	data["module_version"] = bm.Sanitize(node.Status.Module.Version)
+	data["component_description"] = bm.Sanitize(node.Status.Component.Description)
+	data["component_info"] = bm.Sanitize(node.Status.Component.Info)
 
-	// Omit: component_description, component_info, module_version, error, status, last_status_update
-	// These can be derived from component registry at runtime
+	// Omit runtime state: error, status, last_status_update
+	// These are transient and not needed for import
 
 	var keys []string
 	for k := range handlesMap {
