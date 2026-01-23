@@ -865,6 +865,26 @@ func (m Manager) GetProject(ctx context.Context, name string, namespace string) 
 	return project, nil
 }
 
+func (m Manager) RenameProject(ctx context.Context, name string, namespace string, newName string) error {
+
+	project := &v1alpha1.TinyProject{}
+	key := types.NamespacedName{
+		Name:      name,
+		Namespace: namespace,
+	}
+	err := m.client.Get(ctx, key, project)
+
+	if err != nil {
+		return err
+	}
+
+	if project.Annotations == nil {
+		project.Annotations = make(map[string]string)
+	}
+	project.Annotations[v1alpha1.ProjectNameAnnotation] = newName
+	return m.client.Update(ctx, project)
+}
+
 func (m Manager) PutTracker(ctx context.Context, namespace string, projectResourceName string) (*v1alpha1.TinyTracker, error) {
 	// place tracker
 	tracker := &v1alpha1.TinyTracker{
