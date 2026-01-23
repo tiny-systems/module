@@ -186,22 +186,23 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 	bm := bluemonday.StrictPolicy()
 
 	data["component"] = bm.Sanitize(node.Spec.Component)
-	cd := bm.Sanitize(node.Status.Component.Description)
-	if len(cd) > 0 {
-		data["component_description"] = cd
-	}
+	data["module"] = bm.Sanitize(node.Spec.Module)
 
-	data["component_info"] = bm.Sanitize(node.Status.Component.Info)
-	//
 	if !minimal {
+		// Static component metadata - can be derived from component definition at import
+		cd := bm.Sanitize(node.Status.Component.Description)
+		if len(cd) > 0 {
+			data["component_description"] = cd
+		}
+		data["component_info"] = bm.Sanitize(node.Status.Component.Info)
+		data["module_version"] = bm.Sanitize(node.Status.Module.Version)
+		// Runtime status - not useful in exported flow
 		data["error"] = node.Status.Error
 		data["status"] = bm.Sanitize(node.Status.Status)
 		if node.Status.LastUpdateTime != nil {
 			data["last_status_update"] = node.Status.LastUpdateTime.Unix()
 		}
 	}
-	data["module"] = bm.Sanitize(node.Spec.Module)
-	data["module_version"] = bm.Sanitize(node.Status.Module.Version)
 
 	var keys []string
 	for k := range handlesMap {
@@ -496,6 +497,18 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 }
 
 func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
+	return ExportNodesWithOptions(nodesMap, false)
+}
+
+// ExportNodesMinimal exports nodes without redundant schemas.
+// Edge schemas are omitted (can be derived from target port at import time).
+// Handle schemas are omitted (static per component version).
+// Only edge configurations (user data) are preserved.
+func ExportNodesMinimal(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
+	return ExportNodesWithOptions(nodesMap, true)
+}
+
+func ExportNodesWithOptions(nodesMap map[string]v1alpha1.TinyNode, minimal bool) ([]interface{}, error) {
 
 	portStatusSchemaMap, portConfigMap, edgeConfigMap, portSchemaMap, targetPortMap, err := GetFlowMaps(nodesMap)
 	if err != nil {
@@ -523,7 +536,7 @@ func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
 			m["comment"] = comment
 		}
 
-		nodes = append(nodes, ApiNodeToMap(node, m, false))
+		nodes = append(nodes, ApiNodeToMap(node, m, minimal))
 
 		for _, edge := range node.Spec.Edges {
 			data := map[string]interface{}{}
@@ -551,11 +564,13 @@ func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
 					edgeConfiguration = pc.Configuration
 					edgeSchema = pc.Schema
 
-					if len(edgeSchema) == 0 {
-						// edge has no own configured schema, use schema from target port's status
-						edgeSchema = portStatusSchemaMap[edge.To]
+					if !minimal {
+						if len(edgeSchema) == 0 {
+							// edge has no own configured schema, use schema from target port's status
+							edgeSchema = portStatusSchemaMap[edge.To]
+						}
+						edgeSchema, _ = schema.UpdateWithDefinitions(edgeSchema, defs)
 					}
-					edgeSchema, _ = schema.UpdateWithDefinitions(edgeSchema, defs)
 
 					break
 				}
@@ -564,7 +579,7 @@ func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
 			if len(edgeConfiguration) > 0 {
 				data["configuration"] = json.RawMessage(edgeConfiguration)
 			}
-			if len(edgeSchema) > 0 {
+			if !minimal && len(edgeSchema) > 0 {
 				data["schema"] = json.RawMessage(edgeSchema)
 			}
 
