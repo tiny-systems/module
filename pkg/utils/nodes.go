@@ -495,27 +495,25 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 	return portStatusSchemaMap, portConfigMap, destinationsMap, portSchemaMap, targetPortsMap, nil
 }
 
+// ExportNodes exports flow nodes in a minimal format, omitting redundant data
+// that can be derived at runtime:
+// - Port schemas from Status.Ports (derived from component at runtime)
+// - Edge schemas that equal target port default (re-derived at import)
+// - Component description/info/version (lookup from component registry)
+// - Handle labels/positions (from component definition)
+// - Runtime error/status/last_update (runtime state)
 func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
-
-	portStatusSchemaMap, portConfigMap, edgeConfigMap, portSchemaMap, targetPortMap, err := GetFlowMaps(nodesMap)
+	portStatusSchemaMap, portConfigMap, _, _, _, err := GetFlowMaps(nodesMap)
 	if err != nil {
 		return nil, err
 	}
-
-	_ = edgeConfigMap
-	_ = targetPortMap
-	_ = portSchemaMap
 
 	var (
 		edges = make([]interface{}, 0)
 		nodes = make([]interface{}, 0)
 	)
 
-	// collect status port schemas
-
-	// MAIN LOOP
 	for nodeName, node := range nodesMap {
-
 		m := map[string]interface{}{}
 		comment := bluemonday.StrictPolicy().Sanitize(node.Annotations[v1alpha1.NodeCommentAnnotation])
 
@@ -523,7 +521,7 @@ func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
 			m["comment"] = comment
 		}
 
-		nodes = append(nodes, ApiNodeToMap(node, m, false))
+		nodes = append(nodes, ApiNodeToMapMinimal(node, m))
 
 		for _, edge := range node.Spec.Edges {
 			data := map[string]interface{}{}
@@ -531,9 +529,9 @@ func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
 			var (
 				edgeConfiguration []byte
 				edgeSchema        []byte
+				includeSchema     bool
 			)
 
-			// other node port configs
 			sourcePortConfigs, _ := portConfigMap[edge.To]
 			sourceNodeName, sourcePort := ParseFullPortName(edge.To)
 
@@ -541,30 +539,43 @@ func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
 			if !ok {
 				continue
 			}
-			var (
-				from = GetPortFullName(nodeName, edge.Port)
-				defs = GetConfigurableDefinitions(sourceNode, &from)
-			)
+
+			from := GetPortFullName(nodeName, edge.Port)
+			defs := GetConfigurableDefinitions(sourceNode, &from)
 
 			for _, pc := range sourcePortConfigs {
-				if pc.From == from && pc.Port == sourcePort {
-					edgeConfiguration = pc.Configuration
-					edgeSchema = pc.Schema
-
-					if len(edgeSchema) == 0 {
-						// edge has no own configured schema, use schema from target port's status
-						edgeSchema = portStatusSchemaMap[edge.To]
-					}
-					edgeSchema, _ = schema.UpdateWithDefinitions(edgeSchema, defs)
-
-					break
+				if pc.From != from || pc.Port != sourcePort {
+					continue
 				}
+
+				edgeConfiguration = pc.Configuration
+
+				// Only include schema if it differs from the default
+				if len(pc.Schema) > 0 {
+					defaultSchema := portStatusSchemaMap[edge.To]
+					// Check if schema has custom configurable definitions
+					if schema.HasCustomDefinitions(pc.Schema) {
+						includeSchema = true
+						edgeSchema = pc.Schema
+					} else if !schema.SchemasEqual(pc.Schema, defaultSchema) {
+						// Schema differs from default
+						includeSchema = true
+						edgeSchema = pc.Schema
+					}
+					// If schema equals default, omit it (will be re-derived at import)
+				}
+
+				if includeSchema && len(edgeSchema) > 0 {
+					edgeSchema, _ = schema.UpdateWithDefinitions(edgeSchema, defs)
+				}
+
+				break
 			}
 
 			if len(edgeConfiguration) > 0 {
 				data["configuration"] = json.RawMessage(edgeConfiguration)
 			}
-			if len(edgeSchema) > 0 {
+			if includeSchema && len(edgeSchema) > 0 {
 				data["schema"] = json.RawMessage(edgeSchema)
 			}
 
@@ -577,4 +588,139 @@ func ExportNodes(nodesMap map[string]v1alpha1.TinyNode) ([]interface{}, error) {
 	}
 
 	return append(edges, nodes...), nil
+}
+
+// ApiNodeToMapMinimal converts a TinyNode to a map for minimal export format.
+// It omits redundant data that can be derived at runtime:
+// - schema and configuration from handles (use defaults from component)
+// - component_info, component_description, module_version
+// - error, status, last_status_update
+func ApiNodeToMapMinimal(node v1alpha1.TinyNode, data map[string]interface{}) map[string]interface{} {
+	if data == nil {
+		data = map[string]interface{}{}
+	}
+
+	spin := 0
+	m := map[string]interface{}{
+		"type": "tinyNode",
+	}
+
+	position := map[string]interface{}{
+		"x": 600,
+		"y": 200,
+	}
+
+	if node.Annotations[v1alpha1.ComponentPosXAnnotation] != "" {
+		position["x"], _ = strconv.Atoi(node.Annotations[v1alpha1.ComponentPosXAnnotation])
+	}
+
+	if node.Annotations[v1alpha1.ComponentPosYAnnotation] != "" {
+		position["y"], _ = strconv.Atoi(node.Annotations[v1alpha1.ComponentPosYAnnotation])
+	}
+
+	if node.Annotations[v1alpha1.ComponentPosSpinAnnotation] != "" {
+		spin, _ = strconv.Atoi(node.Annotations[v1alpha1.ComponentPosSpinAnnotation])
+	}
+
+	label := node.Status.Component.Description
+	if node.Annotations[v1alpha1.NodeLabelAnnotation] != "" {
+		label = node.Annotations[v1alpha1.NodeLabelAnnotation]
+	}
+
+	m["position"] = position
+
+	defs := GetConfigurableDefinitions(node, nil)
+
+	// Build handles map with minimal data - only settings port with custom config
+	handlesMap := make(map[string]interface{})
+
+	// Get stored handle positions from annotations
+	var storedHandles map[string]interface{}
+	if node.Annotations[v1alpha1.NodeHandlesAnnotation] != "" {
+		_ = json.Unmarshal([]byte(node.Annotations[v1alpha1.NodeHandlesAnnotation]), &storedHandles)
+	}
+
+	// Build default handles from status (minimal - just structure)
+	for _, v := range node.Status.Ports {
+		var typ = "target"
+		if v.Source {
+			typ = "source"
+		}
+
+		ma := map[string]interface{}{
+			"id":               v.Name,
+			"type":             typ,
+			"position":         int(v.Position),
+			"rotated_position": (int(v.Position) + spin) % 4,
+			"label":            v.Label,
+		}
+
+		handlesMap[v.Name] = ma
+	}
+
+	// Process settings port configurations from Spec.Ports
+	for _, pc := range node.Spec.Ports {
+		if pc.From != "" {
+			// Skip edge configurations - handled separately
+			continue
+		}
+		if pc.Port != v1alpha1.SettingsPort {
+			// Only settings port should be saved in handles for minimal export
+			continue
+		}
+
+		if ma, ok := handlesMap[pc.Port].(map[string]interface{}); ok {
+			if len(pc.Configuration) > 0 {
+				ma["configuration"] = json.RawMessage(pc.Configuration)
+			}
+			if len(pc.Schema) > 0 {
+				updatedSchema, err := schema.UpdateWithDefinitions(pc.Schema, defs)
+				if err == nil {
+					ma["schema"] = json.RawMessage(updatedSchema)
+				} else {
+					ma["schema"] = json.RawMessage(pc.Schema)
+				}
+			}
+		}
+	}
+
+	bm := bluemonday.StrictPolicy()
+
+	data["component"] = bm.Sanitize(node.Spec.Component)
+	data["module"] = bm.Sanitize(node.Spec.Module)
+
+	// Omit: component_description, component_info, module_version, error, status, last_status_update
+	// These can be derived from component registry at runtime
+
+	var keys []string
+	for k := range handlesMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var handles []interface{}
+	for _, k := range keys {
+		handles = append(handles, handlesMap[k])
+	}
+
+	data["handles"] = handles
+	data["spin"] = spin
+
+	sw := bm.Sanitize(node.Annotations[v1alpha1.SharedWithFlowsAnnotation])
+	if len(sw) > 0 {
+		data["shared_with_flows"] = sw
+	}
+
+	dl := bm.Sanitize(node.Labels[v1alpha1.DashboardLabel])
+	if len(dl) > 0 {
+		data["dashboard"] = dl
+	}
+
+	data["flow_id"] = bm.Sanitize(node.Labels[v1alpha1.FlowNameLabel])
+	data["label"] = bm.Sanitize(label)
+
+	m["data"] = data
+	m["id"] = node.Name
+
+	return m
 }
