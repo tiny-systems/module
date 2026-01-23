@@ -463,3 +463,175 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 
 	return portConfigs
 }
+
+// UpdatePortConfigsFromRequestWithDefaults updates port configurations with support for
+// minimal export format. When schema is nil in the request (indicating the schema equals
+// the default), it uses the provided defaultSchemas map to populate the schema.
+//
+// The defaultSchemas map should be keyed by full port name (nodeID:portName) and contain
+// the default schema from Status.Ports.
+func UpdatePortConfigsFromRequestWithDefaults(
+	ports []v1alpha1.TinyNodePortConfig,
+	flowID, nodeID string,
+	requestMap RequestElementsMap,
+	defaultSchemas map[string][]byte,
+) []v1alpha1.TinyNodePortConfig {
+	elementInRequest, ok := requestMap[nodeID]
+	if !ok {
+		return ports
+	}
+
+	elementDataInRequest, ok := elementInRequest["data"].(map[string]interface{})
+	if !ok {
+		return ports
+	}
+
+	var portConfigs []v1alpha1.TinyNodePortConfig
+
+	// Preserve port configs from other flows
+	for _, port := range ports {
+		if port.FlowID == flowID || port.FlowID == "" || port.From == "" {
+			// Don't preserve internal port configs
+			continue
+		}
+		portConfigs = append(portConfigs, port)
+	}
+
+	var handlePorts []PortConfig
+
+	// Process handles (settings port)
+	if handles, ok := elementDataInRequest["handles"].([]interface{}); ok {
+		for _, handle := range handles {
+			handleMap, ok := handle.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			portName := GetStr(handleMap["id"])
+			if portName != v1alpha1.SettingsPort {
+				// Only settings handle should be saved as port config
+				continue
+			}
+
+			s := handleMap["schema"]
+			conf := handleMap["configuration"]
+			typ := GetStr(handleMap["type"])
+
+			handlePort := PortConfig{
+				Name: portName,
+			}
+			if typ == "source" {
+				handlePort.Source = true
+			}
+			if conf == nil {
+				continue
+			}
+
+			handlePort.Configuration, _ = json.Marshal(conf)
+
+			// Handle schema - use default if not provided (minimal format)
+			if s != nil {
+				handlePort.Schema, _ = json.Marshal(s)
+			} else if defaultSchemas != nil {
+				// Minimal format: schema was omitted, use default from Status.Ports
+				fullPortName := GetPortFullName(nodeID, portName)
+				if defaultSchema, hasDefault := defaultSchemas[fullPortName]; hasDefault {
+					handlePort.Schema = defaultSchema
+				}
+			}
+
+			handlePorts = append(handlePorts, handlePort)
+		}
+	}
+
+	// Process edges targeting this node
+	for _, edge := range requestMap {
+		if !IsEdge(edge) {
+			continue
+		}
+		if GetStr(edge["source"]) == nodeID {
+			continue
+		}
+		if GetStr(edge["target"]) != nodeID {
+			continue
+		}
+
+		edgeData, ok := edge["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		fromNode := GetStr(edge["source"])
+		fromPort := GetStr(edge["sourceHandle"])
+		toHandle := GetStr(edge["targetHandle"])
+
+		conf := edgeData["configuration"]
+		sc := edgeData["schema"]
+
+		handlePort := PortConfig{
+			From: GetPortFullName(fromNode, fromPort),
+			Name: toHandle,
+		}
+
+		if conf != nil {
+			handlePort.Configuration, _ = json.Marshal(conf)
+		}
+
+		// Handle schema - use default if not provided (minimal format)
+		if sc != nil {
+			handlePort.Schema, _ = json.Marshal(sc)
+		} else if defaultSchemas != nil {
+			// Minimal format: schema was omitted, use default from Status.Ports
+			fullPortName := GetPortFullName(nodeID, toHandle)
+			if defaultSchema, hasDefault := defaultSchemas[fullPortName]; hasDefault {
+				handlePort.Schema = defaultSchema
+			}
+		}
+
+		handlePorts = append(handlePorts, handlePort)
+	}
+
+	// Convert to TinyNodePortConfig
+	for _, hp := range handlePorts {
+		if len(hp.Configuration) == 0 && len(hp.Schema) == 0 {
+			continue
+		}
+		if hp.From == "" && hp.Source {
+			continue
+		}
+
+		pc := v1alpha1.TinyNodePortConfig{
+			From:          hp.From,
+			Port:          hp.Name,
+			Configuration: hp.Configuration,
+			Schema:        hp.Schema,
+			FlowID:        flowID,
+		}
+		portConfigs = append(portConfigs, pc)
+	}
+
+	// Sort for consistent ordering
+	sort.Slice(portConfigs, func(i, j int) bool {
+		hash1, _ := hashstructure.Hash(portConfigs[i], hashstructure.FormatV2, nil)
+		hash2, _ := hashstructure.Hash(portConfigs[j], hashstructure.FormatV2, nil)
+		return hash1 < hash2
+	})
+
+	return portConfigs
+}
+
+// BuildDefaultSchemasMap creates a map of full port names to their default schemas
+// from the Status.Ports of nodes. This is used by UpdatePortConfigsFromRequestWithDefaults
+// to populate missing schemas when importing minimal format exports.
+func BuildDefaultSchemasMap(nodesMap map[string]v1alpha1.TinyNode) map[string][]byte {
+	result := make(map[string][]byte)
+	for nodeName, node := range nodesMap {
+		for _, port := range node.Status.Ports {
+			if len(port.Schema) > 0 {
+				fullPortName := GetPortFullName(nodeName, port.Name)
+				result[fullPortName] = port.Schema
+			}
+		}
+	}
+	return result
+}
