@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/tiny-systems/otel-collector
   pullPolicy: Always
-  tag: "0.5.1"
+  tag: "0.5.2"
 
 imagePullSecrets: []
 nameOverride: ""

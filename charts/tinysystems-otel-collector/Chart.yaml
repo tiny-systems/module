@@ -2,5 +2,5 @@ apiVersion: v2
 name: tinysystems-otel-collector
 description: A minimalistic Helm chart for OpenTelemetry Collector
 type: application
-version: 0.1.2
+version: 0.1.3
 appVersion: "1.0"
