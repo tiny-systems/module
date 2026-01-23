@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -286,8 +287,8 @@ func (c *StatsClient) GetTraceByID(ctx context.Context, projectID, traceID strin
 		}
 
 		spans[i] = Span{
-			TraceID:           string(s.TraceId),
-			SpanID:            string(s.SpanId),
+			TraceID:           hex.EncodeToString(s.TraceId),
+			SpanID:            hex.EncodeToString(s.SpanId),
 			Name:              s.Name,
 			StartTimeUnixNano: int64(s.StartTimeUnixNano),
 			EndTimeUnixNano:   int64(s.EndTimeUnixNano),
