@@ -396,8 +396,8 @@ github.com/swaggest/jsonschema-go v0.3.70 h1:8Vx5nm5t/6DBFw2+WC0/Vp1ZVe9/4mpuA0t
 github.com/swaggest/jsonschema-go v0.3.70/go.mod h1:7N43/CwdaWgPUDfYV70K7Qm79tRqe/al7gLSt9YeGIE=
 github.com/swaggest/refl v1.3.0 h1:PEUWIku+ZznYfsoyheF97ypSduvMApYyGkYF3nabS0I=
 github.com/swaggest/refl v1.3.0/go.mod h1:3Ujvbmh1pfSbDYjC6JGG7nMgPvpG0ehQL4iNonnLNbg=
-github.com/tiny-systems/ajson v0.1.3 h1:qklS93ubEFReG7sFa86SW5SFFjaX7UzCncdmQtqRxVo=
-github.com/tiny-systems/ajson v0.1.3/go.mod h1:a6oSw0MMb7Z5aD2tPoPO+jq11ETKgXUr2XktHdT8Wt8=
+github.com/tiny-systems/ajson v0.1.4 h1:cp/cnjAXR4laT3Xp6Bb4YPxj39JKC5oAp39cfhkksKA=
+github.com/tiny-systems/ajson v0.1.4/go.mod h1:a6oSw0MMb7Z5aD2tPoPO+jq11ETKgXUr2XktHdT8Wt8=
 github.com/tiny-systems/errorpanic v0.7.1 h1:GgbimfhC2wnQ8012SGGxh743ryaJXSSD7boLK+IQ0Xs=
 github.com/tiny-systems/errorpanic v0.7.1/go.mod h1:AQobicdSB/J3RzN81pTG4dqgcULaEIrEOvNC8TpSgxw=
 github.com/tiny-systems/otel-collector v0.5.1 h1:tylLj7f7O7n5o9R383Lojd0fN7j5jgZ76zFshJ0SE6c=
