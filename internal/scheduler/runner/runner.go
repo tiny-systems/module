@@ -416,12 +416,16 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		return nil, err
 	}
 
-	ctx, inputSpan := c.tracer.Start(ctx, u.String(),
+	// Use background context for span creation so context cancellation doesn't
+	// interfere with telemetry data submission
+	spanCtx, inputSpan := c.tracer.Start(context.Background(), u.String(),
 		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
 		trace.WithAttributes(attribute.String("from", msg.From)),
 		trace.WithAttributes(attribute.String("flowID", c.flowName)),
 		trace.WithAttributes(attribute.String("projectID", c.projectName)),
 	)
+	// Link the span context to the request context for propagation
+	ctx = trace.ContextWithSpanContext(ctx, trace.SpanContextFromContext(spanCtx))
 
 	defer func() {
 		if err != nil {
@@ -563,7 +567,9 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			return err
 		}
 
-		outputCtx, outputSpan := c.tracer.Start(outputCtx, u.String(), trace.WithAttributes(
+		// Use background context for span creation so context cancellation doesn't
+		// interfere with telemetry data submission
+		spanCtx, outputSpan := c.tracer.Start(context.Background(), u.String(), trace.WithAttributes(
 			attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
 			attribute.String("flowID", c.flowName),
 			attribute.String("projectID", c.projectName),
@@ -577,7 +583,8 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			c.addSpanPortData(outputSpan, string(outputDataBytes))
 		}
 
-		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler)
+		// Link span context to output context for propagation
+		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(spanCtx)), outputPort, outputData, outputHandler)
 		if err != nil {
 			c.log.Error(err, "data handler: output handler failed",
 				"port", outputPort,
