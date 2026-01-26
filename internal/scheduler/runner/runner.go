@@ -416,12 +416,17 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		return nil, err
 	}
 
-	ctx, inputSpan := c.tracer.Start(ctx, u.String(),
+	// Create non-cancellable context that preserves parent span for proper trace hierarchy
+	// This ensures context cancellation doesn't interfere with telemetry submission
+	spanCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
+	spanCtx, inputSpan := c.tracer.Start(spanCtx, u.String(),
 		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
 		trace.WithAttributes(attribute.String("from", msg.From)),
 		trace.WithAttributes(attribute.String("flowID", c.flowName)),
 		trace.WithAttributes(attribute.String("projectID", c.projectName)),
 	)
+	// Update ctx with new span for downstream propagation
+	ctx = trace.ContextWithSpanContext(ctx, trace.SpanContextFromContext(spanCtx))
 
 	defer func() {
 		if err != nil {
@@ -563,7 +568,10 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			return err
 		}
 
-		outputCtx, outputSpan := c.tracer.Start(outputCtx, u.String(), trace.WithAttributes(
+		// Create non-cancellable context that preserves parent span for proper trace hierarchy
+		// This ensures context cancellation doesn't interfere with telemetry submission
+		spanCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(outputCtx))
+		spanCtx, outputSpan := c.tracer.Start(spanCtx, u.String(), trace.WithAttributes(
 			attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
 			attribute.String("flowID", c.flowName),
 			attribute.String("projectID", c.projectName),
@@ -577,7 +585,8 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			c.addSpanPortData(outputSpan, string(outputDataBytes))
 		}
 
-		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(outputCtx)), outputPort, outputData, outputHandler)
+		// Pass span context to downstream for trace propagation
+		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(spanCtx)), outputPort, outputData, outputHandler)
 		if err != nil {
 			c.log.Error(err, "data handler: output handler failed",
 				"port", outputPort,
