@@ -651,7 +651,8 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 	return c
 }
 
-// Stop cancels all ongoing requests and calls component cleanup if implemented
+// Stop cancels all ongoing requests and calls component cleanup if implemented.
+// Use this when the TinyNode is being deleted and cleanup is required.
 func (c *Runner) Stop() {
 	// Flush any pending reconcile updates before stopping
 	if c.reconcileDebouncer != nil {
@@ -668,6 +669,19 @@ func (c *Runner) Stop() {
 			metadata = make(map[string]string)
 		}
 		destroyer.OnDestroy(metadata)
+	}
+
+	close(c.closeCh)
+}
+
+// StopWithoutCleanup cancels all ongoing requests but does NOT call OnDestroy.
+// Use this during pod shutdown when the TinyNode still exists and will be
+// picked up by another pod. OnDestroy should only be called when the node
+// is actually being deleted.
+func (c *Runner) StopWithoutCleanup() {
+	// Flush any pending reconcile updates before stopping
+	if c.reconcileDebouncer != nil {
+		c.reconcileDebouncer.Flush()
 	}
 
 	close(c.closeCh)
