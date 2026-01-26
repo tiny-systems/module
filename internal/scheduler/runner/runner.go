@@ -329,9 +329,15 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		return nil, nil
 	}
 
+	type exprError struct {
+		expr string
+		err  error
+	}
+
 	var (
 		portConfig = c.getPortConfig(msg.From, port)
 		portData   interface{}
+		exprErrors []exprError // Collect expression errors for later span recording
 	)
 
 	portInputData := reflect.New(reflect.TypeOf(nodePort.Configuration)).Elem()
@@ -366,6 +372,14 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 				return nil, err
 			}
 			return resultUnpack, nil
+		}).WithErrorCallback(func(expr string, err error) {
+			exprErrors = append(exprErrors, exprError{expr: expr, err: err})
+			c.log.Error(err, "expression evaluation failed",
+				"expression", expr,
+				"port", port,
+				"from", msg.From,
+				"edgeID", msg.EdgeID,
+			)
 		})
 
 		configurationMap, err := eval.Eval(portConfig.Configuration)
@@ -427,6 +441,16 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	)
 	// Update ctx with new span for downstream propagation
 	ctx = trace.ContextWithSpanContext(ctx, trace.SpanContextFromContext(spanCtx))
+
+	// Record any expression evaluation errors to span
+	for _, exprErr := range exprErrors {
+		inputSpan.AddEvent("expression_error",
+			trace.WithAttributes(
+				attribute.String("expression", exprErr.expr),
+				attribute.String("error", exprErr.err.Error()),
+			),
+		)
+	}
 
 	defer func() {
 		if err != nil {
