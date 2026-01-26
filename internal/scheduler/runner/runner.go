@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 )
 
 type Runner struct {
@@ -417,7 +418,8 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	// Create non-cancellable context that preserves parent span for proper trace hierarchy
 	// This ensures context cancellation doesn't interfere with telemetry submission
-	spanCtx, inputSpan := c.tracer.Start(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), u.String(),
+	spanCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
+	spanCtx, inputSpan := c.tracer.Start(spanCtx, u.String(),
 		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
 		trace.WithAttributes(attribute.String("from", msg.From)),
 		trace.WithAttributes(attribute.String("flowID", c.flowName)),
@@ -745,6 +747,14 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 
 	c.nodeLock.Unlock()
 
+	wg, ctx := errgroup.WithContext(ctx)
+
+	var (
+		results    = make([]any, 0)
+		errors     = make([]error, 0)
+		resultLock = &sync.Mutex{}
+	)
+
 	var sourcePort m.Port
 	for _, p := range c.getPorts() {
 		if p.Name == port {
@@ -754,66 +764,37 @@ func (c *Runner) outputHandler(ctx context.Context, port string, data interface{
 	}
 
 	fromPort := utils.GetPortFullName(c.name, port)
-
-	// Filter edges for this port
-	var matchingEdges []v1alpha1.TinyNodeEdge
 	for _, e := range edges {
-		if e.Port == port {
-			matchingEdges = append(matchingEdges, e)
-		}
-	}
-
-	// Single edge - simple path, no concurrency needed
-	if len(matchingEdges) == 1 {
-		res, err := c.sendToEdgeWithRetry(ctx, matchingEdges[0], fromPort, matchingEdges[0].To, dataBytes, sourcePort.ResponseConfiguration, handler)
-		if err != nil {
-			return nil, err
-		}
-		return res, nil
-	}
-
-	// Multiple edges - fan out with early response return
-	// Return first valid response immediately, let other edges complete in background
-	type edgeResult struct {
-		res any
-		err error
-	}
-	resultCh := make(chan edgeResult, len(matchingEdges))
-
-	// Launch all edges concurrently
-	for _, edge := range matchingEdges {
-		go func(e v1alpha1.TinyNodeEdge) {
-			res, err := c.sendToEdgeWithRetry(ctx, e, fromPort, e.To, dataBytes, sourcePort.ResponseConfiguration, handler)
-			resultCh <- edgeResult{res: res, err: err}
-		}(edge)
-	}
-
-	// Wait for first valid response or all edges to complete
-	var (
-		firstError error
-		collected  int
-	)
-
-	for collected < len(matchingEdges) {
-		result := <-resultCh
-		collected++
-
-		// Return immediately on first valid response
-		// Other edges continue in background - their goroutines will complete
-		// and send to the buffered channel (which will be GC'd)
-		if !utils.IsNil(result.res) {
-			return result.res, nil
+		edge := e
+		if edge.Port != port {
+			continue
 		}
 
-		// Track first error in case no valid responses arrive
-		if firstError == nil && result.err != nil {
-			firstError = result.err
-		}
+		wg.Go(func() error {
+			res, err := c.sendToEdgeWithRetry(ctx, edge, fromPort, edge.To, dataBytes, sourcePort.ResponseConfiguration, handler)
+
+			resultLock.Lock()
+			defer resultLock.Unlock()
+
+			if err != nil {
+				errors = append(errors, err)
+				return nil
+			}
+			// Use IsNil to catch typed nils (e.g., (*T)(nil)) which != nil but are meaningless
+			if !utils.IsNil(res) {
+				results = append(results, res)
+			}
+			return nil
+		})
 	}
 
-	// All edges completed without a valid response
-	if firstError != nil {
-		return nil, firstError
+	_ = wg.Wait()
+
+	if len(results) > 0 {
+		return results[0], nil
+	}
+	if len(errors) > 0 {
+		return nil, errors[0]
 	}
 	return nil, nil
 }
