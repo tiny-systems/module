@@ -9,9 +9,11 @@ import (
 )
 
 type Callback func(expression string) (interface{}, error)
+type ErrorCallback func(expression string, err error)
 
 type Evaluator struct {
 	callback Callback
+	onError  ErrorCallback
 }
 
 var DefaultCallback Callback = func(expression string) (interface{}, error) {
@@ -29,6 +31,12 @@ func NewEvaluator(callback Callback) *Evaluator {
 		callback = DefaultCallback
 	}
 	return &Evaluator{callback: callback}
+}
+
+// WithErrorCallback sets an error callback for reporting expression evaluation errors
+func (c *Evaluator) WithErrorCallback(onError ErrorCallback) *Evaluator {
+	c.onError = onError
+	return c
 }
 
 func (c *Evaluator) calculateResult(valNode *ajson.Node) (interface{}, error) {
@@ -82,10 +90,14 @@ func (c *Evaluator) evaluateString(str string) (interface{}, error) {
 	// Check if the entire string is a single {{expression}}
 	// In this case, return the actual type (number, bool, object, etc.)
 	if matches := pureExprPattern.FindStringSubmatch(str); len(matches) == 2 {
-		result, err := c.callback(strings.TrimSpace(matches[1]))
+		expr := strings.TrimSpace(matches[1])
+		result, err := c.callback(expr)
 		if err != nil {
-			// If callback fails (e.g., source data unavailable), return nil
-			// This allows downstream code to continue with missing data
+			// Report error via callback if set
+			if c.onError != nil {
+				c.onError(expr, err)
+			}
+			// Return nil to allow downstream code to continue with missing data
 			return nil, nil
 		}
 		return result, nil
@@ -103,7 +115,11 @@ func (c *Evaluator) evaluateString(str string) (interface{}, error) {
 		expr := strings.TrimSpace(match[2 : len(match)-2])
 		val, err := c.callback(expr)
 		if err != nil {
-			// If callback fails, leave expression unevaluated
+			// Report error via callback if set
+			if c.onError != nil {
+				c.onError(expr, err)
+			}
+			// Leave expression unevaluated so user can see what failed
 			return match
 		}
 		if val == nil {
