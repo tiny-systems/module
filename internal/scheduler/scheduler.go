@@ -223,51 +223,12 @@ func (s *Schedule) sendMsg(ctx context.Context, instance *runner.Runner, msg *ru
 }
 
 func (s *Schedule) Destroy(name string) error {
-	instance, ok := s.instancesMap.Get(name)
-	if !ok || instance == nil {
-		return nil
+	if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
+		// remove from map first so no one can access it
+		s.instancesMap.Remove(name)
+		instance.Stop()
 	}
-
-	// remove from map first so no one can access it
-	s.instancesMap.Remove(name)
-
-	// Clean up exposed ports from node metadata before stopping
-	s.cleanupExposedPorts(instance)
-
-	instance.Stop()
 	return nil
-}
-
-// cleanupExposedPorts removes any exposed ports from Service/Ingress based on node metadata
-func (s *Schedule) cleanupExposedPorts(instance *runner.Runner) {
-	if s.manager == nil {
-		return
-	}
-
-	node := instance.Node()
-	if node.Status.Metadata == nil {
-		return
-	}
-
-	// Check for port in metadata (used by http-server component)
-	portStr, ok := node.Status.Metadata["port"]
-	if !ok || portStr == "" {
-		return
-	}
-
-	port := 0
-	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil || port == 0 {
-		return
-	}
-
-	s.log.Info("cleanup exposed port on destroy", "node", node.Name, "port", port)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
-
-	if err := s.manager.DisclosePort(ctx, port); err != nil {
-		s.log.Error(err, "failed to cleanup exposed port", "node", node.Name, "port", port)
-	}
 }
 
 // HasInstance checks if an instance exists for the given node name
