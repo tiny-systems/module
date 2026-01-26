@@ -46,8 +46,6 @@ type ManagerInterface interface {
 	DeleteNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	GetNode(ctx context.Context, name, namespace string) (*v1alpha1.TinyNode, error)
 	CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte) error
-	// DisclosePort removes a port from Service and Ingress rules
-	DisclosePort(ctx context.Context, port int) error
 }
 
 func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
