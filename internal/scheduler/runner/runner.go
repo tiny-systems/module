@@ -618,12 +618,25 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 	return c
 }
 
-// Stop cancels all ongoing requests
+// Stop cancels all ongoing requests and calls component cleanup if implemented
 func (c *Runner) Stop() {
 	// Flush any pending reconcile updates before stopping
 	if c.reconcileDebouncer != nil {
 		c.reconcileDebouncer.Flush()
 	}
+
+	// Call OnDestroy on the component if it implements Destroyer interface
+	if destroyer, ok := c.component.(m.Destroyer); ok {
+		c.nodeLock.Lock()
+		metadata := c.node.Status.Metadata
+		c.nodeLock.Unlock()
+
+		if metadata == nil {
+			metadata = make(map[string]string)
+		}
+		destroyer.OnDestroy(metadata)
+	}
+
 	close(c.closeCh)
 }
 
