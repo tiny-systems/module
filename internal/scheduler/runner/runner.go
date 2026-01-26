@@ -416,15 +416,16 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		return nil, err
 	}
 
-	// Use background context for span creation so context cancellation doesn't
-	// interfere with telemetry data submission
-	spanCtx, inputSpan := c.tracer.Start(context.Background(), u.String(),
+	// Create non-cancellable context that preserves parent span for proper trace hierarchy
+	// This ensures context cancellation doesn't interfere with telemetry submission
+	spanCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
+	spanCtx, inputSpan := c.tracer.Start(spanCtx, u.String(),
 		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
 		trace.WithAttributes(attribute.String("from", msg.From)),
 		trace.WithAttributes(attribute.String("flowID", c.flowName)),
 		trace.WithAttributes(attribute.String("projectID", c.projectName)),
 	)
-	// Link the span context to the request context for propagation
+	// Update ctx with new span for downstream propagation
 	ctx = trace.ContextWithSpanContext(ctx, trace.SpanContextFromContext(spanCtx))
 
 	defer func() {
@@ -567,9 +568,10 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			return err
 		}
 
-		// Use background context for span creation so context cancellation doesn't
-		// interfere with telemetry data submission
-		spanCtx, outputSpan := c.tracer.Start(context.Background(), u.String(), trace.WithAttributes(
+		// Create non-cancellable context that preserves parent span for proper trace hierarchy
+		// This ensures context cancellation doesn't interfere with telemetry submission
+		spanCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(outputCtx))
+		spanCtx, outputSpan := c.tracer.Start(spanCtx, u.String(), trace.WithAttributes(
 			attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
 			attribute.String("flowID", c.flowName),
 			attribute.String("projectID", c.projectName),
@@ -583,7 +585,7 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			c.addSpanPortData(outputSpan, string(outputDataBytes))
 		}
 
-		// Link span context to output context for propagation
+		// Pass span context to downstream for trace propagation
 		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(spanCtx)), outputPort, outputData, outputHandler)
 		if err != nil {
 			c.log.Error(err, "data handler: output handler failed",
