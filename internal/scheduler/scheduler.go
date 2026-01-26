@@ -366,7 +366,14 @@ func (s *Schedule) Start(ctx context.Context) error {
 	<-ctx.Done()
 	s.log.Info("shutting down all scheduler instances")
 	for _, name := range s.instancesMap.Keys() {
-		_ = s.Destroy(name)
+		// Use StopWithoutCleanup instead of Destroy during pod shutdown.
+		// The TinyNode CRDs still exist and will be picked up by the new pod.
+		// OnDestroy should only be called when a node is actually deleted
+		// (via controller reconciliation with deletion timestamp).
+		if instance, ok := s.instancesMap.Get(name); ok && instance != nil {
+			s.instancesMap.Remove(name)
+			instance.StopWithoutCleanup()
+		}
 	}
 	s.log.Info("scheduler is waiting for errgroup done")
 	return s.errGroup.Wait()
