@@ -773,6 +773,83 @@ func TestEvaluator_Eval_PassEntireMessage(t *testing.T) {
 	}
 }
 
+func TestEvaluator_WithErrorCallback(t *testing.T) {
+	var capturedErrors []struct {
+		expr string
+		err  string
+	}
+
+	callback := func(expression string) (interface{}, error) {
+		if expression == "$.valid" {
+			return "valid value", nil
+		}
+		return nil, fmt.Errorf("unknown path: %s", expression)
+	}
+
+	onError := func(expr string, err error) {
+		capturedErrors = append(capturedErrors, struct {
+			expr string
+			err  string
+		}{expr: expr, err: err.Error()})
+	}
+
+	eval := NewEvaluator(callback).WithErrorCallback(onError)
+
+	t.Run("pure expression error captured", func(t *testing.T) {
+		capturedErrors = nil
+		data := `{"field": "{{$.missing}}"}`
+		_, err := eval.Eval([]byte(data))
+		if err != nil {
+			t.Fatalf("Eval() should not return error, got: %v", err)
+		}
+		if len(capturedErrors) != 1 {
+			t.Fatalf("expected 1 error captured, got %d", len(capturedErrors))
+		}
+		if capturedErrors[0].expr != "$.missing" {
+			t.Errorf("captured expr = %q, want %q", capturedErrors[0].expr, "$.missing")
+		}
+	})
+
+	t.Run("interpolation error captured", func(t *testing.T) {
+		capturedErrors = nil
+		data := `{"greeting": "Hello {{$.missing}}!"}`
+		got, err := eval.Eval([]byte(data))
+		if err != nil {
+			t.Fatalf("Eval() should not return error, got: %v", err)
+		}
+		if len(capturedErrors) != 1 {
+			t.Fatalf("expected 1 error captured, got %d", len(capturedErrors))
+		}
+		// Check expression was left unevaluated
+		result := got.(map[string]interface{})
+		if result["greeting"] != "Hello {{$.missing}}!" {
+			t.Errorf("greeting = %v, want 'Hello {{$.missing}}!'", result["greeting"])
+		}
+	})
+
+	t.Run("multiple errors captured", func(t *testing.T) {
+		capturedErrors = nil
+		data := `{"a": "{{$.missing1}}", "b": "{{$.missing2}}", "c": "{{$.valid}}"}`
+		_, err := eval.Eval([]byte(data))
+		if err != nil {
+			t.Fatalf("Eval() should not return error, got: %v", err)
+		}
+		if len(capturedErrors) != 2 {
+			t.Fatalf("expected 2 errors captured, got %d", len(capturedErrors))
+		}
+	})
+
+	t.Run("no callback no panic", func(t *testing.T) {
+		evalNoCallback := NewEvaluator(callback)
+		data := `{"field": "{{$.missing}}"}`
+		_, err := evalNoCallback.Eval([]byte(data))
+		if err != nil {
+			t.Fatalf("Eval() should not return error, got: %v", err)
+		}
+		// Should not panic, just silently ignore
+	})
+}
+
 // Helper function to compare interfaces (handles nested maps and slices)
 func compareInterface(got, want interface{}) bool {
 	switch wantVal := want.(type) {

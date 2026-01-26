@@ -62,6 +62,21 @@ func ExtractTraceStatistics(trace *TraceData) (*TraceStatistics, map[string][]by
 					}
 				}
 			}
+			// Also capture expression evaluation errors
+			if e.Name == "expression_error" {
+				var expr, exprErr string
+				for _, a := range e.Attributes {
+					switch a.Key {
+					case "expression":
+						expr = a.Value
+					case "error":
+						exprErr = a.Value
+					}
+				}
+				if expr != "" && exprErr != "" {
+					errMsg = fmt.Sprintf("expression {{%s}}: %s", expr, exprErr)
+				}
+			}
 		}
 
 		latency := float64((span.EndTimeUnixNano - span.StartTimeUnixNano) / 1000_000)
