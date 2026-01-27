@@ -57,35 +57,32 @@ func (r *TinyTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	l := log.FromContext(ctx)
 
-	if !r.IsLeader.Load() {
-		return reconcile.Result{}, nil
-	}
-	// only leaders process signals
+	// All pods need tracker registration for span data capture
+	// Registration is read-only state needed by all replicas to add data to spans
 
 	t := &operatorv1alpha1.TinyTracker{}
 
 	err := r.Get(ctx, req.NamespacedName, t)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Object not found, return.  Created objects are automatically garbage collected.
-			// For additional cleanup logic use finalizers.
+			// Object not found - deregister from local tracker manager
 			err = r.Manager.Deregister(req.Name)
 		}
-		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
 
+	// Cleanup old trackers - only leader should delete to avoid multiple API calls
 	ago := v1.NewTime(time.Now().Add(-time.Minute * 60))
-
 	if t.CreationTimestamp.Before(&ago) {
-		_ = r.Delete(ctx, t)
+		if r.IsLeader.Load() {
+			_ = r.Delete(ctx, t)
+		}
 		return reconcile.Result{Requeue: true}, nil
 	}
 
+	// Register tracker on ALL pods so tracker.Active() works everywhere
 	err = r.Manager.Register(*t)
 	if err != nil {
-		// create event maybe?
-		//r.Recorder.Event(instance, "Error", "test", "Configuration")
 		l.Error(err, "register tracker error")
 		return reconcile.Result{}, err
 	}
