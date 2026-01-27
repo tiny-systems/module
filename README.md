@@ -140,6 +140,31 @@ Edges connect ports between nodes and support data transformation using mustache
 - Graceful error handling: If source data is unavailable, expressions return `nil`
 - Full JSONPath support via [ajson](https://github.com/spyzhov/ajson) library
 
+**Built-in Functions**:
+
+The expression engine includes many built-in functions:
+
+| Category | Functions |
+|----------|-----------|
+| **Array** | `length()`, `first()`, `last()`, `avg()`, `sum()`, `size()` |
+| **String** | `upper()`, `lower()`, `trim()`, `reverse()`, `b64encode()`, `b64decode()` |
+| **String (multi-arg)** | `split(str, sep)`, `join(arr, sep)`, `contains(str, sub)`, `hasprefix(str, prefix)`, `hassuffix(str, suffix)`, `replace(str, old, new)`, `substr(str, start[, len])`, `index(str, sub)` |
+| **Math** | `abs()`, `ceil()`, `floor()`, `round()`, `sqrt()`, `pow10()` |
+| **Logic** | `not()`, ternary `? :` |
+
+**String Function Examples**:
+```json
+{
+  "kind": "{{first(split($.target, '/'))}}",
+  "name": "{{last(split($.target, '/'))}}",
+  "hasNamespace": "{{contains($.args, '-n ')}}",
+  "upperName": "{{upper($.name)}}",
+  "label": "{{replace($.label, '=', ': ')}}",
+  "domain": "{{first(split(last(split($.url, '//')), '/'))}}",
+  "message": "{{hasprefix($.error, 'NotFound') ? 'Resource not found' : $.error}}"
+}
+```
+
 ### SDK Components
 
 The SDK provides several packages for module developers:

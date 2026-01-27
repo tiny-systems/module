@@ -210,4 +210,4 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 )
 
-replace github.com/spyzhov/ajson v0.9.4 => github.com/tiny-systems/ajson v0.1.4
+replace github.com/spyzhov/ajson v0.9.4 => github.com/tiny-systems/ajson v0.1.5
