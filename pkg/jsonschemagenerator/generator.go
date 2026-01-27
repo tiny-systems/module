@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/brianvoe/gofakeit/v6"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 )
 
 /*

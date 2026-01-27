@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/pkg/errors"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 	"github.com/swaggest/jsonschema-go"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"

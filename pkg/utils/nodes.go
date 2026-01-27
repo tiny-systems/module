@@ -5,7 +5,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/rs/zerolog/log"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/pkg/schema"
 	"sort"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 )
 
 // RunExpressionRequest contains the input for expression evaluation

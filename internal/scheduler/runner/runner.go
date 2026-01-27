@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/tracker"

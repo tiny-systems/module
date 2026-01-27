@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 )
 
 type Callback func(expression string) (interface{}, error)

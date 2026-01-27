@@ -138,7 +138,7 @@ Edges connect ports between nodes and support data transformation using mustache
 **Key Features**:
 - Type preservation: `"{{$.count}}"` returns a number, not a string
 - Graceful error handling: If source data is unavailable, expressions return `nil`
-- Full JSONPath support via [ajson](https://github.com/spyzhov/ajson) library
+- Full JSONPath support via [ajson](https://github.com/tiny-systems/ajson) library
 
 **Built-in Functions**:
 

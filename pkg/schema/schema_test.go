@@ -1,7 +1,7 @@
 package schema
 
 import (
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 	"reflect"
 	"testing"
 )
