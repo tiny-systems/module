@@ -813,6 +813,52 @@ func TestHello(t *testing.T) {
 6. **Use Permanent Errors**: Don't retry validation errors or user mistakes
 7. **Add Observability**: Create spans for long operations
 8. **Document with Tags**: Use meaningful tags in `GetInfo()` for discoverability
+9. **Always Return Handler Results**: See critical section below
+
+#### CRITICAL: Handler Response Propagation
+
+**ALWAYS return the result of `handler()` calls. Never ignore the return value.**
+
+The TinySystems SDK uses blocking I/O for request-response patterns. When a component like HTTP Server sends a request, it **blocks** waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out.
+
+**BAD - Breaks blocking I/O:**
+```go
+func (c *Component) handleError(ctx context.Context, handler module.Handler, req Request, errMsg string) any {
+    if c.settings.EnableErrorPort {
+        _ = handler(ctx, "error", Error{...})  // WRONG: ignores return value!
+        return nil  // Response is lost, HTTP Server times out
+    }
+    return errors.New(errMsg)
+}
+```
+
+**GOOD - Propagates response correctly:**
+```go
+func (c *Component) handleError(ctx context.Context, handler module.Handler, req Request, errMsg string) any {
+    if c.settings.EnableErrorPort {
+        return handler(ctx, "error", Error{...})  // CORRECT: returns handler result
+    }
+    return errors.New(errMsg)
+}
+```
+
+**Why this matters:**
+
+When HTTP Server → Slack Command → Router → HTTP Server:Response:
+
+1. HTTP Server blocks on `handler(ctx, "request", req)`
+2. Message flows to Slack Command via gRPC
+3. Slack Command processes and calls `handler(ctx, "error", error)`
+4. Edge transforms Error → Response and sends to HTTP Server's response port
+5. HTTP Server's `handleResponse()` returns the Response
+6. **Response must flow back through the entire chain** to unblock HTTP Server
+
+If Slack Command does `_ = handler(...)` and returns `nil`, the Response is lost.
+
+**Rules:**
+- Always `return handler(ctx, port, data)` for output ports
+- Exception: `_reconcile` port calls can ignore returns (internal system port)
+- Exception: Fire-and-forget async operations where no response is expected
 
 #### Component Naming Convention
 
