@@ -2,7 +2,7 @@ package evaluator
 
 import (
 	"fmt"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 	"time"
 )
 

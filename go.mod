@@ -75,8 +75,8 @@ require (
 	github.com/rs/zerolog v1.31.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/spf13/cobra v1.10.1
-	github.com/spyzhov/ajson v0.9.4
 	github.com/swaggest/jsonschema-go v0.3.70
+	github.com/tiny-systems/ajson v0.1.6
 	github.com/tiny-systems/errorpanic v0.7.1
 	github.com/tiny-systems/otel-collector v0.5.1
 	github.com/tiny-systems/platform-api v0.0.14
@@ -209,5 +209,3 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 )
-
-replace github.com/spyzhov/ajson v0.9.4 => github.com/tiny-systems/ajson v0.1.5
