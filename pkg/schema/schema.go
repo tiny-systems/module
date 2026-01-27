@@ -3,7 +3,7 @@ package schema
 import (
 	"fmt"
 	"github.com/pkg/errors"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 )
 
 // UpdateWithDefinitions parses schema and update all definitions in it by using map of ajson.nodes

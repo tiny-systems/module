@@ -4,7 +4,7 @@ import (
 	"reflect"
 
 	"github.com/goccy/go-json"
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 )
 
 // SchemasEqual compares two JSON schemas for semantic equality.

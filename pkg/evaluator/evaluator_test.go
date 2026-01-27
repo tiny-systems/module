@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spyzhov/ajson"
+	"github.com/tiny-systems/ajson"
 )
 
 func TestNewEvaluator(t *testing.T) {
