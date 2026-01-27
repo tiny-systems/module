@@ -13,6 +13,27 @@
 - Flat structure over deep nesting
 - Idiomatic Go - if err != nil { return } pattern
 
+## CRITICAL: Handler Response Propagation
+
+**NEVER ignore the return value of handler() calls. ALWAYS return it.**
+
+TinySystems uses blocking I/O. HTTP Server blocks waiting for responses to flow back through the handler chain. If any component ignores the handler return, responses are lost and requests time out.
+
+```go
+// WRONG - breaks blocking I/O, causes timeouts
+_ = handler(ctx, "error", Error{...})
+return nil
+
+// CORRECT - propagates response back through call chain
+return handler(ctx, "error", Error{...})
+```
+
+**Only exceptions:**
+- `_reconcile` port (internal system port, no response expected)
+- True fire-and-forget async operations
+
+When writing components, always ask: "Does this handler call need to return a response to an upstream blocker?" If yes (which is most cases), return the handler result.
+
 ## SDK vs Module Responsibilities
 
 - SDK handles serialization/deserialization
