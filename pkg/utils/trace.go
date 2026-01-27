@@ -106,6 +106,7 @@ func ExtractTraceStatistics(trace *TraceData) (*TraceStatistics, map[string][]by
 		ts.Sequence = append(ts.Sequence, key)
 
 		// Search for data in events
+		var foundData bool
 		for _, e := range span.Events {
 			if e.Name != "data" {
 				continue
@@ -115,11 +116,23 @@ func ExtractTraceStatistics(trace *TraceData) (*TraceStatistics, map[string][]by
 				if a.Key != "payload" {
 					continue
 				}
+				foundData = true
 				if a.Value != "" {
 					ts.Data[key] = struct{}{}
 					runtimeData[port] = []byte(a.Value)
+				} else {
+					// Mark as visited but with no data (empty payload)
+					runtimeData[port] = nil
 				}
 				break
+			}
+		}
+
+		// If span has port but no data event at all, mark as visited with no data
+		// This ensures we don't fall back to fake data for traced ports
+		if !foundData && port != "" {
+			if _, exists := runtimeData[port]; !exists {
+				runtimeData[port] = nil
 			}
 		}
 	}
