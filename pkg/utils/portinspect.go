@@ -177,10 +177,17 @@ func SimulatePortDataFromMaps(
 
 		// If runtime data is available for this port, use it instead of mock data
 		if runtimeData != nil {
-			if entry, ok := runtimeData[portName]; ok && len(entry) > 0 {
-				var r interface{}
-				if err := json.Unmarshal(entry, &r); err == nil && r != nil {
-					result = r
+			if entry, ok := runtimeData[portName]; ok {
+				// Port was visited in trace
+				if len(entry) > 0 {
+					// Has actual data - use it
+					var r interface{}
+					if err := json.Unmarshal(entry, &r); err == nil && r != nil {
+						result = r
+					}
+				} else {
+					// Port was visited but had no data (empty events) - return null, not fake data
+					result = nil
 				}
 			}
 		}
