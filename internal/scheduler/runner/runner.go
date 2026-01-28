@@ -18,7 +18,6 @@ import (
 	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
-	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/evaluator"
@@ -59,10 +58,8 @@ type Runner struct {
 	nodePortsLock *sync.RWMutex
 
 	//
-	tracer  trace.Tracer
-	tracker tracker.Manager
-
-	meter metric.Meter
+	tracer trace.Tracer
+	meter  metric.Meter
 	//
 	nodeLock *sync.Mutex
 
@@ -118,11 +115,6 @@ func NewRunner(component m.Component) *Runner {
 
 func (c *Runner) SetTracer(t trace.Tracer) *Runner {
 	c.tracer = t
-	return c
-}
-
-func (c *Runner) SetTracker(t tracker.Manager) *Runner {
-	c.tracker = t
 	return c
 }
 
@@ -459,11 +451,9 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		inputSpan.End()
 	}()
 
-	// send span data only if tracker is on
-	if c.tracker.Active(c.projectName) {
-		inputData, _ := json.Marshal(portData)
-		c.addSpanPortData(inputSpan, string(inputData))
-	}
+	// Always record span port data for tracing
+	inputData, _ := json.Marshal(portData)
+	c.addSpanPortData(inputSpan, string(inputData))
 
 	var resp any
 
@@ -483,7 +473,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	)
 
 	err = errorpanic.Wrap(func() error {
-		// track busy edge only if tracker is on
+		// track busy edge metric
 		ticker := time.NewTicker(time.Second * 3)
 		defer ticker.Stop()
 
@@ -603,11 +593,9 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 
 		defer outputSpan.End()
 
-		// send span data only is tracker is on
-		if c.tracker.Active(c.projectName) {
-			outputDataBytes, _ := json.Marshal(outputData)
-			c.addSpanPortData(outputSpan, string(outputDataBytes))
-		}
+		// Always record span port data for tracing
+		outputDataBytes, _ := json.Marshal(outputData)
+		c.addSpanPortData(outputSpan, string(outputDataBytes))
 
 		// Pass span context to downstream for trace propagation
 		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(spanCtx)), outputPort, outputData, outputHandler)
