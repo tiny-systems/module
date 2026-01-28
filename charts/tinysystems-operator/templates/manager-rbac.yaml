@@ -134,33 +134,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinytrackers
-  verbs:
-  - create
-  - delete
-  - deletecollection
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinytrackers/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinytrackers/status
-  verbs:
-  - get
-  - patch
-  - update
 {{- with .Values.rbac.extraRules }}
 {{- toYaml . | nindent 0 }}
 {{- end }}
