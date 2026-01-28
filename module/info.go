@@ -21,10 +21,11 @@ func ParseFullName(fullName string) (module string, component string, err error)
 }
 
 type Info struct {
-	Name      string
-	VersionID string // if module's build is registered
-	Version   string
-	Addr      string //listed address
+	Name       string
+	VersionID  string // if module's build is registered
+	Version    string
+	SDKVersion string // SDK version this module was built with
+	Addr       string //listed address
 	//
 	Components []ComponentInfo
 }
