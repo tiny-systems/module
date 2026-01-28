@@ -258,8 +258,60 @@ customElements.define('markdown-style', MarkdownStyle);</script><markdown-style 
     <ul>
       <li>Type preservation: <code>"{{$.count}}"</code> returns a number, not a string</li>
       <li>Graceful error handling: If source data is unavailable, expressions return <code>nil</code></li>
-      <li>Full JSONPath support via <a href="https://github.com/spyzhov/ajson">ajson</a> library</li>
+      <li>Full JSONPath support via <a href="https://github.com/tiny-systems/ajson">ajson</a> library</li>
     </ul>
+    <p><strong>Built-in Functions</strong>:</p>
+    <p>The expression engine includes many built-in functions:</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Functions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Array</strong></td>
+          <td><code>length()</code>, <code>first()</code>, <code>last()</code>, <code>avg()</code>, <code>sum()</code>, <code>size()</code></td>
+        </tr>
+        <tr>
+          <td><strong>String</strong></td>
+          <td><code>upper()</code>, <code>lower()</code>, <code>trim()</code>, <code>reverse()</code>, <code>b64encode()</code>, <code>b64decode()</code></td>
+        </tr>
+        <tr>
+          <td><strong>String (multi-arg)</strong></td>
+          <td><code>split(str, sep)</code>, <code>join(arr, sep)</code>, <code>contains(str, sub)</code>, <code>hasprefix(str, prefix)</code>, <code>hassuffix(str, suffix)</code>, <code>replace(str, old, new)</code>, <code>substr(str, start[, len])</code>, <code>index(str, sub)</code></td>
+        </tr>
+        <tr>
+          <td><strong>Math</strong></td>
+          <td><code>abs()</code>, <code>ceil()</code>, <code>floor()</code>, <code>round()</code>, <code>sqrt()</code>, <code>pow10()</code></td>
+        </tr>
+        <tr>
+          <td><strong>Logic</strong></td>
+          <td><code>not()</code>, ternary <code>? :</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>String Function Examples</strong>:</p>
+    <pre class="language-json"><code class="language-json code-highlight"><span class="code-line line-number" line="1"><span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="2">  <span class="token property">"kind"</span><span class="token operator">:</span> <span class="token string">"{{first(split($.target, '/'))}}"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="3">  <span class="token property">"name"</span><span class="token operator">:</span> <span class="token string">"{{last(split($.target, '/'))}}"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="4">  <span class="token property">"hasNamespace"</span><span class="token operator">:</span> <span class="token string">"{{contains($.args, '-n ')}}"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="5">  <span class="token property">"upperName"</span><span class="token operator">:</span> <span class="token string">"{{upper($.name)}}"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="6">  <span class="token property">"label"</span><span class="token operator">:</span> <span class="token string">"{{replace($.label, '=', ': ')}}"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="7">  <span class="token property">"domain"</span><span class="token operator">:</span> <span class="token string">"{{first(split(last(split($.url, '//')), '/'))}}"</span><span class="token punctuation">,</span>
+</span><span class="code-line line-number" line="8">  <span class="token property">"message"</span><span class="token operator">:</span> <span class="token string">"{{hasprefix($.error, 'NotFound') ? 'Resource not found' : $.error}}"</span>
+</span><span class="code-line line-number" line="9"><span class="token punctuation">}</span>
+</span></code><div onclick="copied(this)" data-code="{
+  &#x22;kind&#x22;: &#x22;{{first(split($.target, &#x27;/&#x27;))}}&#x22;,
+  &#x22;name&#x22;: &#x22;{{last(split($.target, &#x27;/&#x27;))}}&#x22;,
+  &#x22;hasNamespace&#x22;: &#x22;{{contains($.args, &#x27;-n &#x27;)}}&#x22;,
+  &#x22;upperName&#x22;: &#x22;{{upper($.name)}}&#x22;,
+  &#x22;label&#x22;: &#x22;{{replace($.label, &#x27;=&#x27;, &#x27;: &#x27;)}}&#x22;,
+  &#x22;domain&#x22;: &#x22;{{first(split(last(split($.url, &#x27;//&#x27;)), &#x27;/&#x27;))}}&#x22;,
+  &#x22;message&#x22;: &#x22;{{hasprefix($.error, &#x27;NotFound&#x27;) ? &#x27;Resource not found&#x27; : $.error}}&#x22;
+}
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
     <h3 id="sdk-components"><a class="anchor" aria-hidden="true" tabindex="-1" href="#sdk-components"><span class="octicon octicon-link"></span></a>SDK Components</h3>
     <p>The SDK provides several packages for module developers:</p>
     <h4 id="module---core-interfaces"><a class="anchor" aria-hidden="true" tabindex="-1" href="#module---core-interfaces"><span class="octicon octicon-link"></span></a><code>/module/</code> - Core Interfaces</h4>
@@ -1174,7 +1226,58 @@ func TestHello(t *testing.T) {
       <li><strong>Use Permanent Errors</strong>: Don't retry validation errors or user mistakes</li>
       <li><strong>Add Observability</strong>: Create spans for long operations</li>
       <li><strong>Document with Tags</strong>: Use meaningful tags in <code>GetInfo()</code> for discoverability</li>
+      <li><strong>Always Return Handler Results</strong>: See critical section below</li>
     </ol>
+    <h4 id="critical-handler-response-propagation"><a class="anchor" aria-hidden="true" tabindex="-1" href="#critical-handler-response-propagation"><span class="octicon octicon-link"></span></a>CRITICAL: Handler Response Propagation</h4>
+    <p><strong>ALWAYS return the result of <code>handler()</code> calls. Never ignore the return value.</strong></p>
+    <p>The TinySystems SDK uses blocking I/O for request-response patterns. When a component like HTTP Server sends a request, it <strong>blocks</strong> waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out.</p>
+    <p><strong>BAD - Breaks blocking I/O:</strong></p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">func</span> <span class="token punctuation">(</span>c <span class="token operator">*</span>Component<span class="token punctuation">)</span> <span class="token function">handleError</span><span class="token punctuation">(</span>ctx context<span class="token punctuation">.</span>Context<span class="token punctuation">,</span> handler module<span class="token punctuation">.</span>Handler<span class="token punctuation">,</span> req Request<span class="token punctuation">,</span> errMsg <span class="token builtin">string</span><span class="token punctuation">)</span> any <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="2">    <span class="token keyword">if</span> c<span class="token punctuation">.</span>settings<span class="token punctuation">.</span>EnableErrorPort <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="3">        <span class="token boolean">_</span> <span class="token operator">=</span> <span class="token function">handler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> <span class="token string">"error"</span><span class="token punctuation">,</span> Error<span class="token punctuation">{</span><span class="token operator">...</span><span class="token punctuation">}</span><span class="token punctuation">)</span>  <span class="token comment">// WRONG: ignores return value!</span>
+</span><span class="code-line line-number" line="4">        <span class="token keyword">return</span> <span class="token boolean">nil</span>  <span class="token comment">// Response is lost, HTTP Server times out</span>
+</span><span class="code-line line-number" line="5">    <span class="token punctuation">}</span>
+</span><span class="code-line line-number" line="6">    <span class="token keyword">return</span> errors<span class="token punctuation">.</span><span class="token function">New</span><span class="token punctuation">(</span>errMsg<span class="token punctuation">)</span>
+</span><span class="code-line line-number" line="7"><span class="token punctuation">}</span>
+</span></code><div onclick="copied(this)" data-code="func (c *Component) handleError(ctx context.Context, handler module.Handler, req Request, errMsg string) any {
+    if c.settings.EnableErrorPort {
+        _ = handler(ctx, &#x22;error&#x22;, Error{...})  // WRONG: ignores return value!
+        return nil  // Response is lost, HTTP Server times out
+    }
+    return errors.New(errMsg)
+}
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>GOOD - Propagates response correctly:</strong></p>
+    <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">func</span> <span class="token punctuation">(</span>c <span class="token operator">*</span>Component<span class="token punctuation">)</span> <span class="token function">handleError</span><span class="token punctuation">(</span>ctx context<span class="token punctuation">.</span>Context<span class="token punctuation">,</span> handler module<span class="token punctuation">.</span>Handler<span class="token punctuation">,</span> req Request<span class="token punctuation">,</span> errMsg <span class="token builtin">string</span><span class="token punctuation">)</span> any <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="2">    <span class="token keyword">if</span> c<span class="token punctuation">.</span>settings<span class="token punctuation">.</span>EnableErrorPort <span class="token punctuation">{</span>
+</span><span class="code-line line-number" line="3">        <span class="token keyword">return</span> <span class="token function">handler</span><span class="token punctuation">(</span>ctx<span class="token punctuation">,</span> <span class="token string">"error"</span><span class="token punctuation">,</span> Error<span class="token punctuation">{</span><span class="token operator">...</span><span class="token punctuation">}</span><span class="token punctuation">)</span>  <span class="token comment">// CORRECT: returns handler result</span>
+</span><span class="code-line line-number" line="4">    <span class="token punctuation">}</span>
+</span><span class="code-line line-number" line="5">    <span class="token keyword">return</span> errors<span class="token punctuation">.</span><span class="token function">New</span><span class="token punctuation">(</span>errMsg<span class="token punctuation">)</span>
+</span><span class="code-line line-number" line="6"><span class="token punctuation">}</span>
+</span></code><div onclick="copied(this)" data-code="func (c *Component) handleError(ctx context.Context, handler module.Handler, req Request, errMsg string) any {
+    if c.settings.EnableErrorPort {
+        return handler(ctx, &#x22;error&#x22;, Error{...})  // CORRECT: returns handler result
+    }
+    return errors.New(errMsg)
+}
+" class="copied"><svg class="octicon-copy" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"></path><path fill-rule="evenodd" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"></path></svg><svg class="octicon-check" aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" height="12" width="12"><path fill-rule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"></path></svg></div></pre>
+    <p><strong>Why this matters:</strong></p>
+    <p>When HTTP Server → Slack Command → Router → HTTP Server:Response:</p>
+    <ol>
+      <li>HTTP Server blocks on <code>handler(ctx, "request", req)</code></li>
+      <li>Message flows to Slack Command via gRPC</li>
+      <li>Slack Command processes and calls <code>handler(ctx, "error", error)</code></li>
+      <li>Edge transforms Error → Response and sends to HTTP Server's response port</li>
+      <li>HTTP Server's <code>handleResponse()</code> returns the Response</li>
+      <li><strong>Response must flow back through the entire chain</strong> to unblock HTTP Server</li>
+    </ol>
+    <p>If Slack Command does <code>_ = handler(...)</code> and returns <code>nil</code>, the Response is lost.</p>
+    <p><strong>Rules:</strong></p>
+    <ul>
+      <li>Always <code>return handler(ctx, port, data)</code> for output ports</li>
+      <li>Exception: <code>_reconcile</code> port calls can ignore returns (internal system port)</li>
+      <li>Exception: Fire-and-forget async operations where no response is expected</li>
+    </ul>
     <h4 id="component-naming-convention"><a class="anchor" aria-hidden="true" tabindex="-1" href="#component-naming-convention"><span class="octicon octicon-link"></span></a>Component Naming Convention</h4>
     <p>All component names must follow a consistent naming pattern using <code>snake_case</code>:</p>
     <p><strong>Pattern:</strong> <code>[technology_][resource]_[action]</code> or <code>[resource]_[action]</code></p>
