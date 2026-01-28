@@ -84,6 +84,7 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	instance.Status.Addr = r.Module.Addr
 	instance.Status.Version = r.Module.Version
 	instance.Status.Name = r.Module.Name
+	instance.Status.SDKVersion = r.Module.SDKVersion
 	instance.Status.Components = r.buildComponentStatus()
 
 	if err := r.Status().Update(ctx, instance); err != nil {

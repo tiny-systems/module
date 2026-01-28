@@ -39,6 +39,7 @@ type TinyModuleStatus struct {
 	Addr       string                      `json:"addr"`
 	Name       string                      `json:"name"`
 	Version    string                      `json:"version"`
+	SDKVersion string                      `json:"sdkVersion,omitempty"`
 	Components []TinyModuleComponentStatus `json:"components"`
 }
 

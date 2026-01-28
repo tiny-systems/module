@@ -246,32 +246,23 @@ func ApplyTraceStatToEdge(edgeMap map[string]interface{}, ts *TraceStatistics) {
 		"sequence": seq,
 	}
 
-	var hasError bool
 	if er, ok := ts.Errors[from]; ok {
-		hasError = true
 		traceInfo["error"] = er
 	}
 
 	if er, ok := ts.Errors[to]; ok {
-		hasError = true
 		traceInfo["error"] = er
 	}
 
 	data["trace"] = traceInfo
 
+	// Stroke width for trace visualization (color is handled by frontend)
 	if hasLatency {
 		style, ok := edgeMap["style"].(map[string]interface{})
 		if !ok {
 			style = make(map[string]interface{})
 			edgeMap["style"] = style
 		}
-
-		if hasError {
-			style["stroke"] = "#fca5a5"
-		} else {
-			style["stroke"] = "#00bfff"
-		}
-
 		style["strokeWidth"] = getStrokeWidth(seq, len(ts.Sequence))
 	}
 }

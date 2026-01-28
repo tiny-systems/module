@@ -73,6 +73,8 @@ spec:
                 type: array
               name:
                 type: string
+              sdkVersion:
+                type: string
               version:
                 type: string
             required:

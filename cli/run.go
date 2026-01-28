@@ -4,6 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"os"
+	"reflect"
+	"runtime/debug"
+	"strings"
+	"sync/atomic"
+	"time"
+
 	"github.com/go-logr/zerologr"
 	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
@@ -23,7 +32,6 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/sync/errgroup"
-	"io"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -32,16 +40,10 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
-	"net"
-	"os"
-	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"strings"
-	"sync/atomic"
-	"time"
 )
 
 // override by ldflags
@@ -60,6 +62,27 @@ var (
 	ErrInvalidModuleName    = fmt.Errorf("invalid module name")
 	ErrInvalidModuleVersion = fmt.Errorf("invalid module version")
 )
+
+const sdkModulePath = "github.com/tiny-systems/module"
+
+// getSDKVersion returns the version of the SDK this module was built with.
+// It reads the dependency version from Go's build info embedded in the binary.
+func getSDKVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, dep := range info.Deps {
+		if dep.Path == sdkModulePath {
+			return strings.TrimPrefix(dep.Version, "v")
+		}
+	}
+	// If running from SDK itself (during development), check main module
+	if info.Main.Path == sdkModulePath {
+		return strings.TrimPrefix(info.Main.Version, "v")
+	}
+	return "unknown"
+}
 
 var runCmd = &cobra.Command{
 	Use:   "run",
@@ -121,10 +144,14 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		sdkVersion := getSDKVersion()
+		l.Info("SDK version detected", "sdkVersion", sdkVersion)
+
 		moduleInfo := m.Info{
-			Version:   version,
-			Name:      name,
-			VersionID: versionID,
+			Version:    version,
+			Name:       name,
+			VersionID:  versionID,
+			SDKVersion: sdkVersion,
 		}
 
 		scheme := runtime.NewScheme()
