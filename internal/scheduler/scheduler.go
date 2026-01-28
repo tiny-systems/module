@@ -8,7 +8,6 @@ import (
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
-	"github.com/tiny-systems/module/internal/tracker"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -49,8 +48,6 @@ type Schedule struct {
 	// open telemetry metric meter
 	meter metric.Meter
 
-	tracker tracker.Manager
-
 	// meant to be for all background processes
 	errGroup *errgroup.Group
 	// pretty much self-explanatory
@@ -83,11 +80,6 @@ func (s *Schedule) SetMeter(m metric.Meter) *Schedule {
 
 func (s *Schedule) SetTracer(t trace.Tracer) *Schedule {
 	s.tracer = t
-	return s
-}
-
-func (s *Schedule) SetTracker(t tracker.Manager) *Schedule {
-	s.tracker = t
 	return s
 }
 
@@ -270,7 +262,6 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 			SetLogger(s.log).
 			SetTracer(s.tracer).
 			SetManager(s.manager).
-			SetTracker(s.tracker).
 			SetMeter(s.meter)
 	})
 

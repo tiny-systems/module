@@ -4,7 +4,6 @@
 resources:
 - bases/operator.tinysystems.io_tinynodes.yaml
 - bases/operator.tinysystems.io_tinymodules.yaml
-- bases/operator.tinysystems.io_tinytrackers.yaml
 - bases/operator.tinysystems.io_tinysignals.yaml
 - bases/operator.tinysystems.io_tinyprojects.yaml
 - bases/operator.tinysystems.io_tinyflows.yaml

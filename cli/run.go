@@ -23,7 +23,6 @@ import (
 	sch "github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server"
-	"github.com/tiny-systems/module/internal/tracker"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
@@ -351,12 +350,8 @@ var runCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		var (
-			trackManager = tracker.NewManager().SetLogger(l)
-			scheduler    *sch.Schedule
-		)
+		var scheduler *sch.Schedule
 
-		//
 		scheduler = sch.New(func(ctx context.Context, msg *runner.Msg) (any, error) {
 			l.Info("message router: received message",
 				"to", msg.To,
@@ -431,7 +426,6 @@ var runCmd = &cobra.Command{
 		}).
 			SetLogger(l).
 			SetMeter(meter).
-			SetTracker(trackManager).
 			SetTracer(tracer).
 			SetManager(resourceManager)
 
@@ -496,17 +490,6 @@ var runCmd = &cobra.Command{
 
 		if err = moduleController.SetupWithManager(mgr); err != nil {
 			l.Error(err, "unable to create tinymodule controller")
-			return
-		}
-
-		if err = (&controller.TinyTrackerReconciler{
-			Client:   mgr.GetClient(),
-			Scheme:   mgr.GetScheme(),
-			Manager:  trackManager,
-			IsLeader: isLeader,
-			//
-		}).SetupWithManager(mgr); err != nil {
-			l.Error(err, "unable to create tinytracker controller")
 			return
 		}
 
@@ -588,8 +571,6 @@ var runCmd = &cobra.Command{
 			}
 			return nil
 		})
-		// tracker
-		/// Instance scheduler
 		wg.Go(func() error {
 			l.Info("starting scheduler")
 			defer func() {
@@ -597,20 +578,6 @@ var runCmd = &cobra.Command{
 			}()
 			if err := scheduler.Start(ctx); err != nil {
 				l.Error(err, "unable to start scheduler")
-				return err
-			}
-			return nil
-		})
-		////
-		// run tracker
-
-		wg.Go(func() error {
-			l.Info("starting tracker manager")
-			defer func() {
-				l.Info("tracker manager stopped")
-			}()
-			if err := trackManager.Run(ctx); err != nil {
-				l.Error(err, "unable to start tracker manager")
 				return err
 			}
 			return nil

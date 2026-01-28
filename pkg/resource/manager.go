@@ -767,16 +767,6 @@ func (m Manager) MoveWidgetPageToPos(ctx context.Context, namespace, pageResourc
 	return nil
 }
 
-func (m Manager) DeleteTracker(ctx context.Context, tracker *v1alpha1.TinyTracker) error {
-	delCtx, cancel := context.WithTimeout(ctx, time.Second*30)
-	defer cancel()
-
-	if err := m.client.Delete(delCtx, tracker); err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-	return nil
-}
-
 func (m Manager) WatchNodes(ctx context.Context, projectResourceName string) (watch.Interface, error) {
 
 	var (
@@ -883,46 +873,6 @@ func (m Manager) RenameProject(ctx context.Context, name string, namespace strin
 	}
 	project.Annotations[v1alpha1.ProjectNameAnnotation] = newName
 	return m.client.Update(ctx, project)
-}
-
-func (m Manager) PutTracker(ctx context.Context, namespace string, projectResourceName string) (*v1alpha1.TinyTracker, error) {
-	// place tracker
-	tracker := &v1alpha1.TinyTracker{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: namespace,
-			Labels: map[string]string{
-				v1alpha1.ProjectNameLabel: projectResourceName,
-			},
-			Annotations:  map[string]string{},
-			GenerateName: utils.SanitizeResourceName(fmt.Sprintf("prj-%s-tracker-", projectResourceName)),
-		},
-		Spec: v1alpha1.TinyTrackerSpec{},
-	}
-
-	// Set owner reference to the project
-	// Get the project by its resource name
-	project, err := m.GetProject(ctx, projectResourceName, namespace)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get project for owner reference: %w", err)
-	}
-
-	// Set owner reference to the project
-	tracker.OwnerReferences = []metav1.OwnerReference{
-		{
-			APIVersion: project.APIVersion,
-			Kind:       project.Kind,
-			Name:       project.Name,
-			UID:        project.UID,
-			Controller: func() *bool { b := true; return &b }(),
-		},
-	}
-
-	if err := m.client.Create(ctx, tracker); err != nil {
-		log.Error().Err(err).Msg("can not create tracker")
-		return nil, fmt.Errorf("can not create tracker %s", err)
-	}
-
-	return tracker, nil
 }
 
 func (m Manager) DeleteFlow(ctx context.Context, flowResourceName string) error {
