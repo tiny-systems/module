@@ -364,22 +364,6 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 		return ports
 	}
 
-	// Build a set of edges from the request to check for overwrites
-	requestEdgeKeys := make(map[string]bool)
-	for _, edge := range requestMap {
-		if !IsEdge(edge) {
-			continue
-		}
-		if GetStr(edge["target"]) != nodeID {
-			continue
-		}
-		fromNode := GetStr(edge["source"])
-		fromPort := GetStr(edge["sourceHandle"])
-		toHandle := GetStr(edge["targetHandle"])
-		key := GetPortFullName(fromNode, fromPort) + "->" + toHandle
-		requestEdgeKeys[key] = true
-	}
-
 	// Build a map of existing configs (legacy and current flow) for fallback
 	// when request has edge but no configuration (e.g., just moving a node)
 	existingConfigs := make(map[string]v1alpha1.TinyNodePortConfig)
@@ -412,16 +396,9 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 		if port.FlowID == flowID {
 			continue
 		}
-		// For edge configs with legacy FlowID (empty), skip if the edge is in the request
-		// (the request will provide the new config OR we'll use existing as fallback)
-		if port.From != "" && port.FlowID == "" {
-			key := port.From + "->" + port.Port
-			if requestEdgeKeys[key] {
-				continue
-			}
-		}
-		// Preserve configs from other flows (both settings and edge configs)
-		// and legacy configs not in request
+		// Preserve ALL configs from other flows and legacy configs
+		// Legacy configs (FlowID="") are kept for backward compatibility
+		// Each flow creates its own config when saved
 		portConfigs = append(portConfigs, port)
 	}
 
@@ -559,22 +536,6 @@ func UpdatePortConfigsFromRequestWithDefaults(
 		return ports
 	}
 
-	// Build a set of edges from the request to check for overwrites
-	requestEdgeKeys := make(map[string]bool)
-	for _, edge := range requestMap {
-		if !IsEdge(edge) {
-			continue
-		}
-		if GetStr(edge["target"]) != nodeID {
-			continue
-		}
-		fromNode := GetStr(edge["source"])
-		fromPort := GetStr(edge["sourceHandle"])
-		toHandle := GetStr(edge["targetHandle"])
-		key := GetPortFullName(fromNode, fromPort) + "->" + toHandle
-		requestEdgeKeys[key] = true
-	}
-
 	// Build a map of existing configs (legacy and current flow) for fallback
 	// when request has edge but no configuration (e.g., just moving a node)
 	existingConfigs := make(map[string]v1alpha1.TinyNodePortConfig)
@@ -607,16 +568,9 @@ func UpdatePortConfigsFromRequestWithDefaults(
 		if port.FlowID == flowID {
 			continue
 		}
-		// For edge configs with legacy FlowID (empty), skip if the edge is in the request
-		// (the request will provide the new config OR we'll use existing as fallback)
-		if port.From != "" && port.FlowID == "" {
-			key := port.From + "->" + port.Port
-			if requestEdgeKeys[key] {
-				continue
-			}
-		}
-		// Preserve configs from other flows (both settings and edge configs)
-		// and legacy configs not in request
+		// Preserve ALL configs from other flows and legacy configs
+		// Legacy configs (FlowID="") are kept for backward compatibility
+		// Each flow creates its own config when saved
 		portConfigs = append(portConfigs, port)
 	}
 
