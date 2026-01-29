@@ -476,28 +476,23 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 			continue
 		}
 
-		edgeData, ok := edge["data"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
 		fromNode := GetStr(edge["source"])
 		fromPort := GetStr(edge["sourceHandle"])
 		toHandle := GetStr(edge["targetHandle"])
-
-		conf := edgeData["configuration"]
-		sc := edgeData["schema"]
 
 		handlePort := PortConfig{
 			From: GetPortFullName(fromNode, fromPort),
 			Name: toHandle,
 		}
 
-		if conf != nil {
-			handlePort.Configuration, _ = json.Marshal(conf)
-		}
-		if sc != nil {
-			handlePort.Schema, _ = json.Marshal(sc)
+		// Edge may have no data when just moving nodes - still process it for fallback
+		if edgeData, ok := edge["data"].(map[string]interface{}); ok {
+			if conf := edgeData["configuration"]; conf != nil {
+				handlePort.Configuration, _ = json.Marshal(conf)
+			}
+			if sc := edgeData["schema"]; sc != nil {
+				handlePort.Schema, _ = json.Marshal(sc)
+			}
 		}
 
 		handlePorts = append(handlePorts, handlePort)
@@ -690,35 +685,30 @@ func UpdatePortConfigsFromRequestWithDefaults(
 			continue
 		}
 
-		edgeData, ok := edge["data"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
 		fromNode := GetStr(edge["source"])
 		fromPort := GetStr(edge["sourceHandle"])
 		toHandle := GetStr(edge["targetHandle"])
-
-		conf := edgeData["configuration"]
-		sc := edgeData["schema"]
 
 		handlePort := PortConfig{
 			From: GetPortFullName(fromNode, fromPort),
 			Name: toHandle,
 		}
 
-		if conf != nil {
-			handlePort.Configuration, _ = json.Marshal(conf)
-		}
+		// Edge may have no data when just moving nodes - still process it for fallback
+		if edgeData, ok := edge["data"].(map[string]interface{}); ok {
+			if conf := edgeData["configuration"]; conf != nil {
+				handlePort.Configuration, _ = json.Marshal(conf)
+			}
 
-		// Handle schema - use default if not provided (minimal format)
-		if sc != nil {
-			handlePort.Schema, _ = json.Marshal(sc)
-		} else if defaultSchemas != nil {
-			// Minimal format: schema was omitted, use default from Status.Ports
-			fullPortName := GetPortFullName(nodeID, toHandle)
-			if defaultSchema, hasDefault := defaultSchemas[fullPortName]; hasDefault {
-				handlePort.Schema = defaultSchema
+			// Handle schema - use default if not provided (minimal format)
+			if sc := edgeData["schema"]; sc != nil {
+				handlePort.Schema, _ = json.Marshal(sc)
+			} else if defaultSchemas != nil {
+				// Minimal format: schema was omitted, use default from Status.Ports
+				fullPortName := GetPortFullName(nodeID, toHandle)
+				if defaultSchema, hasDefault := defaultSchemas[fullPortName]; hasDefault {
+					handlePort.Schema = defaultSchema
+				}
 			}
 		}
 
