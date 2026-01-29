@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/microcosm-cc/bluemonday"
@@ -170,7 +171,8 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 				continue
 			}
 			ma["configuration"] = json.RawMessage(pc.Configuration)
-			if len(pc.Schema) == 0 {
+			// Skip if schema is empty or "null" - preserve Status.Ports schema
+			if len(pc.Schema) == 0 || bytes.Equal(pc.Schema, []byte("null")) {
 				continue
 			}
 			updatedConfigSchema, err := schema.UpdateWithDefinitions(pc.Schema, defs)
