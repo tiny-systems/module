@@ -380,6 +380,30 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 		requestEdgeKeys[key] = true
 	}
 
+	// Build a map of existing configs (legacy and current flow) for fallback
+	// when request has edge but no configuration (e.g., just moving a node)
+	existingConfigs := make(map[string]v1alpha1.TinyNodePortConfig)
+	for _, port := range ports {
+		if port.From == "" {
+			continue
+		}
+		key := port.From + "->" + port.Port
+		// Prefer current flow's config, then legacy, then other flows
+		if existing, ok := existingConfigs[key]; ok {
+			if existing.FlowID == flowID {
+				continue // Keep current flow's config
+			}
+			if port.FlowID == flowID {
+				existingConfigs[key] = port
+				continue
+			}
+			if existing.FlowID == "" {
+				continue // Keep legacy config
+			}
+		}
+		existingConfigs[key] = port
+	}
+
 	var portConfigs []v1alpha1.TinyNodePortConfig
 
 	// Preserve port configs from other flows and legacy configs
@@ -393,7 +417,7 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 			continue
 		}
 		// For legacy configs (empty FlowID), skip if the edge is in the request
-		// (the request will provide the new config with proper FlowID)
+		// (the request will provide the new config OR we'll use existing as fallback)
 		if port.FlowID == "" {
 			key := port.From + "->" + port.Port
 			if requestEdgeKeys[key] {
@@ -481,9 +505,6 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 
 	// Convert to TinyNodePortConfig
 	for _, hp := range handlePorts {
-		if len(hp.Configuration) == 0 && len(hp.Schema) == 0 {
-			continue
-		}
 		if hp.From == "" && hp.Source {
 			continue
 		}
@@ -495,6 +516,22 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 			Schema:        hp.Schema,
 			FlowID:        flowID,
 		}
+
+		// If request has edge but no config, fall back to existing config
+		// This handles the case where user just moves a node without changing edge settings
+		if len(hp.Configuration) == 0 && len(hp.Schema) == 0 {
+			key := hp.From + "->" + hp.Name
+			if existing, ok := existingConfigs[key]; ok {
+				pc.Configuration = existing.Configuration
+				pc.Schema = existing.Schema
+			}
+		}
+
+		// Only add if we have configuration (either from request or fallback)
+		if len(pc.Configuration) == 0 && len(pc.Schema) == 0 {
+			continue
+		}
+
 		portConfigs = append(portConfigs, pc)
 	}
 
@@ -546,6 +583,30 @@ func UpdatePortConfigsFromRequestWithDefaults(
 		requestEdgeKeys[key] = true
 	}
 
+	// Build a map of existing configs (legacy and current flow) for fallback
+	// when request has edge but no configuration (e.g., just moving a node)
+	existingConfigs := make(map[string]v1alpha1.TinyNodePortConfig)
+	for _, port := range ports {
+		if port.From == "" {
+			continue
+		}
+		key := port.From + "->" + port.Port
+		// Prefer current flow's config, then legacy, then other flows
+		if existing, ok := existingConfigs[key]; ok {
+			if existing.FlowID == flowID {
+				continue // Keep current flow's config
+			}
+			if port.FlowID == flowID {
+				existingConfigs[key] = port
+				continue
+			}
+			if existing.FlowID == "" {
+				continue // Keep legacy config
+			}
+		}
+		existingConfigs[key] = port
+	}
+
 	var portConfigs []v1alpha1.TinyNodePortConfig
 
 	// Preserve port configs from other flows and legacy configs
@@ -559,7 +620,7 @@ func UpdatePortConfigsFromRequestWithDefaults(
 			continue
 		}
 		// For legacy configs (empty FlowID), skip if the edge is in the request
-		// (the request will provide the new config with proper FlowID)
+		// (the request will provide the new config OR we'll use existing as fallback)
 		if port.FlowID == "" {
 			key := port.From + "->" + port.Port
 			if requestEdgeKeys[key] {
@@ -666,9 +727,6 @@ func UpdatePortConfigsFromRequestWithDefaults(
 
 	// Convert to TinyNodePortConfig
 	for _, hp := range handlePorts {
-		if len(hp.Configuration) == 0 && len(hp.Schema) == 0 {
-			continue
-		}
 		if hp.From == "" && hp.Source {
 			continue
 		}
@@ -680,6 +738,22 @@ func UpdatePortConfigsFromRequestWithDefaults(
 			Schema:        hp.Schema,
 			FlowID:        flowID,
 		}
+
+		// If request has edge but no config, fall back to existing config
+		// This handles the case where user just moves a node without changing edge settings
+		if len(hp.Configuration) == 0 && len(hp.Schema) == 0 {
+			key := hp.From + "->" + hp.Name
+			if existing, ok := existingConfigs[key]; ok {
+				pc.Configuration = existing.Configuration
+				pc.Schema = existing.Schema
+			}
+		}
+
+		// Only add if we have configuration (either from request or fallback)
+		if len(pc.Configuration) == 0 && len(pc.Schema) == 0 {
+			continue
+		}
+
 		portConfigs = append(portConfigs, pc)
 	}
 
