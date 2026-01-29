@@ -408,23 +408,20 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 
 	// Preserve port configs from other flows and legacy configs
 	for _, port := range ports {
-		// Skip internal port configs (no From = direct settings, not edge configs)
-		if port.From == "" {
-			continue
-		}
 		// Skip current flow's configs (will be replaced from request)
 		if port.FlowID == flowID {
 			continue
 		}
-		// For legacy configs (empty FlowID), skip if the edge is in the request
+		// For edge configs with legacy FlowID (empty), skip if the edge is in the request
 		// (the request will provide the new config OR we'll use existing as fallback)
-		if port.FlowID == "" {
+		if port.From != "" && port.FlowID == "" {
 			key := port.From + "->" + port.Port
 			if requestEdgeKeys[key] {
 				continue
 			}
 		}
-		// Preserve configs from other flows and legacy configs not in request
+		// Preserve configs from other flows (both settings and edge configs)
+		// and legacy configs not in request
 		portConfigs = append(portConfigs, port)
 	}
 
@@ -606,23 +603,20 @@ func UpdatePortConfigsFromRequestWithDefaults(
 
 	// Preserve port configs from other flows and legacy configs
 	for _, port := range ports {
-		// Skip internal port configs (no From = direct settings, not edge configs)
-		if port.From == "" {
-			continue
-		}
 		// Skip current flow's configs (will be replaced from request)
 		if port.FlowID == flowID {
 			continue
 		}
-		// For legacy configs (empty FlowID), skip if the edge is in the request
+		// For edge configs with legacy FlowID (empty), skip if the edge is in the request
 		// (the request will provide the new config OR we'll use existing as fallback)
-		if port.FlowID == "" {
+		if port.From != "" && port.FlowID == "" {
 			key := port.From + "->" + port.Port
 			if requestEdgeKeys[key] {
 				continue
 			}
 		}
-		// Preserve configs from other flows and legacy configs not in request
+		// Preserve configs from other flows (both settings and edge configs)
+		// and legacy configs not in request
 		portConfigs = append(portConfigs, port)
 	}
 
