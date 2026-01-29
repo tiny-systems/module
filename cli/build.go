@@ -69,11 +69,13 @@ var buildCmd = &cobra.Command{
 		}
 
 		//devKey
+		sdkVersion := getSDKVersion()
 		publishReq := api.PublishModuleRequest{
 			Name:       name,
 			Info:       &info,
 			Version:    strings.TrimPrefix(version, "v"),
 			Components: componentsApi,
+			SdkVersion: &sdkVersion,
 		}
 
 		// Include module requirements if set
