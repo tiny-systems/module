@@ -282,13 +282,28 @@ func UpdateEdgesFromRequest(edges []v1alpha1.TinyNodeEdge, flowID, nodeID string
 		return nil, fmt.Errorf("source element %s contains no _ports", nodeID)
 	}
 
+	// Build a set of edge IDs from the request to check for overwrites
+	requestEdgeIDs := make(map[string]bool)
+	for _, v := range sourceNodePorts {
+		edgeID := GetStr(v["id"])
+		if edgeID != "" {
+			requestEdgeIDs[edgeID] = true
+		}
+	}
+
 	defer delete(sourceNode, "_ports")
 	duplicates := make(map[string]struct{})
 	newEdges := make([]v1alpha1.TinyNodeEdge, 0)
 
-	// Preserve edges from other flows
+	// Preserve edges from other flows and legacy edges
 	for _, edge := range edges {
-		if edge.FlowID == flowID || edge.FlowID == "" {
+		// Skip current flow's edges (will be replaced from request)
+		if edge.FlowID == flowID {
+			continue
+		}
+		// For legacy edges (empty FlowID), skip if the edge is in the request
+		// (the request will provide the new edge with proper FlowID)
+		if edge.FlowID == "" && requestEdgeIDs[edge.ID] {
 			continue
 		}
 
@@ -349,14 +364,43 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 		return ports
 	}
 
-	var portConfigs []v1alpha1.TinyNodePortConfig
-
-	// Preserve port configs from other flows
-	for _, port := range ports {
-		if port.FlowID == flowID || port.FlowID == "" || port.From == "" {
-			// Don't preserve internal port configs
+	// Build a set of edges from the request to check for overwrites
+	requestEdgeKeys := make(map[string]bool)
+	for _, edge := range requestMap {
+		if !IsEdge(edge) {
 			continue
 		}
+		if GetStr(edge["target"]) != nodeID {
+			continue
+		}
+		fromNode := GetStr(edge["source"])
+		fromPort := GetStr(edge["sourceHandle"])
+		toHandle := GetStr(edge["targetHandle"])
+		key := GetPortFullName(fromNode, fromPort) + "->" + toHandle
+		requestEdgeKeys[key] = true
+	}
+
+	var portConfigs []v1alpha1.TinyNodePortConfig
+
+	// Preserve port configs from other flows and legacy configs
+	for _, port := range ports {
+		// Skip internal port configs (no From = direct settings, not edge configs)
+		if port.From == "" {
+			continue
+		}
+		// Skip current flow's configs (will be replaced from request)
+		if port.FlowID == flowID {
+			continue
+		}
+		// For legacy configs (empty FlowID), skip if the edge is in the request
+		// (the request will provide the new config with proper FlowID)
+		if port.FlowID == "" {
+			key := port.From + "->" + port.Port
+			if requestEdgeKeys[key] {
+				continue
+			}
+		}
+		// Preserve configs from other flows and legacy configs not in request
 		portConfigs = append(portConfigs, port)
 	}
 
@@ -486,14 +530,43 @@ func UpdatePortConfigsFromRequestWithDefaults(
 		return ports
 	}
 
-	var portConfigs []v1alpha1.TinyNodePortConfig
-
-	// Preserve port configs from other flows
-	for _, port := range ports {
-		if port.FlowID == flowID || port.FlowID == "" || port.From == "" {
-			// Don't preserve internal port configs
+	// Build a set of edges from the request to check for overwrites
+	requestEdgeKeys := make(map[string]bool)
+	for _, edge := range requestMap {
+		if !IsEdge(edge) {
 			continue
 		}
+		if GetStr(edge["target"]) != nodeID {
+			continue
+		}
+		fromNode := GetStr(edge["source"])
+		fromPort := GetStr(edge["sourceHandle"])
+		toHandle := GetStr(edge["targetHandle"])
+		key := GetPortFullName(fromNode, fromPort) + "->" + toHandle
+		requestEdgeKeys[key] = true
+	}
+
+	var portConfigs []v1alpha1.TinyNodePortConfig
+
+	// Preserve port configs from other flows and legacy configs
+	for _, port := range ports {
+		// Skip internal port configs (no From = direct settings, not edge configs)
+		if port.From == "" {
+			continue
+		}
+		// Skip current flow's configs (will be replaced from request)
+		if port.FlowID == flowID {
+			continue
+		}
+		// For legacy configs (empty FlowID), skip if the edge is in the request
+		// (the request will provide the new config with proper FlowID)
+		if port.FlowID == "" {
+			key := port.From + "->" + port.Port
+			if requestEdgeKeys[key] {
+				continue
+			}
+		}
+		// Preserve configs from other flows and legacy configs not in request
 		portConfigs = append(portConfigs, port)
 	}
 
