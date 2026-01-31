@@ -19,12 +19,24 @@ func NodesToGraph(elements map[string]v1alpha1.TinyNode, flowName *string) ([]in
 }
 
 func NodesToGraphWithOptions(elements map[string]v1alpha1.TinyNode, flowName *string, minimal bool) ([]interface{}, []interface{}, error) {
+	// Build port config map to look up edge configurations
+	portConfigMap := make(map[string][]v1alpha1.TinyNodePortConfig)
+	for _, node := range elements {
+		for _, pc := range node.Spec.Ports {
+			if pc.From == "" {
+				continue // Skip non-edge configs
+			}
+			portFullName := GetPortFullName(node.Name, pc.Port)
+			portConfigMap[portFullName] = append(portConfigMap[portFullName], pc)
+		}
+	}
+
 	var (
 		edges = make([]interface{}, 0)
 		nodes = make([]interface{}, 0)
 	)
 
-	for _, node := range elements {
+	for nodeName, node := range elements {
 		var (
 			sharedWithThisFlow bool
 			notThisFlow        bool
@@ -60,22 +72,29 @@ func NodesToGraphWithOptions(elements map[string]v1alpha1.TinyNode, flowName *st
 
 		nodes = append(nodes, ApiNodeToMap(node, m, minimal))
 
-		var (
-			edgeConfiguration []byte
-			edgeSchema        []byte
-		)
-
 		for _, edge := range node.Spec.Edges {
-
 			data := map[string]interface{}{
 				"valid": true,
 			}
-			if len(edgeConfiguration) > 0 {
-				data["configuration"] = json.RawMessage(edgeConfiguration)
+
+			// Look up edge configuration from target node's port configs
+			targetPortConfigs, _ := portConfigMap[edge.To]
+			sourcePortFullName := GetPortFullName(nodeName, edge.Port)
+			_, targetPort := ParseFullPortName(edge.To)
+
+			for _, pc := range targetPortConfigs {
+				if pc.From != sourcePortFullName || pc.Port != targetPort {
+					continue
+				}
+				if len(pc.Configuration) > 0 {
+					data["configuration"] = json.RawMessage(pc.Configuration)
+				}
+				if len(pc.Schema) > 0 {
+					data["schema"] = json.RawMessage(pc.Schema)
+				}
+				break
 			}
-			if len(edgeSchema) > 0 {
-				data["schema"] = json.RawMessage(edgeSchema)
-			}
+
 			edgeMap, err := ApiEdgeToProtoMap(&node, &edge, data)
 			if err != nil {
 				continue
