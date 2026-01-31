@@ -22,6 +22,12 @@ func ValidateEdge(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, so
 // ValidateEdgeWithSchema validates an edge's configuration against a custom schema.
 // Use this when the edge has its own schema (different from the port's native schema).
 func ValidateEdgeWithSchema(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, sourcePortFullName string, edgeConfiguration []byte, edgeSchemaBytes []byte) error {
+	return ValidateEdgeWithSchemaAndRuntimeData(ctx, nodesMap, sourcePortFullName, edgeConfiguration, edgeSchemaBytes, nil)
+}
+
+// ValidateEdgeWithSchemaAndRuntimeData validates an edge's configuration against a custom schema,
+// using runtime data when available instead of simulated mock data.
+func ValidateEdgeWithSchemaAndRuntimeData(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, sourcePortFullName string, edgeConfiguration []byte, edgeSchemaBytes []byte, runtimeData map[string][]byte) error {
 	// Get flow maps for port schemas and destinations (needed for simulation)
 	_, _, destinationsMap, portSchemaMap, _, err := GetFlowMaps(nodesMap)
 	if err != nil {
@@ -37,8 +43,8 @@ func ValidateEdgeWithSchema(ctx context.Context, nodesMap map[string]v1alpha1.Ti
 		return fmt.Errorf("invalid edge schema: %v", err)
 	}
 
-	// Simulate port data for the source port
-	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, nil)
+	// Simulate port data for the source port (using runtime data if available)
+	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, runtimeData)
 	if err != nil {
 		return fmt.Errorf("cannot get port data: %v", err)
 	}
