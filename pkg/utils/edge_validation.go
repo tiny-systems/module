@@ -16,6 +16,12 @@ import (
 // It simulates the source port data and evaluates the edge configuration,
 // then validates the result against the target port schema.
 func ValidateEdge(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, sourcePortFullName, targetPortFullName string, edgeConfiguration []byte) error {
+	return ValidateEdgeWithRuntimeData(ctx, nodesMap, sourcePortFullName, targetPortFullName, edgeConfiguration, nil)
+}
+
+// ValidateEdgeWithRuntimeData validates an edge's configuration against the target port's schema,
+// using runtime data when available instead of simulated mock data.
+func ValidateEdgeWithRuntimeData(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, sourcePortFullName, targetPortFullName string, edgeConfiguration []byte, runtimeData map[string][]byte) error {
 	// Get flow maps for port schemas and destinations
 	_, _, destinationsMap, portSchemaMap, _, err := GetFlowMaps(nodesMap)
 	if err != nil {
@@ -29,8 +35,8 @@ func ValidateEdge(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, so
 		return nil
 	}
 
-	// Simulate port data for the source port
-	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, nil)
+	// Simulate port data for the source port (using runtime data if available)
+	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, runtimeData)
 	if err != nil {
 		return fmt.Errorf("cannot get port data: %v", err)
 	}
