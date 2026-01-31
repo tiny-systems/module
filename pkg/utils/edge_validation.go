@@ -83,7 +83,10 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 		return fmt.Errorf("unable to create ajson node: %v", err)
 	}
 
-	// Create evaluator for JSONPath expressions
+	// Collect expression evaluation errors
+	var evalErrors []string
+
+	// Create evaluator for JSONPath expressions with error callback
 	e := evaluator.NewEvaluator(func(expression string) (interface{}, error) {
 		if expression == "" {
 			return nil, fmt.Errorf("expression is empty")
@@ -101,6 +104,8 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 			return nil, err
 		}
 		return resultUnpack, nil
+	}).WithErrorCallback(func(expression string, err error) {
+		evalErrors = append(evalErrors, fmt.Sprintf("{{%s}}: %v", expression, err))
 	})
 
 	// Use empty object if no configuration
@@ -112,6 +117,11 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 	portDataConfig, err := e.Eval(edgeConfiguration)
 	if err != nil {
 		return fmt.Errorf("eval error: %v", err)
+	}
+
+	// Check if any expression evaluation errors occurred
+	if len(evalErrors) > 0 {
+		return fmt.Errorf("expression error: %s", evalErrors[0])
 	}
 
 	// Validate against schema
