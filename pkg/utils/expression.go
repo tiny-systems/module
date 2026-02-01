@@ -2,11 +2,13 @@ package utils
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/tiny-systems/ajson"
+	"github.com/tiny-systems/module/pkg/evaluator"
 )
 
 // RunExpressionRequest contains the input for expression evaluation
@@ -100,4 +102,74 @@ func RunExpression(req *RunExpressionRequest) (*RunExpressionResponse, error) {
 	}
 
 	return resp, nil
+}
+
+// PreviewEdgeMappingRequest contains the input for edge mapping preview
+type PreviewEdgeMappingRequest struct {
+	// Configuration is the edge configuration JSON (may contain {{expression}} patterns)
+	Configuration string
+	// SourceData is the source port data to evaluate expressions against
+	SourceData string
+}
+
+// PreviewEdgeMappingResponse contains the result of edge mapping preview
+type PreviewEdgeMappingResponse struct {
+	// Result is the JSON-encoded result after evaluating all expressions
+	Result string
+	// Errors contains any expression evaluation errors that occurred
+	Errors []string
+}
+
+// PreviewEdgeMapping evaluates an edge configuration against source data.
+// It processes all {{expression}} patterns in the configuration and returns the transformed result.
+func PreviewEdgeMapping(req *PreviewEdgeMappingRequest) (*PreviewEdgeMappingResponse, error) {
+	if req.Configuration == "" {
+		return &PreviewEdgeMappingResponse{Result: "{}"}, nil
+	}
+
+	// Parse source data for JSONPath evaluation
+	var sourceNode *ajson.Node
+	var parseErr error
+	if req.SourceData != "" {
+		sourceNode, parseErr = ajson.Unmarshal([]byte(req.SourceData))
+		if parseErr != nil {
+			return nil, fmt.Errorf("failed to parse source data: %w", parseErr)
+		}
+	}
+
+	var evalErrors []string
+
+	// Create evaluator with callback that evaluates JSONPath expressions
+	eval := evaluator.NewEvaluator(func(expression string) (interface{}, error) {
+		if sourceNode == nil {
+			return nil, fmt.Errorf("no source data available")
+		}
+
+		// Evaluate JSONPath expression
+		result, err := ajson.Eval(sourceNode, expression)
+		if err != nil {
+			return nil, err
+		}
+
+		return result.Unpack()
+	}).WithErrorCallback(func(expression string, err error) {
+		evalErrors = append(evalErrors, fmt.Sprintf("%s: %s", expression, err.Error()))
+	})
+
+	// Evaluate the configuration
+	result, err := eval.Eval([]byte(req.Configuration))
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate configuration: %w", err)
+	}
+
+	// Marshal result to JSON
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	return &PreviewEdgeMappingResponse{
+		Result: string(resultJSON),
+		Errors: evalErrors,
+	}, nil
 }
