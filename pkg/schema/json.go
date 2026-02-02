@@ -174,6 +174,11 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 
 			if configurable || shared || params.PropertySchema.HasType(jsonschema.Object) || params.PropertySchema.HasType(jsonschema.Array) || params.PropertySchema.Type == nil {
 				// ensure we have definitions for configurable, shared, objects, arrays and empty schemes
+				// For configurable fields with no type (any/interface{}), default to object
+				// This ensures simulation doesn't return null for user-configurable context fields
+				if configurable && params.PropertySchema.Type == nil {
+					params.PropertySchema.AddType(jsonschema.Object)
+				}
 				refOnly := replaceRoot(getDefinitionName(params.Field.Type), params.PropertySchema)
 				*params.PropertySchema = refOnly
 			}
