@@ -76,17 +76,7 @@ func (se *JSONSchemaBasedDataGenerator) Generate(node *ajson.Node, clb Callback)
 
 	switch typ {
 	case "":
-		// empty schema - check for default value first
-		if d, _ := node.GetKey("default"); d != nil {
-			return d.Unpack()
-		}
-		// check if configurable (can hold any user-defined data)
-		configurable, _ := GetStrKey("configurable", node)
-		if configurable == "true" {
-			// Configurable fields without type should return empty object, not null
-			// This represents "user can configure this to any value"
-			return map[string]interface{}{}, nil
-		}
+		// empty schema - nil
 		return nil, nil
 	case "string", "number", "integer":
 		return getDefaultValue(typ, node)
