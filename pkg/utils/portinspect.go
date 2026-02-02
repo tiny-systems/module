@@ -16,12 +16,12 @@ import (
 // If runtimeData is provided, it will overlay actual trace data on top of the simulated data.
 // runtimeData is a map of port full names to their JSON-encoded data from trace spans.
 func SimulatePortData(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, inspectPortFullName string, runtimeData map[string][]byte) (interface{}, error) {
-	_, _, edgeConfigMap, portSchemaMap, _, err := GetFlowMaps(nodesMap)
+	_, portConfigMap, edgeConfigMap, portSchemaMap, _, err := GetFlowMaps(nodesMap)
 	if err != nil {
 		return nil, err
 	}
 
-	return SimulatePortDataFromMaps(ctx, portSchemaMap, edgeConfigMap, inspectPortFullName, runtimeData)
+	return SimulatePortDataFromMapsWithConfig(ctx, portSchemaMap, edgeConfigMap, portConfigMap, inspectPortFullName, runtimeData)
 }
 
 // SimulatePortDataFromMaps generates mock data using pre-computed flow maps.
@@ -30,6 +30,19 @@ func SimulatePortDataFromMaps(
 	ctx context.Context,
 	portSchemaMap map[string]*ajson.Node,
 	edgeConfigMap map[string][]Destination,
+	inspectPortFullName string,
+	runtimeData map[string][]byte,
+) (interface{}, error) {
+	return SimulatePortDataFromMapsWithConfig(ctx, portSchemaMap, edgeConfigMap, nil, inspectPortFullName, runtimeData)
+}
+
+// SimulatePortDataFromMapsWithConfig generates mock data using pre-computed flow maps and port configurations.
+// portConfigMap is used to get actual configured values from settings ports.
+func SimulatePortDataFromMapsWithConfig(
+	ctx context.Context,
+	portSchemaMap map[string]*ajson.Node,
+	edgeConfigMap map[string][]Destination,
+	portConfigMap map[string][]v1alpha1.TinyNodePortConfig,
 	inspectPortFullName string,
 	runtimeData map[string][]byte,
 ) (interface{}, error) {
@@ -51,7 +64,32 @@ func SimulatePortDataFromMaps(
 
 			_, p := ParseFullPortName(portStr)
 			if strings.HasPrefix(p, "_") {
-				// system ports like _settings, _control
+				// system ports like _settings - get actual configured value
+				if p == v1alpha1.SettingsPort && portConfigMap != nil {
+					if configs, ok := portConfigMap[portStr]; ok {
+						for _, pc := range configs {
+							if pc.From == "" && len(pc.Configuration) > 0 {
+								// Found settings configuration - extract the value using path
+								pathStr, _ := jsonschemagenerator.GetStrKey("path", n)
+								configNode, err := ajson.Unmarshal(pc.Configuration)
+								if err != nil {
+									return nil, false, nil
+								}
+								if pathStr == "" || pathStr == "$" {
+									result, _ := configNode.Unpack()
+									return result, true, nil
+								}
+								// Evaluate path to get nested value
+								resultNode, err := ajson.Eval(configNode, pathStr)
+								if err != nil {
+									return nil, false, nil
+								}
+								result, _ := resultNode.Unpack()
+								return result, true, nil
+							}
+						}
+					}
+				}
 				return nil, false, nil
 			}
 
