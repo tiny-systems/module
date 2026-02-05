@@ -525,6 +525,29 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Context, outputPort string, outputData any) any {
 
 	return func(outputCtx context.Context, outputPort string, outputData any) any {
+		// ControlPort messages trigger a status update to reflect new control state
+		// This ensures UI sees updated control values (e.g., Running status, Stop button)
+		if outputPort == v1alpha1.ControlPort {
+			// Invalidate port cache so ReadStatus picks up fresh Ports() with new control value
+			c.InvalidatePortCache()
+
+			// Capture current node state for debounced execution
+			currentNode := c.node
+
+			// Debounce status update to protect K8s API
+			c.reconcileDebouncer.Debounce(outputCtx, func() {
+				err := c.manager.PatchNode(context.Background(), currentNode, func(node *v1alpha1.TinyNode) error {
+					return c.ReadStatus(&node.Status)
+				})
+				if err != nil {
+					c.log.Error(err, "data handler: failed to patch node for control port",
+						"node", c.name,
+					)
+				}
+			})
+			return nil
+		}
+
 		if outputPort == v1alpha1.ReconcilePort {
 			// Node updater function - accumulate for batched execution
 			if nodeUpdater, ok := outputData.(func(node *v1alpha1.TinyNode) error); ok && nodeUpdater != nil {
