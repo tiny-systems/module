@@ -183,16 +183,20 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 		ma["schema"] = json.RawMessage(s)
 		ma["configuration"] = json.RawMessage(v.Configuration)
 
-		// Override configuration (NOT schema) from port-level Spec.Ports configs.
+		// Override configuration (NOT schema) from port-level Spec.Ports configs,
+		// but ONLY for non-source ports. Source ports (like _control) are component-controlled
+		// and their configuration should always reflect the component's current state.
 		// Schema always comes from Status.Ports to ensure component updates are reflected.
 		// User's configurable definitions from Spec.Ports are already merged via
 		// GetConfigurableDefinitions + UpdateWithDefinitions above.
-		for _, pc := range node.Spec.Ports {
-			if pc.From != "" || pc.Port != v.Name {
-				// Skip edge configs (From!="") and other ports
-				continue
+		if !v.Source {
+			for _, pc := range node.Spec.Ports {
+				if pc.From != "" || pc.Port != v.Name {
+					// Skip edge configs (From!="") and other ports
+					continue
+				}
+				ma["configuration"] = json.RawMessage(pc.Configuration)
 			}
-			ma["configuration"] = json.RawMessage(pc.Configuration)
 		}
 	}
 
