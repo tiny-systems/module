@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/microcosm-cc/bluemonday"
@@ -184,23 +183,16 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 		ma["schema"] = json.RawMessage(s)
 		ma["configuration"] = json.RawMessage(v.Configuration)
 
+		// Override configuration (not schema) from port-level Spec.Ports configs.
+		// Schema always comes from Status.Ports (the component's current schema).
+		// This ensures handle schemas stay up-to-date when component versions change.
 		for _, pc := range node.Spec.Ports {
 			if pc.From != "" || pc.Port != v.Name {
-				// do not update schema and configuration with edge data
+				// Skip edge configs (From!="") and other ports
 				continue
 			}
+			// Only override configuration, NOT schema
 			ma["configuration"] = json.RawMessage(pc.Configuration)
-			// Skip if schema is empty or "null" - preserve Status.Ports schema
-			if len(pc.Schema) == 0 || bytes.Equal(pc.Schema, []byte("null")) {
-				continue
-			}
-			updatedConfigSchema, err := schema.UpdateWithDefinitions(pc.Schema, defs)
-			if err != nil {
-				log.Debug().Err(err).Str("port", v.Name).Msg("unable to update spec port definitions, using original schema")
-				ma["schema"] = json.RawMessage(pc.Schema)
-				continue
-			}
-			ma["schema"] = json.RawMessage(updatedConfigSchema)
 		}
 	}
 
