@@ -544,8 +544,22 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			currentNode := c.node
 
 			// Debounce status update to protect K8s API
+			// MUST also drain pendingNodeUpdaters since this shares reconcileDebouncer
+			// with ReconcilePort — otherwise metadata updates (e.g. clearMetadata) are lost
 			c.reconcileDebouncer.Debounce(outputCtx, func() {
+				// Collect all pending updaters atomically
+				c.pendingNodeUpdatersLock.Lock()
+				updaters := c.pendingNodeUpdaters
+				c.pendingNodeUpdaters = nil
+				c.pendingNodeUpdatersLock.Unlock()
+
 				err := c.manager.PatchNode(context.Background(), currentNode, func(node *v1alpha1.TinyNode) error {
+					// Apply ALL accumulated metadata updates first
+					for _, updater := range updaters {
+						if err := updater(node); err != nil {
+							return err
+						}
+					}
 					return c.ReadStatus(&node.Status)
 				})
 				if err != nil {
