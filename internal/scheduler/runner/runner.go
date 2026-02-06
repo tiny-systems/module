@@ -77,8 +77,13 @@ type Runner struct {
 	reconcileDebouncer *ReconcileDebouncer
 
 	// pendingNodeUpdaters accumulates metadata update functions during debounce window
-	pendingNodeUpdaters   []func(*v1alpha1.TinyNode) error
+	pendingNodeUpdaters    []func(*v1alpha1.TinyNode) error
 	pendingNodeUpdatersLock *sync.Mutex
+
+	// activeEdges tracks busy edge timestamps for the single gauge callback
+	activeEdges       cmap.ConcurrentMap[string, int64]
+	gaugeOnce         sync.Once
+	gaugeRegistration metric.Registration
 }
 
 const (
@@ -108,6 +113,9 @@ func NewRunner(component m.Component) *Runner {
 
 		// accumulate metadata updaters during debounce window
 		pendingNodeUpdatersLock: &sync.Mutex{},
+
+		// single gauge callback tracks all active edges
+		activeEdges: cmap.New[int64](),
 
 		closeCh: make(chan struct{}),
 	}
@@ -474,10 +482,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 
 	err = errorpanic.Wrap(func() error {
 		// track busy edge metric
+		c.setGauge(time.Now().Unix(), msg.EdgeID)
+		defer c.clearGauge(msg.EdgeID)
+
 		ticker := time.NewTicker(time.Second * 3)
 		defer ticker.Stop()
-
-		c.setGauge(time.Now().Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
 
 		go func() {
 			for {
@@ -485,7 +494,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 				case <-ctx.Done():
 					return
 				case t := <-ticker.C:
-					c.setGauge(t.Unix(), msg.EdgeID, metrics.MetricEdgeBusy)
+					c.setGauge(t.Unix(), msg.EdgeID)
 				}
 			}
 		}()
@@ -670,6 +679,11 @@ func (c *Runner) Stop() {
 		c.reconcileDebouncer.Flush()
 	}
 
+	// Unregister gauge callback to prevent leaks
+	if c.gaugeRegistration != nil {
+		_ = c.gaugeRegistration.Unregister()
+	}
+
 	// Call OnDestroy on the component if it implements Destroyer interface
 	if destroyer, ok := c.component.(m.Destroyer); ok {
 		c.nodeLock.Lock()
@@ -693,6 +707,11 @@ func (c *Runner) StopWithoutCleanup() {
 	// Flush any pending reconcile updates before stopping
 	if c.reconcileDebouncer != nil {
 		c.reconcileDebouncer.Flush()
+	}
+
+	// Unregister gauge callback to prevent leaks
+	if c.gaugeRegistration != nil {
+		_ = c.gaugeRegistration.Unregister()
 	}
 
 	close(c.closeCh)
@@ -870,36 +889,46 @@ func (c *Runner) addSpanPortData(span trace.Span, data string) {
 		trace.WithAttributes(attribute.String("payload", data)))
 }
 
-func (c *Runner) setGauge(val int64, name string, m metrics.Metric) {
-	if name == "" {
+func (c *Runner) ensureEdgeGauge() {
+	c.gaugeOnce.Do(func() {
+		gauge, err := c.meter.Int64ObservableGauge(string(metrics.MetricEdgeBusy),
+			metric.WithUnit("1"),
+		)
+		if err != nil {
+			c.log.Error(err, "failed to create edge busy gauge")
+			return
+		}
+
+		c.gaugeRegistration, err = c.meter.RegisterCallback(
+			func(ctx context.Context, o metric.Observer) error {
+				for item := range c.activeEdges.IterBuffered() {
+					o.ObserveInt64(gauge, item.Val,
+						metric.WithAttributes(
+							attribute.String("element", item.Key),
+							attribute.String("flowID", c.flowName),
+							attribute.String("projectID", c.projectName),
+						))
+				}
+				return nil
+			},
+			gauge,
+		)
+		if err != nil {
+			c.log.Error(err, "failed to register edge busy gauge callback")
+		}
+	})
+}
+
+func (c *Runner) setGauge(val int64, edgeID string) {
+	if edgeID == "" {
 		return
 	}
-	gauge, _ := c.meter.Int64ObservableGauge(string(m),
-		metric.WithUnit("1"),
-	)
+	c.ensureEdgeGauge()
+	c.activeEdges.Set(edgeID, val)
+}
 
-	r, err := c.meter.RegisterCallback(
-		func(ctx context.Context, o metric.Observer) error {
-			o.ObserveInt64(gauge, val,
-				metric.WithAttributes(
-					attribute.String("element", name),
-					attribute.String("flowID", c.flowName),
-					attribute.String("projectID", c.projectName),
-				))
-			return nil
-		},
-		gauge,
-	)
-
-	if err != nil {
-		c.log.Error(err, "metric gauge err")
-		return
-	}
-
-	go func() {
-		time.Sleep(time.Second * 6)
-		_ = r.Unregister()
-	}()
+func (c *Runner) clearGauge(edgeID string) {
+	c.activeEdges.Remove(edgeID)
 }
 
 // getPortByName returns the port configuration by name
