@@ -84,6 +84,11 @@ type Runner struct {
 	activeEdges       cmap.ConcurrentMap[string, int64]
 	gaugeOnce         sync.Once
 	gaugeRegistration metric.Registration
+
+	// edgeCancels tracks cancel funcs for in-flight edge sends.
+	// When SetNode detects an edge was removed, it cancels the in-flight send,
+	// which propagates through gRPC to the target component.
+	edgeCancels cmap.ConcurrentMap[string, context.CancelFunc]
 }
 
 const (
@@ -116,6 +121,9 @@ func NewRunner(component m.Component) *Runner {
 
 		// single gauge callback tracks all active edges
 		activeEdges: cmap.New[int64](),
+
+		// cancel funcs for in-flight edge sends
+		edgeCancels: cmap.New[context.CancelFunc](),
 
 		closeCh: make(chan struct{}),
 	}
@@ -668,21 +676,43 @@ func (c *Runner) Node() v1alpha1.TinyNode {
 func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 
 	c.nodeLock.Lock()
-	defer c.nodeLock.Unlock()
-	//
-
+	oldEdges := c.node.Spec.Edges
 	c.flowName = node.Labels[v1alpha1.FlowNameLabel]
 	c.projectName = node.Labels[v1alpha1.ProjectNameLabel]
 	c.name = node.Name
-
-	//
 	c.node = node
+	c.nodeLock.Unlock()
+
+	// Cancel in-flight sends for removed edges
+	c.cancelRemovedEdges(oldEdges, node.Spec.Edges)
 
 	// Invalidate port cache when node spec changes, as component may now
 	// expose different ports based on the new configuration
 	c.InvalidatePortCache()
 
 	return c
+}
+
+// cancelRemovedEdges cancels in-flight sends for edges present in oldEdges but absent in newEdges.
+func (c *Runner) cancelRemovedEdges(oldEdges, newEdges []v1alpha1.TinyNodeEdge) {
+	newSet := make(map[string]struct{}, len(newEdges))
+	for _, e := range newEdges {
+		newSet[e.ID] = struct{}{}
+	}
+	for _, e := range oldEdges {
+		if _, ok := newSet[e.ID]; ok {
+			continue
+		}
+		if cancel, ok := c.edgeCancels.Get(e.ID); ok {
+			c.log.Info("cancelling in-flight send for removed edge",
+				"edgeID", e.ID,
+				"port", e.Port,
+				"to", e.To,
+				"node", c.name,
+			)
+			cancel()
+		}
+	}
 }
 
 // Stop cancels all ongoing requests and calls component cleanup if implemented.
@@ -734,6 +764,14 @@ func (c *Runner) StopWithoutCleanup() {
 // sendToEdgeWithRetry sends a message to an edge with retry logic.
 // It only retries on transient errors. Permanent errors and context cancellation stop immediately.
 func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort, edgeTo string, dataBytes []byte, responseConfig interface{}, handler Handler) (any, error) {
+	// Track cancel func so SetNode can cancel in-flight sends for removed edges.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if edge.ID != "" {
+		c.edgeCancels.Set(edge.ID, cancel)
+		defer c.edgeCancels.Remove(edge.ID)
+	}
+
 	msg := &Msg{
 		To:     edgeTo,
 		From:   fromPort,
