@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/go-logr/logr"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	perrors "github.com/tiny-systems/module/pkg/errors"
 	"testing"
@@ -25,7 +26,8 @@ func mockHandler(failCount int, err error, result any) Handler {
 // createTestRunner creates a minimal runner for testing
 func createTestRunner() *Runner {
 	runner := &Runner{
-		log: logr.Discard(), // Use discard logger for tests
+		log:         logr.Discard(),
+		edgeCancels: cmap.New[context.CancelFunc](),
 	}
 	return runner
 }
