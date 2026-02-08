@@ -361,7 +361,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		}
 		portData = portInputData.Interface()
 
-	} else if portConfig != nil && len(portConfig.Configuration) > 0 && string(portConfig.Configuration) != "null" {
+	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
 			return nil, errors.Wrap(err, "ajson parse requestData payload error")
@@ -405,10 +405,8 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		}
 		portData = portInputData.Interface()
 	} else {
-		// no edge config — use zero-value of the port's configuration type
-		// (not the live component state, which would create a feedback loop
-		// when user clears configuration to "none")
-		portData = portInputData.Interface()
+		// default is the state of a port's config
+		portData = nodePort.Configuration
 	}
 
 	// we do not send data from signals if they are not changed to prevent work disruptions due to periodic reconciliations
