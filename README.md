@@ -664,6 +664,40 @@ case "_settings":
     // Store settings for later use
 ```
 
+#### Port Delivery Ordering
+
+**There is no guaranteed delivery order between system ports.** The `_settings`, `_reconcile`, and `_control` ports may fire in any sequence after a pod restart or during normal operation. Module creators must handle all possible orderings.
+
+Common pitfall: a component restores state from metadata via `_reconcile`, then a `_settings` delivery arrives with stale CRD values and overwrites it. The SDK does not enforce any ordering — **it is the module creator's responsibility to handle this**.
+
+Example: if your component stores user-provided context via `_control` and persists it to metadata, you must protect it from being overwritten by `_settings`:
+
+```go
+type Component struct {
+    settings         Settings
+    contextFromControl bool // tracks whether context was set by control/metadata
+}
+
+case v1alpha1.SettingsPort:
+    in := msg.(Settings)
+    if c.contextFromControl {
+        in.Context = c.settings.Context // preserve control-set context
+    }
+    c.settings = in
+
+case v1alpha1.ReconcilePort:
+    // restore from metadata
+    if cfg, ok := restoreFromMetadata(node); ok {
+        c.settings = cfg
+        c.contextFromControl = true
+    }
+
+case v1alpha1.ControlPort:
+    ctrl := msg.(Control)
+    c.settings.Context = ctrl.Context
+    c.contextFromControl = true
+```
+
 #### Error Handling
 
 ##### Transient Errors
