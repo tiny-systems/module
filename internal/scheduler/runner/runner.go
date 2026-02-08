@@ -361,7 +361,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		}
 		portData = portInputData.Interface()
 
-	} else if portConfig != nil && len(portConfig.Configuration) > 0 {
+	} else if portConfig != nil && len(portConfig.Configuration) > 0 && string(portConfig.Configuration) != "null" {
 		requestDataNode, err := ajson.Unmarshal(msg.Data)
 		if err != nil {
 			return nil, errors.Wrap(err, "ajson parse requestData payload error")
