@@ -405,8 +405,10 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		}
 		portData = portInputData.Interface()
 	} else {
-		// default is the state of a port's config
-		portData = nodePort.Configuration
+		// no edge config — use zero-value of the port's configuration type
+		// (not the live component state, which would create a feedback loop
+		// when user clears configuration to "none")
+		portData = portInputData.Interface()
 	}
 
 	// we do not send data from signals if they are not changed to prevent work disruptions due to periodic reconciliations
