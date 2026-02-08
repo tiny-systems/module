@@ -504,6 +504,8 @@ func UpdatePortConfigsFromRequest(ports []v1alpha1.TinyNodePortConfig, flowID, n
 		portConfigs = append(portConfigs, pc)
 	}
 
+	portConfigs = cleanLegacyPortConfigs(portConfigs)
+
 	// Sort for consistent ordering
 	sort.Slice(portConfigs, func(i, j int) bool {
 		hash1, _ := hashstructure.Hash(portConfigs[i], hashstructure.FormatV2, nil)
@@ -695,6 +697,8 @@ func UpdatePortConfigsFromRequestWithDefaults(
 		portConfigs = append(portConfigs, pc)
 	}
 
+	portConfigs = cleanLegacyPortConfigs(portConfigs)
+
 	// Sort for consistent ordering
 	sort.Slice(portConfigs, func(i, j int) bool {
 		hash1, _ := hashstructure.Hash(portConfigs[i], hashstructure.FormatV2, nil)
@@ -703,6 +707,25 @@ func UpdatePortConfigsFromRequestWithDefaults(
 	})
 
 	return portConfigs
+}
+
+// cleanLegacyPortConfigs removes legacy port configs (FlowID="") that have
+// a flow-scoped replacement for the same From+Port.
+func cleanLegacyPortConfigs(configs []v1alpha1.TinyNodePortConfig) []v1alpha1.TinyNodePortConfig {
+	flowScoped := make(map[string]bool)
+	for _, pc := range configs {
+		if pc.FlowID != "" {
+			flowScoped[pc.From+"->"+pc.Port] = true
+		}
+	}
+	result := configs[:0]
+	for _, pc := range configs {
+		if pc.FlowID == "" && flowScoped[pc.From+"->"+pc.Port] {
+			continue
+		}
+		result = append(result, pc)
+	}
+	return result
 }
 
 // BuildDefaultSchemasMap creates a map of full port names to their default schemas
