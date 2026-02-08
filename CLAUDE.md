@@ -34,6 +34,37 @@ return handler(ctx, "error", Error{...})
 
 When writing components, always ask: "Does this handler call need to return a response to an upstream blocker?" If yes (which is most cases), return the handler result.
 
+## CRITICAL: System Port Delivery Order
+
+**System ports (`_settings`, `_control`, `_reconcile`) have NO guaranteed delivery order.**
+
+On pod restart or leadership change, `_reconcile` may fire before `_settings`. Components that persist state to metadata must guard against reconcile overwriting fresh in-memory values with stale metadata.
+
+**Pattern: use a guard flag to prevent stale overwrites:**
+
+```go
+type Component struct {
+    settings         Settings
+    settingsFromPort bool // prevents _reconcile from overwriting with stale metadata
+}
+
+// _settings handler — set the flag
+case v1alpha1.SettingsPort:
+    c.settings = in
+    c.settingsFromPort = true
+    // if component is active, also persist to metadata
+
+// _reconcile handler — check the flag
+func (c *Component) handleReconcile(...) {
+    if c.settingsFromPort {
+        return nil // don't overwrite user-provided settings
+    }
+    c.restoreFromMetadata(metadata)
+}
+```
+
+**Also: when active state changes settings (e.g. running cron receives new settings), persist to metadata immediately** so subsequent reconciles don't clobber the update.
+
 ## SDK vs Module Responsibilities
 
 - SDK handles serialization/deserialization
