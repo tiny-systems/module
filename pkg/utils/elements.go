@@ -709,18 +709,12 @@ func UpdatePortConfigsFromRequestWithDefaults(
 	return portConfigs
 }
 
-// cleanLegacyPortConfigs removes legacy port configs (FlowID="") that have
-// a flow-scoped replacement for the same From+Port.
+// cleanLegacyPortConfigs removes all legacy port configs (FlowID="").
+// All port configs should be flow-scoped.
 func cleanLegacyPortConfigs(configs []v1alpha1.TinyNodePortConfig) []v1alpha1.TinyNodePortConfig {
-	flowScoped := make(map[string]bool)
-	for _, pc := range configs {
-		if pc.FlowID != "" {
-			flowScoped[pc.From+"->"+pc.Port] = true
-		}
-	}
 	result := configs[:0]
 	for _, pc := range configs {
-		if pc.FlowID == "" && flowScoped[pc.From+"->"+pc.Port] {
+		if pc.FlowID == "" {
 			continue
 		}
 		result = append(result, pc)
