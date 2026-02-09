@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 const (
@@ -198,6 +199,30 @@ func ApplyTraceStatToNode(nodeMap map[string]interface{}, ts *TraceStatistics) {
 			"sequence": getIndexByValue(ts.Sequence, target),
 		}
 		return
+	}
+
+	// Third pass: check target handles for edge latency (sink nodes with no output ports)
+	for _, handle := range handles {
+		handleMap, ok := handle.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if GetStr(handleMap["type"]) != "target" {
+			continue
+		}
+		target := GetPortFullName(nodeID, GetStr(handleMap["id"]))
+		for key, lat := range ts.Latencies {
+			if !strings.HasSuffix(key, target) || key == target {
+				continue
+			}
+			data["trace"] = map[string]interface{}{
+				"error":    hasError,
+				"latency":  lat,
+				"port":     GetStr(handleMap["id"]),
+				"sequence": getIndexByValue(ts.Sequence, key),
+			}
+			return
+		}
 	}
 
 	// Fallback: check non-visible ports (like setting or control ports)
