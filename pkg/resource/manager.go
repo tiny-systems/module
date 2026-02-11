@@ -854,6 +854,16 @@ func (m Manager) GetProject(ctx context.Context, name string, namespace string) 
 	return project, nil
 }
 
+func (m Manager) UpdateProjectDescription(ctx context.Context, name string, namespace string, description string) error {
+	project := &v1alpha1.TinyProject{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := m.client.Get(ctx, key, project); err != nil {
+		return err
+	}
+	project.Spec.Description = description
+	return m.client.Update(ctx, project)
+}
+
 func (m Manager) RenameProject(ctx context.Context, name string, namespace string, newName string) error {
 
 	project := &v1alpha1.TinyProject{}
