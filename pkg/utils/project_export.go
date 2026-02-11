@@ -34,10 +34,11 @@ type ExportWidget struct {
 
 // ProjectExport represents the full project export format
 type ProjectExport struct {
-	Version   int                      `json:"version"`
-	TinyFlows []ExportFlow             `json:"tinyFlows"`
-	Elements  []map[string]interface{} `json:"elements"`
-	Pages     []ExportPage             `json:"pages"`
+	Version     int                      `json:"version"`
+	Description string                   `json:"description,omitempty"`
+	TinyFlows   []ExportFlow             `json:"tinyFlows"`
+	Elements    []map[string]interface{} `json:"elements"`
+	Pages       []ExportPage             `json:"pages"`
 }
 
 // CurrentExportVersion is the current version of the export format
