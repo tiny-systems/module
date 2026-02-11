@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+
 	helmclient "github.com/mittwald/go-helm-client"
 	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -596,10 +596,9 @@ func (m Manager) CreateSignal(ctx context.Context, nodeName, nodeNamespace strin
 	}
 
 	newSignal.Spec = v1alpha1.TinySignalSpec{
-		Node:  nodeName,
-		Port:  port,
-		Data:  data,
-		Nonce: uuid.Must(uuid.NewRandom()).String(),
+		Node: nodeName,
+		Port: port,
+		Data: data,
 	}
 
 	if errors.IsNotFound(err) {

@@ -51,8 +51,7 @@ const (
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
 
-	SignalNonceAnnotation = "tinysystems.io/signal-nonce"
-	NodeLabelAnnotation   = "tinysystems.io/node-label"
+	NodeLabelAnnotation = "tinysystems.io/node-label"
 	NodeCommentAnnotation = "tinysystems.io/node-comment"
 
 	IngressHostNameSuffixAnnotation = "tinysystems.io/ingress-hostname-suffix"

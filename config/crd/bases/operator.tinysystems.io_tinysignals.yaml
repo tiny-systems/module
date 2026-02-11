@@ -46,11 +46,6 @@ spec:
               node:
                 description: Node is the name of the TinyNode to signal
                 type: string
-              nonce:
-                description: |-
-                  Nonce is a unique identifier for this signal firing.
-                  Changing the nonce triggers a new signal delivery.
-                type: string
               port:
                 description: Port is the port on the node to send the signal to
                 type: string
@@ -60,12 +55,6 @@ spec:
             type: object
           status:
             description: TinySignalStatus defines the observed state of TinySignal
-            properties:
-              processedNonce:
-                description: |-
-                  ProcessedNonce is the last nonce that was successfully processed.
-                  Used to determine if a signal needs to be re-fired.
-                type: string
             type: object
         type: object
     served: true

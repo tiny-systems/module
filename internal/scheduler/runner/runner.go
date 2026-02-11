@@ -63,15 +63,8 @@ type Runner struct {
 	//
 	nodeLock *sync.Mutex
 
-	// caching requests => responses, errors
-	portMsg   cmap.ConcurrentMap[string, any]
-	portRes   cmap.ConcurrentMap[string, any]
-	portErr   cmap.ConcurrentMap[string, error]
-	portNonce cmap.ConcurrentMap[string, string]
-
-	// dedupLock protects the dedup check-and-set operation to ensure atomicity.
-	// Without this, concurrent signals could race between checking and setting cache values.
-	dedupLock *sync.Mutex
+	// settings dedup: skip Handle() when _settings data hasn't changed
+	portMsg cmap.ConcurrentMap[string, any]
 
 	// reconcileDebouncer coalesces rapid reconcile requests to protect K8s API server
 	reconcileDebouncer *ReconcileDebouncer
@@ -102,16 +95,8 @@ func NewRunner(component m.Component) *Runner {
 
 		nodePortsLock: &sync.RWMutex{},
 
-		// msg cache
+		// settings dedup cache
 		portMsg: cmap.New[any](),
-		// response cache
-		portRes: cmap.New[any](),
-		// response error cache
-		portErr: cmap.New[error](),
-		// last port message nonce
-		portNonce: cmap.New[string](),
-		// dedup lock for atomic check-and-set
-		dedupLock: &sync.Mutex{},
 
 		// debounce reconcile requests to protect K8s API (1s window)
 		reconcileDebouncer: NewReconcileDebouncer(time.Second),
@@ -409,28 +394,16 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		portData = nodePort.Configuration
 	}
 
-	// we do not send data from signals if they are not changed to prevent work disruptions due to periodic reconciliations
-	if msg.From == FromSignal || port == v1alpha1.SettingsPort {
-		// Lock to ensure atomic check-and-set of dedup cache.
-		// Without this, concurrent signals could race: one checks cache, another updates it,
-		// leading to incorrect dedup decisions or inconsistent cache state.
-		c.dedupLock.Lock()
+	// Skip settings delivery when data hasn't changed between reconciliations
+	if port == v1alpha1.SettingsPort {
 		if prevPortData, ok := c.portMsg.Get(port); ok && cmp.Equal(portData, prevPortData) {
-			if prevPortNonce, ok := c.portNonce.Get(port); ok && msg.Nonce == prevPortNonce {
-				c.log.Info("runner msg handler: skipping duplicate signal (same data and nonce)",
-					"port", port,
-					"node", c.name,
-					"nonce", msg.Nonce,
-				)
-				prevResp, _ := c.portRes.Get(port)
-				prevErr, _ := c.portErr.Get(port)
-				c.dedupLock.Unlock()
-				return prevResp, prevErr
-			}
+			c.log.Info("runner msg handler: skipping settings (data unchanged)",
+				"port", port,
+				"node", c.name,
+			)
+			return nil, nil
 		}
 		c.portMsg.Set(port, portData)
-		c.portNonce.Set(port, msg.Nonce)
-		c.dedupLock.Unlock()
 	}
 
 	u, err := uuid.NewUUID()
@@ -532,9 +505,6 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 			"hasResponse", resp != nil,
 		)
 	}
-
-	c.portErr.Set(port, err)
-	c.portRes.Set(port, resp)
 
 	return resp, err
 }

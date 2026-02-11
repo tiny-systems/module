@@ -11,8 +11,6 @@ type Msg struct {
 	To   string `json:"to"`
 	Data []byte `json:"data"`
 
-	Nonce string `json:"nonce,omitempty"`
-
 	//
 	Resp interface{} `json:"-"`
 }
