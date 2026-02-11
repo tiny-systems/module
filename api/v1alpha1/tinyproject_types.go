@@ -27,6 +27,9 @@ import (
 type TinyProjectSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	// Description is a markdown description of the project
+	Description string `json:"description,omitempty"`
 }
 
 // TinyProjectStatus defines the observed state of TinyProject
