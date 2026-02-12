@@ -41,6 +41,7 @@ spec:
             description: TinyProjectSpec defines the desired state of TinyProject
             properties:
               description:
+                description: Description is a markdown description of the project
                 type: string
             type: object
           status:
