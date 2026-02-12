@@ -67,10 +67,8 @@ type TinyWidget struct {
 	GridY       int    `json:"gridY,omitempty"`
 	GridW       int    `json:"gridW,omitempty"`
 	GridH       int    `json:"gridH,omitempty"`
-	// Content widget fields (Port=="" && ContentType!="" means content widget)
-	ContentType string `json:"contentType,omitempty"` // e.g. "markdown"
-	Schema      []byte `json:"schema,omitempty"`      // Full JSON Schema for content widget
-	Data        []byte `json:"data,omitempty"`         // JSON data (e.g. {"content":"# Hello"})
+	Schema []byte `json:"schema,omitempty"` // Full JSON Schema (content widgets: Port=="")
+	Data   []byte `json:"data,omitempty"`   // JSON data (content widgets: Port=="")
 }
 
 func init() {
