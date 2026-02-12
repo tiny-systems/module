@@ -44,6 +44,13 @@ spec:
                   to remove/update
                 items:
                   properties:
+                    contentType:
+                      description: Content widget fields (Port=="" && ContentType!=""
+                        means content widget)
+                      type: string
+                    data:
+                      format: byte
+                      type: string
                     gridH:
                       type: integer
                     gridW:
@@ -55,6 +62,9 @@ spec:
                     name:
                       type: string
                     port:
+                      type: string
+                    schema:
+                      format: byte
                       type: string
                     schemaPatch:
                       format: byte
