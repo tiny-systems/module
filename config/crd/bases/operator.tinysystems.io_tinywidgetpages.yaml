@@ -44,9 +44,6 @@ spec:
                   to remove/update
                 items:
                   properties:
-                    data:
-                      format: byte
-                      type: string
                     gridH:
                       type: integer
                     gridW:
@@ -58,9 +55,6 @@ spec:
                     name:
                       type: string
                     port:
-                      type: string
-                    schema:
-                      format: byte
                       type: string
                     schemaPatch:
                       format: byte
