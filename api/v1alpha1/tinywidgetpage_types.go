@@ -67,8 +67,6 @@ type TinyWidget struct {
 	GridY       int    `json:"gridY,omitempty"`
 	GridW       int    `json:"gridW,omitempty"`
 	GridH       int    `json:"gridH,omitempty"`
-	Schema []byte `json:"schema,omitempty"` // Full JSON Schema (content widgets: Port=="")
-	Data   []byte `json:"data,omitempty"`   // JSON data (content widgets: Port=="")
 }
 
 func init() {

@@ -30,8 +30,6 @@ type ExportWidget struct {
 	GridW       int             `json:"gridW"`
 	GridH       int             `json:"gridH"`
 	SchemaPatch json.RawMessage `json:"schemaPatch,omitempty"`
-	Schema      json.RawMessage `json:"schema,omitempty"`
-	Data        json.RawMessage `json:"data,omitempty"`
 }
 
 // ProjectExport represents the full project export format
@@ -164,11 +162,6 @@ func validatePage(index int, page *ExportPage) {
 
 	for i, widget := range page.Widgets {
 		widgetLogCtx := logCtx.With().Int("widgetIndex", i).Str("widgetPort", widget.Port).Logger()
-
-		// Content widgets (no port) don't need port validation
-		if widget.Port == "" {
-			continue
-		}
 
 		// Validate port format: must be "nodeId:portName"
 		if widget.Port == "" {
