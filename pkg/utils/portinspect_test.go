@@ -1119,6 +1119,467 @@ func TestSimulatePortData_SharedDefinitionConsistency(t *testing.T) {
 	}
 }
 
+// TestSimulatePortData_ArraySplitItemNotModeled verifies that when an array_split
+// component splits an array of objects, the individual item properties are available
+// on the source port for downstream edge expressions like $.item.method.
+//
+// This is the real-world scenario: ticker outputs {context, endpoints: [{method, url, ...}]},
+// array_split splits endpoints into individual items, and http_request consumes $.item.method.
+//
+// The bug: commit 29000d8 ("Only annotate configurable/shared definitions with port")
+// stopped adding the "port" annotation to non-configurable definitions like ItemContext.
+// Without the "port" annotation, the generator callback can't trace back through the edge
+// to discover that ItemContext should have {method, url, contentType} properties.
+// Result: $.item resolves to null, all downstream expressions fail.
+func TestSimulatePortData_ArraySplitItemNotModeled(t *testing.T) {
+	ctx := context.Background()
+
+	// Source node (e.g., ticker) outputs an object with an endpoints array.
+	// Each endpoint has method, url, contentType properties.
+	sourceOutSchema := []byte(`{
+		"$defs": {
+			"Endpoint": {
+				"type": "object",
+				"properties": {
+					"method": {"type": "string"},
+					"url": {"type": "string"},
+					"contentType": {"type": "string"}
+				}
+			},
+			"Context": {
+				"configurable": true,
+				"type": "object",
+				"path": "$.context"
+			},
+			"OutMessage": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context"},
+					"endpoints": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/Endpoint"}
+					}
+				}
+			}
+		},
+		"$ref": "#/$defs/OutMessage"
+	}`)
+
+	// array_split "in" target port schema (from Go struct).
+	// Context is configurable, ItemContext is shared (propagates through edges).
+	splitInSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"configurable": true,
+				"type": "object",
+				"path": "$.context"
+			},
+			"ItemContext": {
+				"shared": true,
+				"type": "object",
+				"path": "$.array"
+			},
+			"InMessage": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context"},
+					"array": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/ItemContext"}
+					}
+				},
+				"required": ["array"]
+			}
+		},
+		"$ref": "#/$defs/InMessage"
+	}`)
+
+	// array_split "out" source port schema (ItemContext is shared).
+	splitOutSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"type": "object",
+				"path": "$.context"
+			},
+			"ItemContext": {
+				"shared": true,
+				"type": "object",
+				"path": "$.item"
+			},
+			"OutMessage": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context"},
+					"item": {"$ref": "#/$defs/ItemContext"}
+				}
+			}
+		},
+		"$ref": "#/$defs/OutMessage"
+	}`)
+
+	// http_request "request" target port schema — expects method, url, contentType, timeout.
+	requestSchema := []byte(`{
+		"$defs": {
+			"Request": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"method": {"type": "string"},
+					"url": {"type": "string"},
+					"contentType": {"type": "string"},
+					"timeout": {"type": "integer"}
+				}
+			}
+		},
+		"$ref": "#/$defs/Request"
+	}`)
+
+	// Source node: ticker with endpoints output
+	sourceNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "ticker",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e1", Port: "out", To: "split:in"},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "out", Source: true, Schema: sourceOutSchema},
+			},
+		},
+	}
+	sourceNode.Name = "source"
+
+	// Edge schema stored on split:in — this is what the platform saves when
+	// the user configures the edge. It has rich ItemContext with properties
+	// derived from the upstream ticker's endpoint type.
+	splitInEdgeSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"configurable": true,
+				"type": "object",
+				"path": "$.context"
+			},
+			"ItemContext": {
+				"shared": true,
+				"type": "object",
+				"path": "$.array",
+				"properties": {
+					"method": {"type": "string"},
+					"url": {"type": "string"},
+					"contentType": {"type": "string"}
+				}
+			},
+			"InMessage": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context"},
+					"array": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/ItemContext"}
+					}
+				},
+				"required": ["array"]
+			}
+		},
+		"$ref": "#/$defs/InMessage"
+	}`)
+
+	// Split node: array_split with in (target) and out (source)
+	splitNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "array_split",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e2", Port: "out", To: "target:request"},
+			},
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					// Edge config from source:out → split:in
+					Port:          "in",
+					From:          "source:out",
+					Configuration: []byte(`{"context": "{{$}}", "array": "{{$.endpoints}}"}`),
+					Schema:        splitInEdgeSchema,
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "in", Source: false, Schema: splitInSchema},
+				{Name: "out", Source: true, Schema: splitOutSchema},
+			},
+		},
+	}
+	splitNode.Name = "split"
+
+	// Target node: http_request consuming item properties
+	targetNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "http_request",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					// Edge config from split:out → target:request
+					Port:          "request",
+					From:          "split:out",
+					Configuration: []byte(`{"method": "{{$.item.method}}", "url": "{{$.item.url}}", "contentType": "{{$.item.contentType}}", "timeout": 10}`),
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "request", Source: false, Schema: requestSchema},
+			},
+		},
+	}
+	targetNode.Name = "target"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"source": sourceNode,
+		"split":  splitNode,
+		"target": targetNode,
+	}
+
+	// Test 1: Simulate split:out and verify item has properties
+	t.Run("split out port item should have properties", func(t *testing.T) {
+		result, err := SimulatePortData(ctx, nodesMap, "split:out", nil)
+		if err != nil {
+			t.Fatalf("SimulatePortData(split:out) error = %v", err)
+		}
+
+		m, ok := result.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected map, got %T: %v", result, result)
+		}
+
+		// item must NOT be null — it should be an object with endpoint properties
+		item := m["item"]
+		if item == nil {
+			t.Fatal("item is nil — ItemContext definition was not properly modeled. " +
+				"The 'port' annotation is missing on ItemContext because it's not " +
+				"configurable/shared, so the generator can't trace back through " +
+				"the edge to discover the item's properties.")
+		}
+
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			t.Fatalf("item should be an object with properties, got %T: %v", item, item)
+		}
+
+		// Item should have the endpoint properties from the source's Endpoint type
+		for _, field := range []string{"method", "url", "contentType"} {
+			if itemMap[field] == nil {
+				t.Errorf("item.%s is nil — endpoint properties not propagated through array_split", field)
+			}
+		}
+	})
+
+	// Test 2: Validate the edge split:out → target:request
+	// Expressions like {{$.item.method}} should resolve to strings, not null
+	t.Run("edge validation split to target should pass", func(t *testing.T) {
+		err := ValidateEdgeWithRuntimeData(
+			ctx,
+			nodesMap,
+			"split:out",
+			"target:request",
+			[]byte(`{"method": "{{$.item.method}}", "url": "{{$.item.url}}", "contentType": "{{$.item.contentType}}", "timeout": 10}`),
+			nil,
+		)
+		if err != nil {
+			t.Errorf("ValidateEdgeWithRuntimeData() error = %v — "+
+				"item properties should be resolvable but are null because "+
+				"ItemContext lacks 'port' annotation", err)
+		}
+	})
+}
+
+// TestGetFlowMaps_ArraySplitPropertyPropagation verifies that GetFlowMaps propagates
+// rich definitions from edge schemas to source ports. When array_split's "in" port
+// has an edge schema with ItemContext properties (from the upstream data mapping),
+// those properties should appear on the "out" port's ItemContext definition.
+//
+// Shared definitions (like ItemContext) don't get "port" annotation — they propagate
+// their schema (properties) directly. Only configurable definitions get "port" for
+// edge tracing.
+func TestGetFlowMaps_ArraySplitPropertyPropagation(t *testing.T) {
+	// array_split "in" target port — Status schema has bare ItemContext
+	splitInStatusSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"configurable": true,
+				"type": "object",
+				"path": "$.context"
+			},
+			"ItemContext": {
+				"shared": true,
+				"type": "object",
+				"path": "$.array"
+			},
+			"InMessage": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context"},
+					"array": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/ItemContext"}
+					}
+				}
+			}
+		},
+		"$ref": "#/$defs/InMessage"
+	}`)
+
+	// Edge schema on "in" port — has rich ItemContext with properties from upstream
+	splitInEdgeSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"configurable": true,
+				"type": "object",
+				"path": "$.context"
+			},
+			"ItemContext": {
+				"shared": true,
+				"type": "object",
+				"path": "$.array",
+				"properties": {
+					"method": {"type": "string"},
+					"url": {"type": "string"},
+					"contentType": {"type": "string"}
+				}
+			},
+			"InMessage": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context"},
+					"array": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/ItemContext"}
+					}
+				}
+			}
+		},
+		"$ref": "#/$defs/InMessage"
+	}`)
+
+	// array_split "out" source port — bare ItemContext
+	splitOutSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"type": "object",
+				"path": "$.context"
+			},
+			"ItemContext": {
+				"shared": true,
+				"type": "object",
+				"path": "$.item"
+			},
+			"OutMessage": {
+				"type": "object",
+				"path": "$",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context"},
+					"item": {"$ref": "#/$defs/ItemContext"}
+				}
+			}
+		},
+		"$ref": "#/$defs/OutMessage"
+	}`)
+
+	splitNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "array_split",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port:   "in",
+					From:   "source:out",
+					Schema: splitInEdgeSchema,
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "in", Source: false, Schema: splitInStatusSchema},
+				{Name: "out", Source: true, Schema: splitOutSchema},
+			},
+		},
+	}
+	splitNode.Name = "split"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"split": splitNode,
+	}
+
+	_, _, _, portSchemaMap, _, err := GetFlowMaps(nodesMap)
+	if err != nil {
+		t.Fatalf("GetFlowMaps() error = %v", err)
+	}
+
+	// Check the out port's schema
+	outSchema, ok := portSchemaMap["split:out"]
+	if !ok {
+		t.Fatal("portSchemaMap missing split:out")
+	}
+
+	defs, err := outSchema.GetKey("$defs")
+	if err != nil {
+		t.Fatalf("split:out schema has no $defs: %v", err)
+	}
+
+	// Context should have "port" annotation (it's configurable — needs edge tracing)
+	contextDef, err := defs.GetKey("Context")
+	if err != nil {
+		t.Fatalf("split:out $defs missing Context: %v", err)
+	}
+	contextPort, _ := contextDef.GetKey("port")
+	if contextPort == nil || !contextPort.IsString() {
+		t.Error("Context definition in out port should have 'port' annotation — " +
+			"it's configurable, so this should work")
+	}
+
+	// ItemContext should NOT have "port" annotation (shared, not configurable).
+	// Instead, it should have PROPERTIES propagated from the edge schema.
+	itemDef, err := defs.GetKey("ItemContext")
+	if err != nil {
+		t.Fatalf("split:out $defs missing ItemContext: %v", err)
+	}
+
+	// Check that ItemContext has properties from the edge schema
+	itemProps, err := itemDef.GetKey("properties")
+	if err != nil || itemProps == nil || !itemProps.IsObject() {
+		t.Fatal("ItemContext in out port should have 'properties' from edge schema — " +
+			"edge schema enrichment did not propagate to source port")
+	}
+
+	keys := itemProps.Keys()
+	hasMethod := false
+	hasURL := false
+	hasContentType := false
+	for _, k := range keys {
+		switch k {
+		case "method":
+			hasMethod = true
+		case "url":
+			hasURL = true
+		case "contentType":
+			hasContentType = true
+		}
+	}
+
+	if !hasMethod {
+		t.Error("ItemContext in out port missing 'method' property")
+	}
+	if !hasURL {
+		t.Error("ItemContext in out port missing 'url' property")
+	}
+	if !hasContentType {
+		t.Error("ItemContext in out port missing 'contentType' property")
+	}
+}
+
 // Helper to create ajson nodes for testing
 func mustUnmarshal(s string) *ajson.Node {
 	n, err := ajson.Unmarshal([]byte(s))

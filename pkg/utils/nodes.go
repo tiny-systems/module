@@ -460,19 +460,58 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 			}
 
 			for k, v := range portDefinitions {
-				// Only annotate configurable/shared definitions with port.
-				// These are the definitions that need edge evaluation via the
-				// generator callback. Non-configurable definitions (like root
+				// Only annotate configurable definitions with port.
+				// Configurable definitions need edge evaluation via the
+				// generator callback (trace back through edges to get data).
+				// Shared definitions propagate their schema (properties)
+				// but don't need edge tracing — the generator uses their
+				// properties directly. Non-tagged definitions (like root
 				// types Start, Settings, or simple types String) should NOT be
 				// intercepted — the generator iterates their properties normally.
 				configurable, _ := schema.GetBool("configurable", v)
-				shared, _ := schema.GetBool("shared", v)
-				if configurable || shared {
+				if configurable {
 					_ = v.AppendObject("port", ajson.StringNode("", portID))
 				}
 				nodeTargetDefinitions[k] = v
 				if port.Name == v1alpha1.SettingsPort {
 					nodeSettingsDefinitions[k] = v
+				}
+			}
+
+			// Also enrich definitions from edge schemas (Spec.Ports with From != "").
+			// Edge schemas contain richer definitions from the user's edge configuration
+			// (e.g., ItemContext with actual properties derived from upstream data mapping).
+			// These override bare definitions from Status schema.
+			for _, pc := range node.Spec.Ports {
+				if pc.From == "" || pc.Port != port.Name || len(pc.Schema) == 0 {
+					continue
+				}
+				edgeSchema, err := ajson.Unmarshal(pc.Schema)
+				if err != nil {
+					continue
+				}
+				edgeDefs, _ := edgeSchema.GetKey("$defs")
+				if edgeDefs == nil || !edgeDefs.IsObject() {
+					continue
+				}
+				edgeDefsMap, err := edgeDefs.GetObject()
+				if err != nil {
+					continue
+				}
+				for ek, ev := range edgeDefsMap {
+					existing, exists := nodeTargetDefinitions[ek]
+					if !exists {
+						nodeTargetDefinitions[ek] = ev
+						continue
+					}
+					// Prefer edge definition if it has properties and existing doesn't
+					evProps, _ := ev.GetKey("properties")
+					exProps, _ := existing.GetKey("properties")
+					evHasProps := evProps != nil && evProps.IsObject() && len(evProps.Keys()) > 0
+					exHasProps := exProps != nil && exProps.IsObject() && len(exProps.Keys()) > 0
+					if evHasProps && !exHasProps {
+						nodeTargetDefinitions[ek] = ev
+					}
 				}
 			}
 		}
