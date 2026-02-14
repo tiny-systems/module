@@ -64,6 +64,32 @@ func (se *JSONSchemaBasedDataGenerator) Generate(node *ajson.Node, clb Callback)
 			if err != nil {
 				return nil, err
 			}
+			// When callback replaces an object, fill in any properties
+			// missing from the result with schema-generated mock data.
+			// This ensures unmapped fields (e.g. arrays not in edge config)
+			// still get default values.
+			typ, _ := GetStrKey("type", node)
+			if typ == "object" {
+				if m, ok := res.(map[string]interface{}); ok {
+					propsNode, _ := node.GetKey("properties")
+					if propsNode != nil && propsNode.IsObject() {
+						for _, propName := range propsNode.Keys() {
+							if _, exists := m[propName]; exists {
+								continue
+							}
+							propValue, pErr := propsNode.GetKey(propName)
+							if pErr != nil || propValue == nil {
+								continue
+							}
+							// Use nil callback — pure mock data, no edge evaluation
+							val, gErr := se.Generate(propValue, nil)
+							if gErr == nil {
+								m[propName] = val
+							}
+						}
+					}
+				}
+			}
 			return res, nil
 		}
 	}
