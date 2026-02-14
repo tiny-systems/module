@@ -165,8 +165,19 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 					itemDefName = fmt.Sprintf("%s%s", getDefinitionName(params.Field.Type), "Item")
 				}
 
+				// Propagate shared/configurable from array field to items definition.
+				// When `shared:"true"` is on []ItemContext, the items type should also
+				// be marked shared so GetFlowMaps can add port annotations.
+				itemSchema := params.PropertySchema.Items.SchemaOrBool.TypeObject
+				if shared {
+					itemSchema.WithExtraPropertiesItem("shared", true)
+				}
+				if configurable {
+					itemSchema.WithExtraPropertiesItem("configurable", true)
+				}
+
 				// register items schema under definition name
-				refOnly := replaceRoot(itemDefName, params.PropertySchema.Items.SchemaOrBool.TypeObject)
+				refOnly := replaceRoot(itemDefName, itemSchema)
 				ts := refOnly.ToSchemaOrBool()
 				// replace property items with ref
 				params.PropertySchema.Items.SchemaOrBool = &ts
