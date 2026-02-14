@@ -468,45 +468,64 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 			}
 		}
 
-		// all nodeSourceDefinitions ready
-		// replace source port definitions with node's target ones
-		for _, port := range node.Status.Ports {
-			portID := GetPortFullName(node.Name, port.Name)
-			s, ok := portSchemaMap[portID]
-			if !ok {
-				continue
-			}
-
-			// target port replace its definitions from source ports
-			definitionsNode, err := s.GetKey("$defs")
-			if err != nil {
-				continue
-			}
-			if !definitionsNode.IsObject() {
-				continue
-			}
-			defs, err := definitionsNode.GetObject()
-			if err != nil {
-				return nil, nil, nil, nil, nil, err
-			}
-
-			for k, v := range defs {
-				var replaceMap map[string]*ajson.Node
-				if _, ok := targetPortsMap[portID]; ok {
-					// source port could be replaced with settings one
-					replaceMap = nodeSettingsDefinitions
-				} else {
-					// not source (target) port could be replaced with source ones
-					replaceMap = nodeTargetDefinitions
+		// Replace definitions in two passes:
+		// 1. Target ports first — replace from nodeSettingsDefinitions
+		// 2. Source ports second — replace from nodeTargetDefinitions
+		//
+		// This order matters because SetNode clones the value. Source ports
+		// use nodeTargetDefinitions which points to target port nodes.
+		// If a source port (e.g. query_result) is processed before its
+		// corresponding target port (e.g. store) alphabetically, it would
+		// get the unreplaced definition. Processing targets first ensures
+		// nodeTargetDefinitions entries are updated before source ports read them.
+		replacePortDefs := func(ports []v1alpha1.TinyNodePortStatus, replaceMap map[string]*ajson.Node) error {
+			for _, port := range ports {
+				portID := GetPortFullName(node.Name, port.Name)
+				s, ok := portSchemaMap[portID]
+				if !ok {
+					continue
 				}
-				if replace, ok := replaceMap[k]; ok {
-					if err = v.SetNode(replace); err != nil {
-						return nil, nil, nil, nil, nil, err
+				definitionsNode, err := s.GetKey("$defs")
+				if err != nil {
+					continue
+				}
+				if !definitionsNode.IsObject() {
+					continue
+				}
+				defs, err := definitionsNode.GetObject()
+				if err != nil {
+					return err
+				}
+				for k, v := range defs {
+					if replace, ok := replaceMap[k]; ok {
+						if err = v.SetNode(replace); err != nil {
+							return err
+						}
 					}
 				}
+				portSchemaMap[portID] = s
 			}
-			// update schema for target port
-			portSchemaMap[portID] = s
+			return nil
+		}
+
+		// Separate ports into target and source lists
+		var targetPorts, sourcePorts []v1alpha1.TinyNodePortStatus
+		for _, port := range node.Status.Ports {
+			portID := GetPortFullName(node.Name, port.Name)
+			if _, ok := targetPortsMap[portID]; ok {
+				targetPorts = append(targetPorts, port)
+			} else {
+				sourcePorts = append(sourcePorts, port)
+			}
+		}
+
+		// Pass 1: target ports — replace with settings definitions
+		if err := replacePortDefs(targetPorts, nodeSettingsDefinitions); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		// Pass 2: source ports — replace with target definitions (now updated by pass 1)
+		if err := replacePortDefs(sourcePorts, nodeTargetDefinitions); err != nil {
+			return nil, nil, nil, nil, nil, err
 		}
 	}
 	return portStatusSchemaMap, portConfigMap, destinationsMap, portSchemaMap, targetPortsMap, nil
