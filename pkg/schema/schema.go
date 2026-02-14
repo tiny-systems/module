@@ -123,13 +123,9 @@ func SetStr(param string, val string, v *ajson.Node) error {
 }
 
 func SetBool(param string, val bool, v *ajson.Node) error {
-
 	if c, _ := v.GetKey(param); c != nil {
-		if err := c.SetBool(val); err != nil {
-			return err
-		}
+		return c.SetBool(val)
 	}
-
 	return v.AppendObject(param, ajson.BoolNode("", val))
 }
 
