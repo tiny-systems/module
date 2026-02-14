@@ -69,10 +69,6 @@ spec:
               module:
                 description: Module name - container image repo + tag
                 type: string
-              module_version:
-                default: 1.0.0
-                description: Module version semver v2 compatible (without v prefix)
-                type: string
               ports:
                 description: Port configurations
                 items:
@@ -99,7 +95,6 @@ spec:
             required:
             - component
             - module
-            - module_version
             type: object
           status:
             description: TinyNodeStatus defines the observed state of TinyNode
@@ -130,6 +125,8 @@ spec:
               module:
                 properties:
                   name:
+                    type: string
+                  sdkVersion:
                     type: string
                   version:
                     type: string
