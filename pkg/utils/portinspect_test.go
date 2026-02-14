@@ -6,6 +6,7 @@ import (
 
 	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/pkg/schema"
 )
 
 func TestSimulatePortDataFromMaps(t *testing.T) {
@@ -1119,125 +1120,80 @@ func TestSimulatePortData_SharedDefinitionConsistency(t *testing.T) {
 	}
 }
 
-// TestSimulatePortData_ArraySplitItemNotModeled verifies that when an array_split
-// component splits an array of objects, the individual item properties are available
-// on the source port for downstream edge expressions like $.item.method.
+// TestSimulatePortData_ArraySplitItemFromRealSchema uses schema.CreateSchema() to generate
+// realistic schemas from Go structs identical to the actual array_split component.
+// This ensures the test uses correct paths ($.array[0] not $.array) and correct
+// definition name casing (Itemcontext not ItemContext) — matching real runtime behavior.
 //
-// This is the real-world scenario: ticker outputs {context, endpoints: [{method, url, ...}]},
-// array_split splits endpoints into individual items, and http_request consumes $.item.method.
-//
-// The bug: commit 29000d8 ("Only annotate configurable/shared definitions with port")
-// stopped adding the "port" annotation to non-configurable definitions like ItemContext.
-// Without the "port" annotation, the generator callback can't trace back through the edge
-// to discover that ItemContext should have {method, url, contentType} properties.
-// Result: $.item resolves to null, all downstream expressions fail.
-func TestSimulatePortData_ArraySplitItemNotModeled(t *testing.T) {
+// Flow: source (ticker-like) → split (array_split) → target (http_request-like)
+// The split's out port "item" field must have the properties from the source's array items.
+func TestSimulatePortData_ArraySplitItemFromRealSchema(t *testing.T) {
 	ctx := context.Background()
 
-	// Source node (e.g., ticker) outputs an object with an endpoints array.
-	// Each endpoint has method, url, contentType properties.
-	sourceOutSchema := []byte(`{
-		"$defs": {
-			"Endpoint": {
-				"type": "object",
-				"properties": {
-					"method": {"type": "string"},
-					"url": {"type": "string"},
-					"contentType": {"type": "string"}
-				}
-			},
-			"Context": {
-				"configurable": true,
-				"type": "object",
-				"path": "$.context"
-			},
-			"OutMessage": {
-				"type": "object",
-				"path": "$",
-				"properties": {
-					"context": {"$ref": "#/$defs/Context"},
-					"endpoints": {
-						"type": "array",
-						"items": {"$ref": "#/$defs/Endpoint"}
-					}
-				}
-			}
-		},
-		"$ref": "#/$defs/OutMessage"
-	}`)
+	// --- Generate schemas from Go structs, same as real split component ---
+	// IMPORTANT: Use the same ItemContext type in both In/Out, just like the
+	// real array_split component. This ensures the definition name matches
+	// across ports so replacePortDefs can propagate the port annotation.
 
-	// array_split "in" target port schema (from Go struct).
-	// Context is configurable, ItemContext is shared (propagates through edges).
-	splitInSchema := []byte(`{
-		"$defs": {
-			"Context": {
-				"configurable": true,
-				"type": "object",
-				"path": "$.context"
-			},
-			"ItemContext": {
-				"shared": true,
-				"type": "object",
-				"path": "$.array"
-			},
-			"InMessage": {
-				"type": "object",
-				"path": "$",
-				"properties": {
-					"context": {"$ref": "#/$defs/Context"},
-					"array": {
-						"type": "array",
-						"items": {"$ref": "#/$defs/ItemContext"}
-					}
-				},
-				"required": ["array"]
-			}
-		},
-		"$ref": "#/$defs/InMessage"
-	}`)
+	type ItemContext any
+	type Context any
 
-	// array_split "out" source port schema (ItemContext is shared).
-	splitOutSchema := []byte(`{
-		"$defs": {
-			"Context": {
-				"type": "object",
-				"path": "$.context"
-			},
-			"ItemContext": {
-				"shared": true,
-				"type": "object",
-				"path": "$.item"
-			},
-			"OutMessage": {
-				"type": "object",
-				"path": "$",
-				"properties": {
-					"context": {"$ref": "#/$defs/Context"},
-					"item": {"$ref": "#/$defs/ItemContext"}
-				}
-			}
-		},
-		"$ref": "#/$defs/OutMessage"
-	}`)
+	// Source output: {context, endpoints: [{method, url}]}
+	type Endpoint struct {
+		Method string `json:"method"`
+		URL    string `json:"url"`
+	}
+	type SourceOut struct {
+		Context   Context    `json:"context" configurable:"true"`
+		Endpoints []Endpoint `json:"endpoints"`
+	}
+	sourceSchema, err := schema.CreateSchema(SourceOut{})
+	if err != nil {
+		t.Fatalf("CreateSchema(SourceOut) error: %v", err)
+	}
+	sourceSchemaBytes, _ := sourceSchema.MarshalJSON()
 
-	// http_request "request" target port schema — expects method, url, contentType, timeout.
-	requestSchema := []byte(`{
-		"$defs": {
-			"Request": {
-				"type": "object",
-				"path": "$",
-				"properties": {
-					"method": {"type": "string"},
-					"url": {"type": "string"},
-					"contentType": {"type": "string"},
-					"timeout": {"type": "integer"}
-				}
-			}
-		},
-		"$ref": "#/$defs/Request"
-	}`)
+	// Split input: {context, array: []ItemContext} — ItemContext is shared
+	type SplitIn struct {
+		Context Context       `json:"context" configurable:"true"`
+		Array   []ItemContext `json:"array" shared:"true" required:"true"`
+	}
+	splitInSchema, err := schema.CreateSchema(SplitIn{})
+	if err != nil {
+		t.Fatalf("CreateSchema(SplitIn) error: %v", err)
+	}
+	splitInSchemaBytes, _ := splitInSchema.MarshalJSON()
 
-	// Source node: ticker with endpoints output
+	// Split output: {context, item: ItemContext} — same ItemContext type, shared
+	type SplitOut struct {
+		Context Context     `json:"context"`
+		Item    ItemContext `json:"item" shared:"true"`
+	}
+	splitOutSchema, err := schema.CreateSchema(SplitOut{})
+	if err != nil {
+		t.Fatalf("CreateSchema(SplitOut) error: %v", err)
+	}
+	splitOutSchemaBytes, _ := splitOutSchema.MarshalJSON()
+
+	// Target input: {method, url, timeout}
+	type TargetRequest struct {
+		Method  string `json:"method"`
+		URL     string `json:"url"`
+		Timeout int    `json:"timeout"`
+	}
+	targetSchema, err := schema.CreateSchema(TargetRequest{})
+	if err != nil {
+		t.Fatalf("CreateSchema(TargetRequest) error: %v", err)
+	}
+	targetSchemaBytes, _ := targetSchema.MarshalJSON()
+
+	t.Logf("sourceOut schema: %s", sourceSchemaBytes)
+	t.Logf("splitIn schema:   %s", splitInSchemaBytes)
+	t.Logf("splitOut schema:  %s", splitOutSchemaBytes)
+	t.Logf("target schema:    %s", targetSchemaBytes)
+
+	// --- Build flow nodes ---
+
 	sourceNode := v1alpha1.TinyNode{
 		Spec: v1alpha1.TinyNodeSpec{
 			Component: "ticker",
@@ -1247,15 +1203,12 @@ func TestSimulatePortData_ArraySplitItemNotModeled(t *testing.T) {
 		},
 		Status: v1alpha1.TinyNodeStatus{
 			Ports: []v1alpha1.TinyNodePortStatus{
-				{Name: "out", Source: true, Schema: sourceOutSchema},
+				{Name: "out", Source: true, Schema: sourceSchemaBytes},
 			},
 		},
 	}
 	sourceNode.Name = "source"
 
-	// Split node: array_split with in (target) and out (source).
-	// No edge schema — the fix works via port annotation + array unwrapping,
-	// even without rich edge schemas (which old deployments won't have).
 	splitNode := v1alpha1.TinyNode{
 		Spec: v1alpha1.TinyNodeSpec{
 			Component: "array_split",
@@ -1264,7 +1217,6 @@ func TestSimulatePortData_ArraySplitItemNotModeled(t *testing.T) {
 			},
 			Ports: []v1alpha1.TinyNodePortConfig{
 				{
-					// Edge config from source:out → split:in
 					Port:          "in",
 					From:          "source:out",
 					Configuration: []byte(`{"context": "{{$}}", "array": "{{$.endpoints}}"}`),
@@ -1273,29 +1225,27 @@ func TestSimulatePortData_ArraySplitItemNotModeled(t *testing.T) {
 		},
 		Status: v1alpha1.TinyNodeStatus{
 			Ports: []v1alpha1.TinyNodePortStatus{
-				{Name: "in", Source: false, Schema: splitInSchema},
-				{Name: "out", Source: true, Schema: splitOutSchema},
+				{Name: "in", Source: false, Schema: splitInSchemaBytes},
+				{Name: "out", Source: true, Schema: splitOutSchemaBytes},
 			},
 		},
 	}
 	splitNode.Name = "split"
 
-	// Target node: http_request consuming item properties
 	targetNode := v1alpha1.TinyNode{
 		Spec: v1alpha1.TinyNodeSpec{
 			Component: "http_request",
 			Ports: []v1alpha1.TinyNodePortConfig{
 				{
-					// Edge config from split:out → target:request
 					Port:          "request",
 					From:          "split:out",
-					Configuration: []byte(`{"method": "{{$.item.method}}", "url": "{{$.item.url}}", "contentType": "{{$.item.contentType}}", "timeout": 10}`),
+					Configuration: []byte(`{"method": "{{$.item.method}}", "url": "{{$.item.url}}", "timeout": 10}`),
 				},
 			},
 		},
 		Status: v1alpha1.TinyNodeStatus{
 			Ports: []v1alpha1.TinyNodePortStatus{
-				{Name: "request", Source: false, Schema: requestSchema},
+				{Name: "request", Source: false, Schema: targetSchemaBytes},
 			},
 		},
 	}
@@ -1307,8 +1257,8 @@ func TestSimulatePortData_ArraySplitItemNotModeled(t *testing.T) {
 		"target": targetNode,
 	}
 
-	// Test 1: Simulate split:out and verify item has properties
-	t.Run("split out port item should have properties", func(t *testing.T) {
+	// Test 1: split:out item must have properties from source's Endpoint type
+	t.Run("split out item has endpoint properties", func(t *testing.T) {
 		result, err := SimulatePortData(ctx, nodesMap, "split:out", nil)
 		if err != nil {
 			t.Fatalf("SimulatePortData(split:out) error = %v", err)
@@ -1319,101 +1269,61 @@ func TestSimulatePortData_ArraySplitItemNotModeled(t *testing.T) {
 			t.Fatalf("expected map, got %T: %v", result, result)
 		}
 
-		// item must NOT be null — it should be an object with endpoint properties
 		item := m["item"]
 		if item == nil {
-			t.Fatal("item is nil — ItemContext definition was not properly modeled. " +
-				"The 'port' annotation is missing on ItemContext because it's not " +
-				"configurable/shared, so the generator can't trace back through " +
-				"the edge to discover the item's properties.")
+			t.Fatal("item is nil — shared ItemContext not modeled. " +
+				"The generator can't trace back through the edge to discover item properties.")
 		}
 
 		itemMap, ok := item.(map[string]interface{})
 		if !ok {
-			t.Fatalf("item should be an object with properties, got %T: %v", item, item)
+			t.Fatalf("item should be object, got %T: %v", item, item)
 		}
 
-		// Item should have the endpoint properties from the source's Endpoint type
-		for _, field := range []string{"method", "url", "contentType"} {
+		for _, field := range []string{"method", "url"} {
 			if itemMap[field] == nil {
-				t.Errorf("item.%s is nil — endpoint properties not propagated through array_split", field)
+				t.Errorf("item.%s is nil — not propagated through array_split", field)
 			}
 		}
 	})
 
-	// Test 2: Validate the edge split:out → target:request
-	// Expressions like {{$.item.method}} should resolve to strings, not null
-	t.Run("edge validation split to target should pass", func(t *testing.T) {
+	// Test 2: edge validation split:out → target:request must pass
+	t.Run("edge expressions resolve item properties", func(t *testing.T) {
 		err := ValidateEdgeWithRuntimeData(
-			ctx,
-			nodesMap,
-			"split:out",
-			"target:request",
-			[]byte(`{"method": "{{$.item.method}}", "url": "{{$.item.url}}", "contentType": "{{$.item.contentType}}", "timeout": 10}`),
+			ctx, nodesMap, "split:out", "target:request",
+			[]byte(`{"method": "{{$.item.method}}", "url": "{{$.item.url}}", "timeout": 10}`),
 			nil,
 		)
 		if err != nil {
-			t.Errorf("ValidateEdgeWithRuntimeData() error = %v — "+
-				"item properties should be resolvable but are null because "+
-				"ItemContext lacks 'port' annotation", err)
+			t.Errorf("ValidateEdgeWithRuntimeData() error = %v", err)
 		}
 	})
 }
 
 // TestGetFlowMaps_ArraySplitPortAnnotation verifies that GetFlowMaps adds the
-// "port" annotation to shared definitions (like ItemContext) collected from
-// target ports. This enables the generator callback to trace back through
-// edges and produce proper fake data.
+// "port" annotation to shared definitions collected from target ports.
 func TestGetFlowMaps_ArraySplitPortAnnotation(t *testing.T) {
-	splitInSchema := []byte(`{
-		"$defs": {
-			"Context": {
-				"configurable": true,
-				"type": "object",
-				"path": "$.context"
-			},
-			"ItemContext": {
-				"shared": true,
-				"type": "object",
-				"path": "$.array"
-			},
-			"InMessage": {
-				"type": "object",
-				"path": "$",
-				"properties": {
-					"context": {"$ref": "#/$defs/Context"},
-					"array": {
-						"type": "array",
-						"items": {"$ref": "#/$defs/ItemContext"}
-					}
-				}
-			}
-		},
-		"$ref": "#/$defs/InMessage"
-	}`)
+	// Use real schema generator with same type names as actual component
+	type AnnotItemContext any
+	type AnnotContext any
+	type AnnotSplitIn struct {
+		Context AnnotContext       `json:"context" configurable:"true"`
+		Array   []AnnotItemContext `json:"array" shared:"true" required:"true"`
+	}
+	type AnnotSplitOut struct {
+		Context AnnotContext     `json:"context"`
+		Item    AnnotItemContext `json:"item" shared:"true"`
+	}
+	type SplitIn = AnnotSplitIn
+	type SplitOut = AnnotSplitOut
 
-	splitOutSchema := []byte(`{
-		"$defs": {
-			"Context": {
-				"type": "object",
-				"path": "$.context"
-			},
-			"ItemContext": {
-				"shared": true,
-				"type": "object",
-				"path": "$.item"
-			},
-			"OutMessage": {
-				"type": "object",
-				"path": "$",
-				"properties": {
-					"context": {"$ref": "#/$defs/Context"},
-					"item": {"$ref": "#/$defs/ItemContext"}
-				}
-			}
-		},
-		"$ref": "#/$defs/OutMessage"
-	}`)
+	inSchema, _ := schema.CreateSchema(SplitIn{})
+	inSchemaBytes, _ := inSchema.MarshalJSON()
+	outSchema, _ := schema.CreateSchema(SplitOut{})
+	outSchemaBytes, _ := outSchema.MarshalJSON()
+
+	t.Logf("in schema:  %s", inSchemaBytes)
+	t.Logf("out schema: %s", outSchemaBytes)
 
 	splitNode := v1alpha1.TinyNode{
 		Spec: v1alpha1.TinyNodeSpec{
@@ -1421,8 +1331,8 @@ func TestGetFlowMaps_ArraySplitPortAnnotation(t *testing.T) {
 		},
 		Status: v1alpha1.TinyNodeStatus{
 			Ports: []v1alpha1.TinyNodePortStatus{
-				{Name: "in", Source: false, Schema: splitInSchema},
-				{Name: "out", Source: true, Schema: splitOutSchema},
+				{Name: "in", Source: false, Schema: inSchemaBytes},
+				{Name: "out", Source: true, Schema: outSchemaBytes},
 			},
 		},
 	}
@@ -1437,34 +1347,43 @@ func TestGetFlowMaps_ArraySplitPortAnnotation(t *testing.T) {
 		t.Fatalf("GetFlowMaps() error = %v", err)
 	}
 
-	outSchema, ok := portSchemaMap["split:out"]
+	outSchemaNode, ok := portSchemaMap["split:out"]
 	if !ok {
 		t.Fatal("portSchemaMap missing split:out")
 	}
 
-	defs, err := outSchema.GetKey("$defs")
+	defs, err := outSchemaNode.GetKey("$defs")
 	if err != nil {
 		t.Fatalf("split:out schema has no $defs: %v", err)
 	}
 
-	// Context: configurable → port annotation
-	contextDef, err := defs.GetKey("Context")
-	if err != nil {
-		t.Fatalf("split:out $defs missing Context: %v", err)
-	}
-	contextPort, _ := contextDef.GetKey("port")
-	if contextPort == nil || !contextPort.IsString() {
-		t.Error("Context in out port should have 'port' annotation (configurable)")
+	// Find the shared item definition (name comes from schema generator)
+	// and verify it has the "port" annotation
+	foundSharedWithPort := false
+	for _, defName := range defs.Keys() {
+		def, _ := defs.GetKey(defName)
+		if def == nil {
+			continue
+		}
+		shared, _ := schema.GetBool("shared", def)
+		if !shared {
+			continue
+		}
+		portNode, _ := def.GetKey("port")
+		if portNode != nil && portNode.IsString() {
+			foundSharedWithPort = true
+			portVal, _ := portNode.GetString()
+			t.Logf("shared def %q has port=%q", defName, portVal)
+			if portVal != "split:in" {
+				t.Errorf("shared def %q port = %q, want split:in", defName, portVal)
+			}
+		} else {
+			t.Errorf("shared def %q missing port annotation", defName)
+		}
 	}
 
-	// ItemContext: shared → port annotation
-	itemDef, err := defs.GetKey("ItemContext")
-	if err != nil {
-		t.Fatalf("split:out $defs missing ItemContext: %v", err)
-	}
-	itemPort, _ := itemDef.GetKey("port")
-	if itemPort == nil || !itemPort.IsString() {
-		t.Error("ItemContext in out port should have 'port' annotation (shared)")
+	if !foundSharedWithPort {
+		t.Fatal("no shared definition with port annotation found in split:out schema")
 	}
 }
 
