@@ -26,6 +26,16 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 		return realSchema, nil
 	}
 
+	// build a path-to-definition lookup for fallback matching
+	// when definition key names differ (e.g. "Context" vs "Startcontext")
+	// but both refer to the same field path (e.g. "$.context")
+	pathToConf := make(map[string]*ajson.Node)
+	for _, conf := range configurableDefinitionNodes {
+		if p, ok := GetStr("path", conf); ok && p != "" {
+			pathToConf[p] = conf
+		}
+	}
+
 	// go through status definitions
 	for _, defKey := range realSchemaNodeDefs.Keys() {
 		realSchemaDef, err := realSchemaNodeDefs.GetKey(defKey)
@@ -36,7 +46,17 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 			continue
 		}
 
-		if conf, ok := configurableDefinitionNodes[defKey]; ok {
+		// try exact key name match first
+		conf, ok := configurableDefinitionNodes[defKey]
+		if !ok {
+			// fallback: match by path when key names differ
+			// e.g. source has "Context" (path: "$.context"), target has "Startcontext" (path: "$.context")
+			if p, hasPath := GetStr("path", realSchemaDef); hasPath && p != "" {
+				conf, ok = pathToConf[p]
+			}
+		}
+
+		if ok {
 			// replace this real status def with configurable one
 			// copy important props before replace
 			confCopy := conf.Clone()
