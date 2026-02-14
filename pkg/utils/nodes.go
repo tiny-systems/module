@@ -503,6 +503,12 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 				for ek, ev := range edgeDefsMap {
 					existing, exists := nodeTargetDefinitions[ek]
 					if !exists {
+						// New definition from edge — add port annotation if configurable/shared
+						evConfigurable, _ := schema.GetBool("configurable", ev)
+						evShared, _ := schema.GetBool("shared", ev)
+						if evConfigurable || evShared {
+							_ = ev.AppendObject("port", ajson.StringNode("", portID))
+						}
 						nodeTargetDefinitions[ek] = ev
 						continue
 					}
@@ -512,6 +518,16 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 					evHasProps := evProps != nil && evProps.IsObject() && len(evProps.Keys()) > 0
 					exHasProps := exProps != nil && exProps.IsObject() && len(exProps.Keys()) > 0
 					if evHasProps && !exHasProps {
+						// Carry over port annotation from the definition being replaced.
+						// Without this, the simulation callback can't trace backwards
+						// through edges and falls back to random fakedata.
+						if portNode, pErr := existing.GetKey("port"); pErr == nil && portNode != nil {
+							if ps, pErr2 := portNode.Unpack(); pErr2 == nil {
+								if portStr, ok := ps.(string); ok && portStr != "" {
+									_ = ev.AppendObject("port", ajson.StringNode("", portStr))
+								}
+							}
+						}
 						nodeTargetDefinitions[ek] = ev
 					}
 				}

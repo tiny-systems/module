@@ -1387,6 +1387,293 @@ func TestGetFlowMaps_ArraySplitPortAnnotation(t *testing.T) {
 	}
 }
 
+// TestSimulatePortData_RouterEdgeSchemaEnrichment verifies that when an edge schema
+// enriches a bare configurable Context definition with properties, the "port" annotation
+// is preserved so the simulation callback can trace backwards through edges.
+//
+// This reproduces the real-world bug: a router's input port has a bare Context (configurable: true)
+// in its status schema. The edge from an HTTP server provides a richer Context with properties
+// (body, headers, method, etc.). GetFlowMaps replaces the bare Context with the rich one,
+// but must carry over the "port" annotation. Without it, the router's output port simulation
+// generates random fakedata instead of data propagated from the input.
+func TestSimulatePortData_RouterEdgeSchemaEnrichment(t *testing.T) {
+	ctx := context.Background()
+
+	// HTTP server request output schema — rich Context with properties
+	httpRequestSchema := []byte(`{
+		"$defs": {
+			"Request": {
+				"type": "object",
+				"properties": {
+					"body": {"type": "string", "propertyOrder": 5},
+					"method": {"type": "string", "propertyOrder": 3, "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]},
+					"requestURI": {"type": "string", "propertyOrder": 2},
+					"headers": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/Header"},
+						"propertyOrder": 4
+					}
+				},
+				"path": "$"
+			},
+			"Header": {
+				"type": "object",
+				"properties": {
+					"key": {"type": "string"},
+					"value": {"type": "string"}
+				},
+				"path": "$.headers[0]"
+			}
+		},
+		"$ref": "#/$defs/Request"
+	}`)
+
+	// Router input schema from STATUS — bare Context (configurable, no properties)
+	routerInputStatusSchema := []byte(`{
+		"$defs": {
+			"Condition": {
+				"type": "object",
+				"properties": {
+					"route": {"type": "string"},
+					"condition": {"type": "boolean"}
+				},
+				"path": "$.conditions[0]"
+			},
+			"Context": {
+				"configurable": true,
+				"title": "Context",
+				"path": "$.context"
+			},
+			"Inmessage": {
+				"type": "object",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context", "propertyOrder": 1},
+					"conditions": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/Condition"},
+						"propertyOrder": 2
+					}
+				},
+				"path": "$"
+			}
+		},
+		"$ref": "#/$defs/Inmessage"
+	}`)
+
+	// Router input schema from EDGE (Spec.Ports) — rich Context with HTTP properties
+	routerInputEdgeSchema := []byte(`{
+		"$defs": {
+			"Condition": {
+				"type": "object",
+				"properties": {
+					"condition": {"type": "boolean"},
+					"routeName": {"type": "string"}
+				},
+				"path": "$.conditions[0]"
+			},
+			"Context": {
+				"configurable": true,
+				"title": "Context",
+				"type": "object",
+				"path": "$.context",
+				"properties": {
+					"body": {"type": "string", "propertyOrder": 5},
+					"method": {"type": "string", "propertyOrder": 3},
+					"requestURI": {"type": "string", "propertyOrder": 2},
+					"headers": {
+						"type": "array",
+						"items": {"type": "object"},
+						"propertyOrder": 4
+					}
+				}
+			},
+			"Inmessage": {
+				"type": "object",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context", "propertyOrder": 1},
+					"conditions": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/Condition"},
+						"propertyOrder": 2
+					}
+				},
+				"path": "$"
+			}
+		},
+		"$ref": "#/$defs/Inmessage"
+	}`)
+
+	// Router output schema from STATUS — bare Context
+	routerOutputSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"path": "$"
+			}
+		},
+		"$ref": "#/$defs/Context"
+	}`)
+
+	httpServer := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "http_server",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e1", Port: "request", To: "router:input", FlowID: "flow1"},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "request", Source: true, Schema: httpRequestSchema},
+			},
+		},
+	}
+	httpServer.Name = "http-server"
+
+	routerNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "router",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e2", Port: "out_route", To: "downstream:request", FlowID: "flow1"},
+			},
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port:          "input",
+					From:          "http-server:request",
+					Configuration: []byte(`{"conditions":[{"condition":true,"routeName":"ROUTE"}],"context":"{{$}}"}`),
+					Schema:        routerInputEdgeSchema,
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "input", Source: false, Schema: routerInputStatusSchema},
+				{Name: "out_route", Source: true, Schema: routerOutputSchema},
+			},
+		},
+	}
+	routerNode.Name = "router"
+
+	downstreamNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "slack_command",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port:          "request",
+					From:          "router:out_route",
+					Configuration: []byte(`{"body":"{{$.body}}","method":"{{$.method}}"}`),
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "request", Source: false, Schema: []byte(`{
+					"$defs": {
+						"Request": {
+							"type": "object",
+							"properties": {
+								"body": {"type": "string"},
+								"method": {"type": "string"}
+							}
+						}
+					},
+					"$ref": "#/$defs/Request"
+				}`)},
+			},
+		},
+	}
+	downstreamNode.Name = "downstream"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"http-server": httpServer,
+		"router":      routerNode,
+		"downstream":  downstreamNode,
+	}
+
+	// Test 1: GetFlowMaps must preserve port annotation on enriched Context
+	t.Run("port annotation preserved after edge enrichment", func(t *testing.T) {
+		_, _, _, portSchemaMap, _, err := GetFlowMaps(nodesMap)
+		if err != nil {
+			t.Fatalf("GetFlowMaps() error = %v", err)
+		}
+
+		outSchema, ok := portSchemaMap["router:out_route"]
+		if !ok {
+			t.Fatal("portSchemaMap missing router:out_route")
+		}
+
+		defs, err := outSchema.GetKey("$defs")
+		if err != nil {
+			t.Fatalf("out_route schema has no $defs: %v", err)
+		}
+
+		ctxDef, err := defs.GetKey("Context")
+		if err != nil {
+			t.Fatalf("out_route schema has no Context def: %v", err)
+		}
+
+		// Context must have port annotation for simulation callback to work
+		portNode, pErr := ctxDef.GetKey("port")
+		if pErr != nil || portNode == nil {
+			t.Fatal("Context definition in out_route schema lost 'port' annotation — " +
+				"edge enrichment replaced bare Context with rich version without carrying over 'port'")
+		}
+
+		portVal, _ := portNode.GetString()
+		if portVal != "router:input" {
+			t.Errorf("Context port annotation = %q, want router:input", portVal)
+		}
+
+		// Context should also have the enriched properties from edge schema
+		propsNode, _ := ctxDef.GetKey("properties")
+		if propsNode == nil || !propsNode.IsObject() {
+			t.Error("Context should have properties from edge schema enrichment")
+		}
+	})
+
+	// Test 2: Simulation of output port must use data traced back through edges,
+	// not independently generated fakedata. We verify this by using sentinel default
+	// values in the HTTP server schema — if the callback traces back correctly,
+	// the output will contain these sentinels. If not, it'll have random "fakedata:xxx".
+	t.Run("output port simulation uses propagated input data", func(t *testing.T) {
+		outputResult, err := SimulatePortData(ctx, nodesMap, "router:out_route", nil)
+		if err != nil {
+			t.Fatalf("SimulatePortData(router:out_route) error = %v", err)
+		}
+		outputMap, ok := outputResult.(map[string]interface{})
+		if !ok {
+			t.Fatalf("output result should be map, got %T", outputResult)
+		}
+
+		// The HTTP server's method field has enum values (GET, POST, etc.)
+		// which the generator picks from. If the callback traces back, method
+		// will be one of these. If not, it'll be "fakedata:xxx".
+		method, ok := outputMap["method"]
+		if !ok {
+			t.Fatal("output.method missing")
+		}
+		methodStr, ok := method.(string)
+		if !ok {
+			t.Fatalf("output.method should be string, got %T", method)
+		}
+
+		validMethods := map[string]bool{"GET": true, "POST": true, "PATCH": true, "PUT": true, "DELETE": true}
+		if !validMethods[methodStr] {
+			t.Errorf("output.method = %q — expected one of GET/POST/PATCH/PUT/DELETE from HTTP server enum, "+
+				"got fakedata instead. This means the simulation callback didn't trace back through the edge "+
+				"to get data from the HTTP server (likely the 'port' annotation was lost during edge schema enrichment)",
+				methodStr)
+		}
+
+		// body should also be a string (from edge evaluation), not null
+		body, ok := outputMap["body"]
+		if !ok {
+			t.Error("output.body missing")
+		}
+		if _, ok := body.(string); !ok {
+			t.Errorf("output.body should be string, got %T: %v", body, body)
+		}
+	})
+}
+
 // Helper to create ajson nodes for testing
 func mustUnmarshal(s string) *ajson.Node {
 	n, err := ajson.Unmarshal([]byte(s))
