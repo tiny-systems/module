@@ -597,6 +597,528 @@ func TestSimulatePortData_ConfigurableDefinitionOrder(t *testing.T) {
 	}
 }
 
+// TestSimulatePortData_HTTPServerLikePartialEdge simulates the real-world scenario
+// where an HTTP server Start port has an array field (hostnames []string) that
+// is NOT mapped in the incoming edge config. The generator should fill in
+// unmapped properties with mock data.
+func TestSimulatePortData_HTTPServerLikePartialEdge(t *testing.T) {
+	ctx := context.Background()
+
+	// Schema for the source port — a simple context object
+	sourceOutSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"type": "object",
+				"properties": {
+					"method": {"type": "string"},
+					"url": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/Context"
+	}`)
+
+	// Schema for http_server start port — mirrors real HTTP server Start struct
+	// with autoHostName (bool), hostnames ([]string), readTimeout, writeTimeout (int),
+	// and a context ($ref to Context)
+	startSchema := []byte(`{
+		"$defs": {
+			"Start": {
+				"type": "object",
+				"properties": {
+					"autoHostName": {"type": "boolean"},
+					"hostnames": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/String"}
+					},
+					"readTimeout": {"type": "integer"},
+					"writeTimeout": {"type": "integer"},
+					"context": {"$ref": "#/$defs/Context"}
+				}
+			},
+			"Context": {
+				"type": "object",
+				"configurable": true,
+				"properties": {
+					"method": {"type": "string"},
+					"url": {"type": "string"}
+				}
+			},
+			"String": {
+				"type": "string"
+			}
+		},
+		"$ref": "#/$defs/Start"
+	}`)
+
+	// Source node with edge to http-server:start
+	sourceNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "trigger",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e1", Port: "out", To: "http-server:start"},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "out", Source: true, Schema: sourceOutSchema},
+			},
+		},
+	}
+	sourceNode.Name = "trigger"
+
+	// HTTP server node with start target port
+	// Edge config maps autoHostName, readTimeout, writeTimeout, context but NOT hostnames
+	httpNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "http_server",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port: "start",
+					From: "trigger:out",
+					Configuration: []byte(`{
+						"autoHostName": true,
+						"readTimeout": 30,
+						"writeTimeout": 30,
+						"context": "{{$}}"
+					}`),
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "start", Source: false, Schema: startSchema},
+			},
+		},
+	}
+	httpNode.Name = "http-server"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"trigger":     sourceNode,
+		"http-server": httpNode,
+	}
+
+	// Run multiple times to catch non-determinism
+	for i := 0; i < 10; i++ {
+		result, err := SimulatePortData(ctx, nodesMap, "http-server:start", nil)
+		if err != nil {
+			t.Fatalf("iteration %d: SimulatePortData() error = %v", i, err)
+		}
+
+		m, ok := result.(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: expected map, got %T", i, result)
+		}
+
+		// Edge-mapped fields must be present
+		if _, ok := m["autoHostName"]; !ok {
+			t.Errorf("iteration %d: autoHostName missing", i)
+		}
+		if _, ok := m["readTimeout"]; !ok {
+			t.Errorf("iteration %d: readTimeout missing", i)
+		}
+		if _, ok := m["writeTimeout"]; !ok {
+			t.Errorf("iteration %d: writeTimeout missing", i)
+		}
+		if _, ok := m["context"]; !ok {
+			t.Errorf("iteration %d: context missing", i)
+		}
+
+		// Unmapped array field must be filled with mock data
+		hostnames, ok := m["hostnames"]
+		if !ok {
+			t.Fatalf("iteration %d: hostnames missing — generator should fill in unmapped array properties", i)
+		}
+		arr, ok := hostnames.([]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: hostnames should be array, got %T", i, hostnames)
+		}
+		if len(arr) == 0 {
+			t.Errorf("iteration %d: hostnames array should have at least one mock element", i)
+		}
+	}
+}
+
+// TestSimulatePortData_MultipleEdgesToSamePort verifies that when multiple
+// edges connect to the same target port, the simulation uses the first edge's data.
+func TestSimulatePortData_MultipleEdgesToSamePort(t *testing.T) {
+	ctx := context.Background()
+
+	targetSchema := []byte(`{
+		"$defs": {
+			"Input": {
+				"type": "object",
+				"properties": {
+					"value": {"type": "string"},
+					"count": {"type": "integer"}
+				}
+			}
+		},
+		"$ref": "#/$defs/Input"
+	}`)
+
+	source1 := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "source1",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e1", Port: "out", To: "target:in"},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "out", Source: true, Schema: []byte(`{"type": "object", "properties": {"data": {"type": "string"}}}`)},
+			},
+		},
+	}
+	source1.Name = "source1"
+
+	source2 := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "source2",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e2", Port: "out", To: "target:in"},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "out", Source: true, Schema: []byte(`{"type": "object", "properties": {"info": {"type": "string"}}}`)},
+			},
+		},
+	}
+	source2.Name = "source2"
+
+	targetNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "target",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port:          "in",
+					From:          "source1:out",
+					Configuration: []byte(`{"value": "{{$.data}}", "count": 1}`),
+				},
+				{
+					Port:          "in",
+					From:          "source2:out",
+					Configuration: []byte(`{"value": "{{$.info}}", "count": 2}`),
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "in", Source: false, Schema: targetSchema},
+			},
+		},
+	}
+	targetNode.Name = "target"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"source1": source1,
+		"source2": source2,
+		"target":  targetNode,
+	}
+
+	result, err := SimulatePortData(ctx, nodesMap, "target:in", nil)
+	if err != nil {
+		t.Fatalf("SimulatePortData() error = %v", err)
+	}
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map, got %T", result)
+	}
+
+	// Both fields must be present
+	if _, ok := m["value"]; !ok {
+		t.Error("value field missing")
+	}
+	if _, ok := m["count"]; !ok {
+		t.Error("count field missing")
+	}
+}
+
+// TestSimulatePortData_ArrayOfObjectsWithConfigurableRef verifies that arrays
+// of objects referencing configurable definitions get proper mock data,
+// including when those definitions are enriched by _settings.
+func TestSimulatePortData_ArrayOfObjectsWithConfigurableRef(t *testing.T) {
+	ctx := context.Background()
+
+	// Settings schema — Document with configurable fields {id, name, email}
+	settingsSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"configurable": true,
+				"properties": {
+					"id": {"type": "string"},
+					"name": {"type": "string"},
+					"email": {"type": "string", "format": "email"}
+				}
+			},
+			"Settings": {
+				"type": "object",
+				"properties": {
+					"collection": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/Settings"
+	}`)
+
+	// List output schema — array of Document items
+	listSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"properties": {
+					"id": {"type": "string"}
+				}
+			},
+			"ListResult": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/Document"}
+					},
+					"total": {"type": "integer"}
+				}
+			}
+		},
+		"$ref": "#/$defs/ListResult"
+	}`)
+
+	dbNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "database",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{Port: v1alpha1.SettingsPort, Schema: settingsSchema},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: v1alpha1.SettingsPort, Source: false, Schema: settingsSchema},
+				{Name: "list", Source: true, Schema: listSchema},
+			},
+		},
+	}
+	dbNode.Name = "db"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"db": dbNode,
+	}
+
+	// Run multiple times for non-determinism
+	for i := 0; i < 10; i++ {
+		result, err := SimulatePortData(ctx, nodesMap, "db:list", nil)
+		if err != nil {
+			t.Fatalf("iteration %d: error = %v", i, err)
+		}
+
+		m, ok := result.(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: expected map, got %T", i, result)
+		}
+
+		// items must be a non-empty array
+		items, ok := m["items"].([]interface{})
+		if !ok || len(items) == 0 {
+			t.Fatalf("iteration %d: items should be non-empty array, got %v", i, m["items"])
+		}
+
+		// Each item must have all Document properties from _settings enrichment
+		doc, ok := items[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: item should be map, got %T", i, items[0])
+		}
+
+		for _, field := range []string{"id", "name", "email"} {
+			if doc[field] == nil {
+				t.Errorf("iteration %d: Document.%s is nil — settings enrichment should propagate all fields", i, field)
+			}
+		}
+
+		// total must be present
+		if _, ok := m["total"]; !ok {
+			t.Errorf("iteration %d: total field missing", i)
+		}
+	}
+}
+
+// TestSimulatePortData_NoEdgesPureMockData verifies that a target port
+// with no incoming edges gets pure mock data with all fields populated.
+func TestSimulatePortData_NoEdgesPureMockData(t *testing.T) {
+	ctx := context.Background()
+
+	schema := []byte(`{
+		"$defs": {
+			"Config": {
+				"type": "object",
+				"properties": {
+					"name": {"type": "string"},
+					"count": {"type": "integer"},
+					"tags": {
+						"type": "array",
+						"items": {"type": "string"}
+					},
+					"enabled": {"type": "boolean"},
+					"nested": {
+						"type": "object",
+						"properties": {
+							"key": {"type": "string"},
+							"value": {"type": "number"}
+						}
+					}
+				}
+			}
+		},
+		"$ref": "#/$defs/Config"
+	}`)
+
+	node := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "standalone",
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "config", Source: false, Schema: schema},
+			},
+		},
+	}
+	node.Name = "standalone"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"standalone": node,
+	}
+
+	result, err := SimulatePortData(ctx, nodesMap, "standalone:config", nil)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map, got %T", result)
+	}
+
+	// All top-level properties must be present
+	for _, field := range []string{"name", "count", "tags", "enabled", "nested"} {
+		if _, ok := m[field]; !ok {
+			t.Errorf("field %q missing from pure mock data", field)
+		}
+	}
+
+	// tags should be array with at least one element
+	tags, ok := m["tags"].([]interface{})
+	if !ok || len(tags) == 0 {
+		t.Errorf("tags should be non-empty array, got %v", m["tags"])
+	}
+
+	// nested should be object with sub-fields
+	nested, ok := m["nested"].(map[string]interface{})
+	if !ok {
+		t.Errorf("nested should be map, got %T", m["nested"])
+	} else {
+		if _, ok := nested["key"]; !ok {
+			t.Error("nested.key missing")
+		}
+		if _, ok := nested["value"]; !ok {
+			t.Error("nested.value missing")
+		}
+	}
+}
+
+// TestSimulatePortData_SharedDefinitionConsistency verifies that when a definition
+// (like String) appears in multiple ports, the simulation produces consistent
+// results across multiple runs.
+func TestSimulatePortData_SharedDefinitionConsistency(t *testing.T) {
+	ctx := context.Background()
+
+	// Two ports sharing "String" definition name
+	inSchema := []byte(`{
+		"$defs": {
+			"String": {"type": "string"},
+			"Request": {
+				"type": "object",
+				"properties": {
+					"query": {"$ref": "#/$defs/String"},
+					"limit": {"type": "integer"}
+				}
+			}
+		},
+		"$ref": "#/$defs/Request"
+	}`)
+
+	outSchema := []byte(`{
+		"$defs": {
+			"String": {"type": "string"},
+			"Response": {
+				"type": "object",
+				"properties": {
+					"result": {"$ref": "#/$defs/String"},
+					"items": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/String"}
+					}
+				}
+			}
+		},
+		"$ref": "#/$defs/Response"
+	}`)
+
+	node := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "search",
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "in", Source: false, Schema: inSchema},
+				{Name: "out", Source: true, Schema: outSchema},
+			},
+		},
+	}
+	node.Name = "search"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"search": node,
+	}
+
+	// Verify both ports produce valid data across multiple runs
+	for i := 0; i < 10; i++ {
+		// Test target port
+		inResult, err := SimulatePortData(ctx, nodesMap, "search:in", nil)
+		if err != nil {
+			t.Fatalf("iteration %d: in port error = %v", i, err)
+		}
+		inMap, ok := inResult.(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: in result should be map, got %T", i, inResult)
+		}
+		if _, ok := inMap["query"]; !ok {
+			t.Errorf("iteration %d: in.query missing", i)
+		}
+		if _, ok := inMap["limit"]; !ok {
+			t.Errorf("iteration %d: in.limit missing", i)
+		}
+
+		// Test source port
+		outResult, err := SimulatePortData(ctx, nodesMap, "search:out", nil)
+		if err != nil {
+			t.Fatalf("iteration %d: out port error = %v", i, err)
+		}
+		outMap, ok := outResult.(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: out result should be map, got %T", i, outResult)
+		}
+		if _, ok := outMap["result"]; !ok {
+			t.Errorf("iteration %d: out.result missing", i)
+		}
+		items, ok := outMap["items"].([]interface{})
+		if !ok || len(items) == 0 {
+			t.Errorf("iteration %d: out.items should be non-empty array, got %v", i, outMap["items"])
+		}
+	}
+}
+
 // Helper to create ajson nodes for testing
 func mustUnmarshal(s string) *ajson.Node {
 	n, err := ajson.Unmarshal([]byte(s))
