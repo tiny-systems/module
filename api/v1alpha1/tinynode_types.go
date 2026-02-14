@@ -139,6 +139,8 @@ type TinyNodeModuleStatus struct {
 	Name string `json:"name"`
 	// +kubebuilder:validation:Required
 	Version string `json:"version"`
+	// +kubebuilder:validation:Optional
+	SDKVersion string `json:"sdkVersion,omitempty"`
 }
 
 type TinyNodeComponentStatus struct {
