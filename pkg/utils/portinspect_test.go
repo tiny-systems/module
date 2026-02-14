@@ -448,6 +448,155 @@ func TestSimulatePortDataWithEdgeChain(t *testing.T) {
 	})
 }
 
+// TestSimulatePortData_ConfigurableDefinitionOrder verifies that simulating a
+// source port with configurable definitions produces non-null fake data, even
+// when the source port name sorts alphabetically before the target port that
+// provides the definition (e.g. query_result before store).
+//
+// This is the end-to-end test for the two-pass definition replacement fix.
+func TestSimulatePortData_ConfigurableDefinitionOrder(t *testing.T) {
+	ctx := context.Background()
+
+	settingsSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"configurable": true,
+				"properties": {
+					"id": {"type": "string"},
+					"namespace": {"type": "string"}
+				}
+			},
+			"Settings": {
+				"type": "object",
+				"properties": {
+					"document": {"$ref": "#/$defs/Document"},
+					"primaryKey": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/Settings"
+	}`)
+
+	storeSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"properties": {
+					"id": {"type": "string"}
+				}
+			},
+			"StoreRequest": {
+				"type": "object",
+				"properties": {
+					"document": {"$ref": "#/$defs/Document"},
+					"operation": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/StoreRequest"
+	}`)
+
+	queryResultSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"properties": {
+					"id": {"type": "string"}
+				}
+			},
+			"QueryResultItem": {
+				"type": "object",
+				"properties": {
+					"key": {"type": "string"},
+					"document": {"$ref": "#/$defs/Document"}
+				}
+			},
+			"QueryResult": {
+				"type": "object",
+				"properties": {
+					"results": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/QueryResultItem"}
+					},
+					"count": {"type": "integer"},
+					"query": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/QueryResult"
+	}`)
+
+	kvNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "kv",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port:   v1alpha1.SettingsPort,
+					Schema: settingsSchema,
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: v1alpha1.SettingsPort, Source: false, Schema: settingsSchema},
+				{Name: "query_result", Source: true, Schema: queryResultSchema},
+				{Name: "store", Source: false, Schema: storeSchema},
+			},
+		},
+	}
+	kvNode.Name = "kv-node"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"kv-node": kvNode,
+	}
+
+	// Run multiple times to catch non-determinism
+	for i := 0; i < 10; i++ {
+		result, err := SimulatePortData(ctx, nodesMap, "kv-node:query_result", nil)
+		if err != nil {
+			t.Fatalf("iteration %d: SimulatePortData() error = %v", i, err)
+		}
+
+		qr, ok := result.(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: expected map, got %T", i, result)
+		}
+
+		results, ok := qr["results"].([]interface{})
+		if !ok || len(results) == 0 {
+			t.Fatalf("iteration %d: expected non-empty results array, got %v", i, qr["results"])
+		}
+
+		item, ok := results[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: expected map item, got %T", i, results[0])
+		}
+
+		doc, ok := item["document"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: expected document map, got %T (%v)", i, item["document"], item["document"])
+		}
+
+		// Document must have both properties from _settings schema
+		if doc["id"] == nil {
+			t.Errorf("iteration %d: document.id is nil, expected fake string value", i)
+		}
+		if doc["namespace"] == nil {
+			t.Errorf("iteration %d: document.namespace is nil, expected fake string value — "+
+				"settings definition was not propagated to source port", i)
+		}
+
+		// Values should be strings (fake data), not null
+		if _, ok := doc["id"].(string); !ok {
+			t.Errorf("iteration %d: document.id = %v (%T), expected string", i, doc["id"], doc["id"])
+		}
+		if _, ok := doc["namespace"].(string); !ok {
+			t.Errorf("iteration %d: document.namespace = %v (%T), expected string", i, doc["namespace"], doc["namespace"])
+		}
+	}
+}
+
 // Helper to create ajson nodes for testing
 func mustUnmarshal(s string) *ajson.Node {
 	n, err := ajson.Unmarshal([]byte(s))

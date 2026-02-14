@@ -647,6 +647,165 @@ func TestGetPortFullName(t *testing.T) {
 	}
 }
 
+// TestGetFlowMaps_DefinitionReplacementOrder verifies that source port definitions
+// get the fully-replaced version from _settings, even when the source port name
+// sorts alphabetically before the target port name (e.g. query_result before store).
+//
+// This was a bug: query_result was processed before store in the replacement loop,
+// so it got the unreplaced store definition (with only {id}) instead of the
+// _settings-replaced version (with {id, namespace}).
+func TestGetFlowMaps_DefinitionReplacementOrder(t *testing.T) {
+	// Simulate a KV-like component:
+	// - _settings target port: Document with {id, namespace} (user configured)
+	// - store target port: Document with {id} (default from Go struct)
+	// - query_result source port: Document with {id} (default)
+	//
+	// After processing, query_result's Document $def should have {id, namespace}
+	// because target ports are replaced first, then source ports read the updated definitions.
+
+	settingsSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"configurable": true,
+				"properties": {
+					"id": {"type": "string"},
+					"namespace": {"type": "string"}
+				}
+			},
+			"Settings": {
+				"type": "object",
+				"properties": {
+					"document": {"$ref": "#/$defs/Document"},
+					"primaryKey": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/Settings"
+	}`)
+
+	storeSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"properties": {
+					"id": {"type": "string"}
+				}
+			},
+			"StoreRequest": {
+				"type": "object",
+				"properties": {
+					"document": {"$ref": "#/$defs/Document"},
+					"operation": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/StoreRequest"
+	}`)
+
+	queryResultSchema := []byte(`{
+		"$defs": {
+			"Document": {
+				"type": "object",
+				"properties": {
+					"id": {"type": "string"}
+				}
+			},
+			"QueryResultItem": {
+				"type": "object",
+				"properties": {
+					"key": {"type": "string"},
+					"document": {"$ref": "#/$defs/Document"}
+				}
+			},
+			"QueryResult": {
+				"type": "object",
+				"properties": {
+					"results": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/QueryResultItem"}
+					},
+					"count": {"type": "integer"},
+					"query": {"type": "string"}
+				}
+			}
+		},
+		"$ref": "#/$defs/QueryResult"
+	}`)
+
+	kvNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "kv",
+			// User-configured _settings with custom Document schema
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port:   v1alpha1.SettingsPort,
+					Schema: settingsSchema,
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				// Sorted alphabetically (as runner.go does)
+				{Name: v1alpha1.SettingsPort, Source: false, Schema: settingsSchema},
+				{Name: "query_result", Source: true, Schema: queryResultSchema},
+				{Name: "store", Source: false, Schema: storeSchema},
+			},
+		},
+	}
+	kvNode.Name = "kv-node"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"kv-node": kvNode,
+	}
+
+	_, _, _, portSchemaMap, _, err := GetFlowMaps(nodesMap)
+	if err != nil {
+		t.Fatalf("GetFlowMaps() error = %v", err)
+	}
+
+	// Check that query_result's Document definition got the _settings properties
+	qrSchema, ok := portSchemaMap["kv-node:query_result"]
+	if !ok {
+		t.Fatal("portSchemaMap missing kv-node:query_result")
+	}
+
+	defs, err := qrSchema.GetKey("$defs")
+	if err != nil {
+		t.Fatalf("query_result schema has no $defs: %v", err)
+	}
+
+	docDef, err := defs.GetKey("Document")
+	if err != nil {
+		t.Fatalf("query_result $defs has no Document: %v", err)
+	}
+
+	props, err := docDef.GetKey("properties")
+	if err != nil {
+		t.Fatalf("Document has no properties: %v", err)
+	}
+
+	keys := props.Keys()
+	hasID := false
+	hasNamespace := false
+	for _, k := range keys {
+		if k == "id" {
+			hasID = true
+		}
+		if k == "namespace" {
+			hasNamespace = true
+		}
+	}
+
+	if !hasID {
+		t.Error("query_result Document definition missing 'id' property")
+	}
+	if !hasNamespace {
+		t.Error("query_result Document definition missing 'namespace' property — " +
+			"settings definition was not propagated to source port")
+	}
+}
+
 // Helper function
 func strPtr(s string) *string {
 	return &s
