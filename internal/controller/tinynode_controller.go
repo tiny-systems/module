@@ -110,8 +110,9 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Update status with current module info
 	node.Status.Module = operatorv1alpha1.TinyNodeModuleStatus{
-		Version: r.Module.Version,
-		Name:    r.Module.Name,
+		Version:    r.Module.Version,
+		Name:       r.Module.Name,
+		SDKVersion: r.Module.SDKVersion,
 	}
 	node.Status.Status = "OK"
 	node.Status.Error = false
