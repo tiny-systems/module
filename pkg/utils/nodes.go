@@ -460,7 +460,16 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 			}
 
 			for k, v := range portDefinitions {
-				_ = v.AppendObject("port", ajson.StringNode("", portID))
+				// Only annotate configurable/shared definitions with port.
+				// These are the definitions that need edge evaluation via the
+				// generator callback. Non-configurable definitions (like root
+				// types Start, Settings, or simple types String) should NOT be
+				// intercepted — the generator iterates their properties normally.
+				configurable, _ := schema.GetBool("configurable", v)
+				shared, _ := schema.GetBool("shared", v)
+				if configurable || shared {
+					_ = v.AppendObject("port", ajson.StringNode("", portID))
+				}
 				nodeTargetDefinitions[k] = v
 				if port.Name == v1alpha1.SettingsPort {
 					nodeSettingsDefinitions[k] = v
