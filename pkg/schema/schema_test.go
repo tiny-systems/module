@@ -144,6 +144,22 @@ func TestUpdateWithDefinitions(t *testing.T) {
 			want: []byte(`{"$defs":{"Foo":{"type":"string"}}}`),
 		},
 		{
+			name: "bare exact match replaced by richer path match: both Startcontext and Context in defs",
+			args: args{
+				// Edge schema has Startcontext (bare, from target node)
+				realSchema: []byte(`{"$defs":{"Start":{"path":"$","properties":{"context":{"$ref":"#/$defs/Startcontext"}},"type":"object"},"Startcontext":{"additionalProperties":{"type":"string"},"configurable":true,"path":"$.context","title":"Context","type":"object"}},"$ref":"#/$defs/Start"}`),
+				configurableDefinitionNodes: map[string]*ajson.Node{
+					// From target node: bare Startcontext (exact key match but no properties)
+					"Startcontext": ajson.Must(ajson.Unmarshal([]byte(`{"additionalProperties":{"type":"string"},"configurable":true,"path":"$.context","title":"Context","type":"object"}`))),
+					// From source node: rich Context with explicit properties
+					"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"auto_hostname":{"type":"boolean"},"host_name":{"type":"string"}},"title":"Context","type":"object"}`))),
+				},
+			},
+			wantErr: false,
+			// Startcontext exact match is bare, so path-based fallback should pick richer Context
+			want: []byte(`{"$defs":{"Start":{"path":"$","properties":{"context":{"$ref":"#/$defs/Startcontext"}},"type":"object"},"Startcontext":{"configurable":true,"path":"$.context","properties":{"auto_hostname":{"type":"boolean"},"host_name":{"type":"string"}},"title":"Context","type":"object"}},"$ref":"#/$defs/Start"}`),
+		},
+		{
 			name: "exact key match takes priority over path match",
 			args: args{
 				realSchema: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","type":"object","additionalProperties":{"type":"string"}}}}`),
