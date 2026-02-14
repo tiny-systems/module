@@ -219,6 +219,9 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 	}
 	data["module"] = bm.Sanitize(node.Spec.Module)
 	data["module_version"] = bm.Sanitize(node.Status.Module.Version)
+	if node.Status.Module.SDKVersion != "" {
+		data["sdk_version"] = bm.Sanitize(node.Status.Module.SDKVersion)
+	}
 
 	var keys []string
 	for k := range handlesMap {
@@ -772,6 +775,9 @@ func ApiNodeToMapMinimal(node v1alpha1.TinyNode, data map[string]interface{}) ma
 	data["component"] = bm.Sanitize(node.Spec.Component)
 	data["module"] = bm.Sanitize(node.Spec.Module)
 	data["module_version"] = bm.Sanitize(node.Status.Module.Version)
+	if node.Status.Module.SDKVersion != "" {
+		data["sdk_version"] = bm.Sanitize(node.Status.Module.SDKVersion)
+	}
 	data["component_description"] = bm.Sanitize(node.Status.Component.Description)
 	data["component_info"] = bm.Sanitize(node.Status.Component.Info)
 
