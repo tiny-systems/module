@@ -84,6 +84,9 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 			if err = SetBool("configurable", configurable, confCopy); err != nil {
 				return nil, fmt.Errorf("set bool error: %w", err)
 			}
+			if shared, hasShared := GetBool("shared", realSchemaDef); hasShared {
+				_ = SetBool("shared", shared, confCopy)
+			}
 			if readonly, _ := GetBool("readonly", realSchemaDef); readonly {
 				_ = SetBool("readonly", readonly, confCopy)
 			}
