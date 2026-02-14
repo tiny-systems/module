@@ -137,6 +137,17 @@ func SimulatePortDataFromMaps(
 				return nil, true, err
 			}
 
+			// When a shared definition is used as a single item (e.g. OutMessage.Item)
+			// but the path points to an array field (e.g. $.array from InMessage.Array),
+			// unwrap the first element. The definition type is "object" but the path
+			// returned an array — take [0] to get a representative item.
+			if arr, ok := result.([]interface{}); ok && len(arr) > 0 {
+				defType, _ := jsonschemagenerator.GetStrKey("type", n)
+				if defType != "array" {
+					result = arr[0]
+				}
+			}
+
 			return result, true, nil
 		}
 	}
