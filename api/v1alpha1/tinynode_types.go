@@ -39,9 +39,7 @@ const (
 
 	//ModuleNameMajorLabel module major version label
 	ModuleNameMajorLabel = "tinysystems.io/module-version-major"
-	//ModuleVersionLabel module exact version label
-	ModuleVersionLabel = "tinysystems.io/module-version"
-	DashboardLabel     = "tinysystems.io/dashboard"
+	DashboardLabel = "tinysystems.io/dashboard"
 
 	NodeHandlesAnnotation = "tinysystems.io/node-handles"
 
@@ -70,11 +68,6 @@ type TinyNodeSpec struct {
 	// Module name - container image repo + tag
 	// +kubebuilder:validation:Required
 	Module string `json:"module"`
-
-	// Module version semver v2 compatible (without v prefix)
-	// +kubebuilder:validation:Required
-	// +kubebuilder:default="1.0.0"
-	ModuleVersion string `json:"module_version"`
 
 	// Component name within a module
 	// +kubebuilder:validation:Required
