@@ -201,6 +201,33 @@ type PropertyMismatch struct {
 	ExpectedKey string // e.g. "route" (what the target port expects), empty if no close match
 }
 
+// ValidateEdgeSchemaKeys takes raw edge schema and target port schema bytes, cross-validates
+// property names, and returns a user-facing error string if mismatches are found.
+// Returns empty string if schemas match or can't be parsed.
+// Both platform and desktop client should call this on every edge.
+func ValidateEdgeSchemaKeys(edgeSchemaBytes, targetPortSchemaBytes []byte) string {
+	if len(edgeSchemaBytes) == 0 || len(targetPortSchemaBytes) == 0 {
+		return ""
+	}
+	edgeSchema, err := ajson.Unmarshal(edgeSchemaBytes)
+	if err != nil {
+		return ""
+	}
+	targetSchema, err := ajson.Unmarshal(targetPortSchemaBytes)
+	if err != nil {
+		return ""
+	}
+	mismatches := CrossValidateEdgeSchemaKeys(edgeSchema, targetSchema)
+	if len(mismatches) == 0 {
+		return ""
+	}
+	m := mismatches[0]
+	if m.ExpectedKey != "" {
+		return fmt.Sprintf("property %q in %s does not match target port (expected %q) — value will be lost at runtime", m.EdgeKey, m.DefName, m.ExpectedKey)
+	}
+	return fmt.Sprintf("property %q in %s does not exist in target port schema — value will be lost at runtime", m.EdgeKey, m.DefName)
+}
+
 // CrossValidateEdgeSchemaKeys compares property names between edge schema $defs and target
 // port schema $defs. For each definition that exists in both schemas, it checks whether the
 // edge has property keys that don't exist in the target. This catches bugs like routeName vs route
