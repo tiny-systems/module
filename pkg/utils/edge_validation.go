@@ -54,6 +54,26 @@ func ValidateEdgeWithSchemaAndRuntimeData(ctx context.Context, nodesMap map[stri
 	return ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration)
 }
 
+// ValidateEdgeWithPrecomputedMaps validates an edge using pre-computed flow maps.
+// Use this when GetFlowMaps has already been called (e.g., in buildGraphEvents) to avoid
+// redundant snapshot calls that cause inconsistent validation results.
+func ValidateEdgeWithPrecomputedMaps(ctx context.Context, portSchemaMap map[string]*ajson.Node, edgeConfigMap map[string][]Destination, sourcePortFullName string, edgeConfiguration []byte, edgeSchemaBytes []byte, runtimeData map[string][]byte) error {
+	if len(edgeSchemaBytes) == 0 {
+		return nil
+	}
+	edgeSchema, err := ajson.Unmarshal(edgeSchemaBytes)
+	if err != nil {
+		return fmt.Errorf("invalid edge schema: %v", err)
+	}
+
+	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, edgeConfigMap, sourcePortFullName, runtimeData)
+	if err != nil {
+		return fmt.Errorf("cannot get port data: %v", err)
+	}
+
+	return ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration)
+}
+
 // ValidateEdgeWithRuntimeData validates an edge's configuration against the target port's schema,
 // using runtime data when available instead of simulated mock data.
 func ValidateEdgeWithRuntimeData(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, sourcePortFullName, targetPortFullName string, edgeConfiguration []byte, runtimeData map[string][]byte) error {
