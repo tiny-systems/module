@@ -74,7 +74,7 @@ func (se *JSONSchemaBasedDataGenerator) Generate(node *ajson.Node, clb Callback)
 					propsNode, _ := node.GetKey("properties")
 					if propsNode != nil && propsNode.IsObject() {
 						for _, propName := range propsNode.Keys() {
-							if _, exists := m[propName]; exists {
+							if val, exists := m[propName]; exists && val != nil {
 								continue
 							}
 							propValue, pErr := propsNode.GetKey(propName)
