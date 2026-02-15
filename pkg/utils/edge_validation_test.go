@@ -451,3 +451,204 @@ func containsSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestCrossValidateEdgeSchemaKeys(t *testing.T) {
+	tests := []struct {
+		name             string
+		edgeSchema       string
+		targetPortSchema string
+		wantMismatches   int
+		wantEdgeKey      string
+		wantExpectedKey  string
+		wantDefName      string
+	}{
+		{
+			name: "matching schemas - no mismatches",
+			edgeSchema: `{
+				"$defs": {
+					"Condition": {
+						"type": "object",
+						"properties": {
+							"route": {"type": "string"},
+							"condition": {"type": "boolean"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Condition"
+			}`,
+			targetPortSchema: `{
+				"$defs": {
+					"Condition": {
+						"type": "object",
+						"properties": {
+							"route": {"type": "string"},
+							"condition": {"type": "boolean"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Condition"
+			}`,
+			wantMismatches: 0,
+		},
+		{
+			name: "routeName vs route mismatch",
+			edgeSchema: `{
+				"$defs": {
+					"Condition": {
+						"type": "object",
+						"properties": {
+							"routeName": {"type": "string"},
+							"condition": {"type": "boolean"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Condition"
+			}`,
+			targetPortSchema: `{
+				"$defs": {
+					"Condition": {
+						"type": "object",
+						"properties": {
+							"route": {"type": "string"},
+							"condition": {"type": "boolean"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Condition"
+			}`,
+			wantMismatches:  1,
+			wantEdgeKey:     "routeName",
+			wantExpectedKey: "", // no case-insensitive match for routeName→route
+			wantDefName:     "Condition",
+		},
+		{
+			name: "case mismatch suggests expected key",
+			edgeSchema: `{
+				"$defs": {
+					"Settings": {
+						"type": "object",
+						"properties": {
+							"Delay": {"type": "integer"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Settings"
+			}`,
+			targetPortSchema: `{
+				"$defs": {
+					"Settings": {
+						"type": "object",
+						"properties": {
+							"delay": {"type": "integer"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Settings"
+			}`,
+			wantMismatches:  1,
+			wantEdgeKey:     "Delay",
+			wantExpectedKey: "delay",
+			wantDefName:     "Settings",
+		},
+		{
+			name: "extra properties in edge only",
+			edgeSchema: `{
+				"$defs": {
+					"Message": {
+						"type": "object",
+						"properties": {
+							"body": {"type": "string"},
+							"extraField": {"type": "string"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Message"
+			}`,
+			targetPortSchema: `{
+				"$defs": {
+					"Message": {
+						"type": "object",
+						"properties": {
+							"body": {"type": "string"}
+						}
+					}
+				},
+				"$ref": "#/$defs/Message"
+			}`,
+			wantMismatches: 1,
+			wantEdgeKey:    "extraField",
+			wantDefName:    "Message",
+		},
+		{
+			name:             "nil edge schema",
+			edgeSchema:       "",
+			targetPortSchema: `{"$defs": {"X": {"type": "object", "properties": {"a": {"type": "string"}}}}}`,
+			wantMismatches:   0,
+		},
+		{
+			name:             "nil target schema",
+			edgeSchema:       `{"$defs": {"X": {"type": "object", "properties": {"a": {"type": "string"}}}}}`,
+			targetPortSchema: "",
+			wantMismatches:   0,
+		},
+		{
+			name: "def only in edge - no comparison",
+			edgeSchema: `{
+				"$defs": {
+					"OnlyInEdge": {
+						"type": "object",
+						"properties": {"foo": {"type": "string"}}
+					}
+				}
+			}`,
+			targetPortSchema: `{
+				"$defs": {
+					"OnlyInTarget": {
+						"type": "object",
+						"properties": {"bar": {"type": "string"}}
+					}
+				}
+			}`,
+			wantMismatches: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var edgeSchema, targetPortSchema *ajson.Node
+			if tt.edgeSchema != "" {
+				var err error
+				edgeSchema, err = ajson.Unmarshal([]byte(tt.edgeSchema))
+				if err != nil {
+					t.Fatalf("invalid edge schema: %v", err)
+				}
+			}
+			if tt.targetPortSchema != "" {
+				var err error
+				targetPortSchema, err = ajson.Unmarshal([]byte(tt.targetPortSchema))
+				if err != nil {
+					t.Fatalf("invalid target port schema: %v", err)
+				}
+			}
+
+			mismatches := CrossValidateEdgeSchemaKeys(edgeSchema, targetPortSchema)
+
+			if len(mismatches) != tt.wantMismatches {
+				t.Fatalf("got %d mismatches, want %d: %+v", len(mismatches), tt.wantMismatches, mismatches)
+			}
+
+			if tt.wantMismatches > 0 {
+				m := mismatches[0]
+				if tt.wantEdgeKey != "" && m.EdgeKey != tt.wantEdgeKey {
+					t.Errorf("EdgeKey = %q, want %q", m.EdgeKey, tt.wantEdgeKey)
+				}
+				if tt.wantExpectedKey != "" && m.ExpectedKey != tt.wantExpectedKey {
+					t.Errorf("ExpectedKey = %q, want %q", m.ExpectedKey, tt.wantExpectedKey)
+				}
+				if tt.wantDefName != "" && m.DefName != tt.wantDefName {
+					t.Errorf("DefName = %q, want %q", m.DefName, tt.wantDefName)
+				}
+			}
+		})
+	}
+}

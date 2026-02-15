@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/goccy/go-json"
 	"github.com/santhosh-tekuri/jsonschema/v5"
@@ -190,4 +191,85 @@ func formatValidationError(err *jsonschema.ValidationError) error {
 		path = "/"
 	}
 	return fmt.Errorf("%s: %s", path, leaf.Message)
+}
+
+// PropertyMismatch describes a property key in an edge schema definition that doesn't match
+// the corresponding property key in the target port schema definition.
+type PropertyMismatch struct {
+	DefName     string // e.g. "Condition"
+	EdgeKey     string // e.g. "routeName" (what the edge has)
+	ExpectedKey string // e.g. "route" (what the target port expects), empty if no close match
+}
+
+// CrossValidateEdgeSchemaKeys compares property names between edge schema $defs and target
+// port schema $defs. For each definition that exists in both schemas, it checks whether the
+// edge has property keys that don't exist in the target. This catches bugs like routeName vs route
+// where the edge config uses Go field names instead of json tags.
+//
+// Returns nil if no mismatches found.
+func CrossValidateEdgeSchemaKeys(edgeSchema, targetPortSchema *ajson.Node) []PropertyMismatch {
+	if edgeSchema == nil || targetPortSchema == nil {
+		return nil
+	}
+
+	edgeDefs, err := edgeSchema.GetKey("$defs")
+	if err != nil || edgeDefs == nil || !edgeDefs.IsObject() {
+		return nil
+	}
+
+	targetDefs, err := targetPortSchema.GetKey("$defs")
+	if err != nil || targetDefs == nil || !targetDefs.IsObject() {
+		return nil
+	}
+
+	var mismatches []PropertyMismatch
+
+	for _, defName := range edgeDefs.Keys() {
+		edgeDef, err := edgeDefs.GetKey(defName)
+		if err != nil || edgeDef == nil || !edgeDef.IsObject() {
+			continue
+		}
+		targetDef, err := targetDefs.GetKey(defName)
+		if err != nil || targetDef == nil || !targetDef.IsObject() {
+			continue
+		}
+
+		edgeProps, err := edgeDef.GetKey("properties")
+		if err != nil || edgeProps == nil || !edgeProps.IsObject() {
+			continue
+		}
+		targetProps, err := targetDef.GetKey("properties")
+		if err != nil || targetProps == nil || !targetProps.IsObject() {
+			continue
+		}
+
+		// Build set of target property keys
+		targetKeys := make(map[string]bool, len(targetProps.Keys()))
+		for _, k := range targetProps.Keys() {
+			targetKeys[k] = true
+		}
+
+		// Check each edge property key against target
+		for _, edgeKey := range edgeProps.Keys() {
+			if targetKeys[edgeKey] {
+				continue
+			}
+			// Edge has a key the target doesn't — possible field name vs json tag mismatch
+			mismatch := PropertyMismatch{
+				DefName: defName,
+				EdgeKey: edgeKey,
+			}
+			// Try to find a close match (case-insensitive) for better error messages
+			edgeKeyLower := strings.ToLower(edgeKey)
+			for targetKey := range targetKeys {
+				if strings.ToLower(targetKey) == edgeKeyLower {
+					mismatch.ExpectedKey = targetKey
+					break
+				}
+			}
+			mismatches = append(mismatches, mismatch)
+		}
+	}
+
+	return mismatches
 }
