@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/goccy/go-json"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/tiny-systems/ajson"
@@ -71,7 +73,21 @@ func ValidateEdgeWithPrecomputedMaps(ctx context.Context, portSchemaMap map[stri
 		return fmt.Errorf("cannot get port data: %v", err)
 	}
 
-	return ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration)
+	err = ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration)
+	if err != nil {
+		// Diagnostic: log source port schema and simulated data when validation fails
+		if sourceSchema, ok := portSchemaMap[sourcePortFullName]; ok {
+			schemaBytes, _ := ajson.Marshal(sourceSchema)
+			hasRuntime := runtimeData != nil && len(runtimeData[sourcePortFullName]) > 0
+			log.Info().Str("source_port", sourcePortFullName).
+				RawJSON("source_schema", schemaBytes).
+				Interface("simulated_data", portData).
+				Bool("has_runtime_data", hasRuntime).
+				Str("error", err.Error()).
+				Msg("edge validation failed — diagnostic")
+		}
+	}
+	return err
 }
 
 // ValidateEdgeWithRuntimeData validates an edge's configuration against the target port's schema,

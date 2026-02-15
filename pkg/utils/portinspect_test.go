@@ -1674,6 +1674,210 @@ func TestSimulatePortData_RouterEdgeSchemaEnrichment(t *testing.T) {
 	})
 }
 
+// TestSimulatePortData_RouterNullBackfill reproduces the exact bug where a router
+// output port has an edge schema enriching Context with {content, responseUrl, context},
+// but the upstream source (go-template) has no responseUrl in its context.
+// The edge config maps "responseUrl": "{{$.context.responseUrl}}" which evaluates to null.
+// The backfill should replace null values with fakedata strings.
+//
+// This is the real-world bug: edge validation shows "/url: expected string, but got null"
+// because responseUrl stays null in the simulated data.
+func TestSimulatePortData_RouterNullBackfill(t *testing.T) {
+	ctx := context.Background()
+
+	// Go-template output: has content (string) and context (with body, method, headers, requestURI — NO responseUrl)
+	goTemplateResponseSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"type": "object",
+				"configurable": true,
+				"properties": {
+					"body": {"type": "string"},
+					"context": {"configurable": true},
+					"headers": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}},
+					"method": {"type": "string"},
+					"requestURI": {"type": "string"}
+				},
+				"path": "$.context"
+			},
+			"Response": {
+				"type": "object",
+				"properties": {
+					"content": {"type": "string", "propertyOrder": 1},
+					"context": {"$ref": "#/$defs/Context", "propertyOrder": 2}
+				},
+				"path": "$"
+			}
+		},
+		"$ref": "#/$defs/Response"
+	}`)
+
+	// Router input status schema — bare Context
+	routerInputStatusSchema := []byte(`{
+		"$defs": {
+			"Condition": {
+				"type": "object",
+				"properties": {
+					"route": {"type": "string"},
+					"condition": {"type": "boolean"}
+				},
+				"path": "$.conditions[0]"
+			},
+			"Context": {
+				"configurable": true,
+				"title": "Context",
+				"path": "$.context"
+			},
+			"Inmessage": {
+				"type": "object",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context", "propertyOrder": 1},
+					"conditions": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/Condition"},
+						"propertyOrder": 2
+					}
+				},
+				"path": "$"
+			}
+		},
+		"$ref": "#/$defs/Inmessage"
+	}`)
+
+	// Edge schema from go-template -> router:input
+	// Context has {content, responseUrl, context} — enriched by user's edge configuration
+	routerInputEdgeSchema := []byte(`{
+		"$defs": {
+			"Condition": {
+				"type": "object",
+				"properties": {
+					"route": {"type": "string"},
+					"condition": {"type": "boolean"}
+				},
+				"path": "$.conditions[0]"
+			},
+			"Context": {
+				"configurable": true,
+				"type": "object",
+				"path": "$.context",
+				"properties": {
+					"content": {"type": "string", "propertyOrder": 1},
+					"responseUrl": {"type": "string", "propertyOrder": 2},
+					"context": {"configurable": true, "propertyOrder": 3}
+				}
+			},
+			"Inmessage": {
+				"type": "object",
+				"properties": {
+					"context": {"$ref": "#/$defs/Context", "propertyOrder": 1},
+					"conditions": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/Condition"},
+						"propertyOrder": 2
+					}
+				},
+				"path": "$"
+			}
+		},
+		"$ref": "#/$defs/Inmessage"
+	}`)
+
+	// Router output schema — bare Context (from Status, *interface{})
+	routerOutputSchema := []byte(`{
+		"$defs": {
+			"Context": {
+				"path": "$"
+			}
+		},
+		"$ref": "#/$defs/Context"
+	}`)
+
+	goTemplateNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "go_template",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "e1", Port: "response", To: "router:input"},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "response", Source: true, Schema: goTemplateResponseSchema},
+			},
+		},
+	}
+	goTemplateNode.Name = "go-template"
+
+	routerNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "router",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port: "input",
+					From: "go-template:response",
+					// Edge config maps fields individually, including responseUrl which doesn't exist in go-template context
+					Configuration: []byte(`{
+						"context": {
+							"content": "{{$.content}}",
+							"responseUrl": "{{$.context.responseUrl}}",
+							"context": "{{$.context}}"
+						},
+						"conditions": [{"route": "WEBHOOK", "condition": "{{$.context.responseUrl != null}}"}]
+					}`),
+					Schema: routerInputEdgeSchema,
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "input", Source: false, Schema: routerInputStatusSchema},
+				{Name: "out_webhook", Source: true, Schema: routerOutputSchema},
+			},
+		},
+	}
+	routerNode.Name = "router"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"go-template": goTemplateNode,
+		"router":      routerNode,
+	}
+
+	for i := 0; i < 10; i++ {
+		result, err := SimulatePortData(ctx, nodesMap, "router:out_webhook", nil)
+		if err != nil {
+			t.Fatalf("iteration %d: SimulatePortData() error = %v", i, err)
+		}
+
+		if result == nil {
+			t.Fatalf("iteration %d: result is nil", i)
+		}
+
+		m, ok := result.(map[string]interface{})
+		if !ok {
+			t.Fatalf("iteration %d: expected map, got %T: %v", i, result, result)
+		}
+
+		t.Logf("iteration %d: result = %v", i, m)
+
+		// content should be a string (from go-template's $.content via edge evaluation)
+		if m["content"] == nil {
+			t.Errorf("iteration %d: content is nil", i)
+		}
+
+		// responseUrl — this is the KEY assertion.
+		// The go-template context has NO responseUrl, so the edge expression
+		// {{$.context.responseUrl}} evaluates to nil. The backfill should replace
+		// this null with a fakedata string because the enriched Context definition
+		// has responseUrl: {type: "string"} in its properties.
+		if m["responseUrl"] == nil {
+			t.Errorf("iteration %d: responseUrl is nil — backfill should have replaced null "+
+				"with fakedata string. The enriched Context definition has responseUrl: {type: string} "+
+				"in its properties, but the generator's backfill at line 77 is not firing.", i)
+		} else if _, ok := m["responseUrl"].(string); !ok {
+			t.Errorf("iteration %d: responseUrl should be string, got %T: %v", i, m["responseUrl"], m["responseUrl"])
+		}
+	}
+}
+
 // Helper to create ajson nodes for testing
 func mustUnmarshal(s string) *ajson.Node {
 	n, err := ajson.Unmarshal([]byte(s))
