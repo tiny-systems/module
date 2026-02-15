@@ -2,9 +2,11 @@ package runner
 
 import (
 	"context"
+	stdjson "encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -384,6 +386,21 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 			)
 			return nil, errors.Wrap(err, "eval port edge settings config")
 		}
+
+		// Detect edge config keys that don't match target struct json tags
+		if configMap, ok := configurationMap.(map[string]interface{}); ok {
+			if orphaned := findOrphanedKeys(configMap, reflect.TypeOf(nodePort.Configuration)); len(orphaned) > 0 {
+				c.log.Error(fmt.Errorf("edge config has keys that don't match target port struct"),
+					"orphaned keys will be silently dropped during deserialization",
+					"orphanedKeys", orphaned,
+					"port", port,
+					"edgeID", msg.EdgeID,
+					"from", msg.From,
+					"node", c.name,
+				)
+			}
+		}
+
 		// all good, we can say that's the data for incoming port
 		if err = c.jsonEncodeDecode(configurationMap, portInputData.Addr().Interface()); err != nil {
 			return nil, errors.Wrap(err, "map decode from config map to port input type")
@@ -961,4 +978,97 @@ func (c *Runner) getPortByName(portName string) *m.Port {
 		}
 	}
 	return nil
+}
+
+// getJSONTagNames returns a map of json tag name → struct field index for a struct type.
+// Skips fields without json tags or with json:"-".
+func getJSONTagNames(t reflect.Type) map[string]int {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	result := make(map[string]int, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" {
+			continue
+		}
+		result[name] = i
+	}
+	return result
+}
+
+// findOrphanedKeys compares map keys from evaluated edge config against the target struct's
+// json tags. Returns keys present in the map but missing from the struct — these will be
+// silently dropped by json.Unmarshal, which is the root cause of bugs like routeName vs route.
+// Recurses into nested structs and slice element types. Skips types implementing json.Unmarshaler
+// (e.g. RouteName) since they handle their own deserialization.
+func findOrphanedKeys(data map[string]interface{}, t reflect.Type) []string {
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	// Skip types that implement json.Unmarshaler — they handle their own keys
+	unmarshalerType := reflect.TypeOf((*stdjson.Unmarshaler)(nil)).Elem()
+	if t.Implements(unmarshalerType) || reflect.PointerTo(t).Implements(unmarshalerType) {
+		return nil
+	}
+
+	tags := getJSONTagNames(t)
+	var orphaned []string
+
+	for key, val := range data {
+		fieldIdx, ok := tags[key]
+		if !ok {
+			orphaned = append(orphaned, key)
+			continue
+		}
+		// Recurse into nested structs and slice items
+		if val == nil {
+			continue
+		}
+		fieldType := t.Field(fieldIdx).Type
+		if fieldType.Kind() == reflect.Ptr {
+			fieldType = fieldType.Elem()
+		}
+		switch fieldType.Kind() {
+		case reflect.Struct:
+			if nested, ok := val.(map[string]interface{}); ok {
+				for _, o := range findOrphanedKeys(nested, fieldType) {
+					orphaned = append(orphaned, key+"."+o)
+				}
+			}
+		case reflect.Slice:
+			elemType := fieldType.Elem()
+			if elemType.Kind() == reflect.Ptr {
+				elemType = elemType.Elem()
+			}
+			if elemType.Kind() == reflect.Struct {
+				if arr, ok := val.([]interface{}); ok {
+					for i, item := range arr {
+						if nested, ok := item.(map[string]interface{}); ok {
+							for _, o := range findOrphanedKeys(nested, elemType) {
+								orphaned = append(orphaned, fmt.Sprintf("%s[%d].%s", key, i, o))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(orphaned)
+	return orphaned
 }
