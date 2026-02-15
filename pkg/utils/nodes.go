@@ -525,15 +525,18 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 						nodeTargetDefinitions[ek] = ev
 						continue
 					}
-					// Prefer edge definition if it has properties and existing doesn't
+					// Merge properties from edge definitions into existing.
+					// When multiple edges feed the same port, each may define
+					// different Context properties (e.g., slack path has responseUrl,
+					// k8s path has namespace). Merging ALL properties ensures
+					// simulation is deterministic regardless of map iteration order.
 					evProps, _ := ev.GetKey("properties")
 					exProps, _ := existing.GetKey("properties")
 					evHasProps := evProps != nil && evProps.IsObject() && len(evProps.Keys()) > 0
 					exHasProps := exProps != nil && exProps.IsObject() && len(exProps.Keys()) > 0
 					if evHasProps && !exHasProps {
-						// Carry over port annotation from the definition being replaced.
-						// Without this, the simulation callback can't trace backwards
-						// through edges and falls back to random fakedata.
+						// First edge with properties: replace bare definition.
+						// Carry over port annotation so simulation can trace backwards.
 						if portNode, pErr := existing.GetKey("port"); pErr == nil && portNode != nil {
 							if ps, pErr2 := portNode.Unpack(); pErr2 == nil {
 								if portStr, ok := ps.(string); ok && portStr != "" {
@@ -542,6 +545,16 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 							}
 						}
 						nodeTargetDefinitions[ek] = ev
+					} else if evHasProps && exHasProps {
+						// Both have properties: merge missing ones from edge into existing.
+						for _, propName := range evProps.Keys() {
+							if _, pErr := exProps.GetKey(propName); pErr != nil {
+								propNode, gErr := evProps.GetKey(propName)
+								if gErr == nil && propNode != nil {
+									_ = exProps.AppendObject(propName, propNode)
+								}
+							}
+						}
 					}
 				}
 			}
