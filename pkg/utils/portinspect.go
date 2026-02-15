@@ -113,12 +113,7 @@ func SimulatePortDataFromMaps(
 			if len(results) == 0 {
 				return nil, false, nil
 			}
-			// Merge all results to build the richest possible simulated data.
-			// A port may have multiple incoming edges (e.g., different command paths
-			// in a flow). Each edge contributes different fields. Picking just
-			// results[0] would depend on map iteration order and miss fields
-			// from other edges, causing non-deterministic validation.
-			result = mergeResults(results)
+			result = results[0]
 
 			if pathStr == "$" || pathStr == "" {
 				return result, true, nil
@@ -212,53 +207,6 @@ func SimulatePortDataFromMaps(
 	}
 
 	return inspect(ctx, inspectPortFullName)
-}
-
-// mergeResults combines multiple simulation results into one, preferring non-null
-// values. When a port has multiple incoming edges (e.g., different command paths),
-// each edge contributes different fields. Merging produces the richest possible
-// simulated data for validation.
-func mergeResults(results []interface{}) interface{} {
-	if len(results) == 1 {
-		return results[0]
-	}
-
-	// Try to merge maps
-	merged := make(map[string]interface{})
-	hasMaps := false
-	for _, r := range results {
-		m, ok := r.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		hasMaps = true
-		for k, v := range m {
-			existing, exists := merged[k]
-			if !exists || existing == nil {
-				merged[k] = v
-			} else if v != nil {
-				// Both non-nil: recurse for nested maps
-				if existingMap, ok := existing.(map[string]interface{}); ok {
-					if vMap, ok := v.(map[string]interface{}); ok {
-						merged[k] = mergeResults([]interface{}{existingMap, vMap})
-						continue
-					}
-				}
-				// Keep existing non-null value
-			}
-		}
-	}
-	if hasMaps {
-		return merged
-	}
-
-	// Not maps — return first non-nil result
-	for _, r := range results {
-		if r != nil {
-			return r
-		}
-	}
-	return results[0]
 }
 
 // SimulatePortDataSimple generates mock data for a port without runtime/trace data.
