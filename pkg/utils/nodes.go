@@ -329,8 +329,19 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 		portStatusSchemaMap = map[string][]byte{}
 	)
 
+	// Sort node names for deterministic processing order.
+	// Go map iteration is randomized — without sorting, destinationsMap
+	// slice ordering varies between calls, causing SimulatePortDataFromMaps
+	// to pick different results[0] for ports with multiple incoming edges.
+	sortedNodeNames := make([]string, 0, len(nodesMap))
+	for name := range nodesMap {
+		sortedNodeNames = append(sortedNodeNames, name)
+	}
+	sort.Strings(sortedNodeNames)
+
 	// ALL PORT CONFIGS
-	for _, node := range nodesMap {
+	for _, nodeName := range sortedNodeNames {
+		node := nodesMap[nodeName]
 		for _, pc := range node.Spec.Ports {
 			port := GetPortFullName(node.Name, pc.Port)
 			if portConfigMap[port] == nil {
@@ -342,7 +353,8 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 
 	// ALL TARGET PORTS OF THE FLOW
 	targetPortsMap := make(map[string]struct{})
-	for _, node := range nodesMap {
+	for _, nodeName := range sortedNodeNames {
+		node := nodesMap[nodeName]
 		// each node
 		for _, np := range node.Status.Ports {
 
@@ -355,7 +367,8 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 	}
 
 	// MAIN LOOP
-	for _, node := range nodesMap {
+	for _, nodeName := range sortedNodeNames {
+		node := nodesMap[nodeName]
 		// each node
 		// default port info
 		for _, np := range node.Status.Ports {
