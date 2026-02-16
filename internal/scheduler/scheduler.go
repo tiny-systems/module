@@ -114,13 +114,40 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 
 	instance, ok := s.instancesMap.Get(nodeName)
 
-	// If instance doesn't exist at all, delegate to outside handler (might be remote)
+	// If instance doesn't exist, wait with backoff — it may be starting up.
+	// Previously this delegated to msgHandler which routed back here, creating
+	// a tight infinite loop that OOMed the pod for phantom/deleted nodes.
 	if !ok {
-		s.log.Info("scheduler handle: instance not found, delegating to outside handler",
+		s.log.Info("scheduler handle: instance not found, starting backoff retry",
 			"node", nodeName,
 			"port", port,
 		)
-		return s.msgHandler(ctx, msg)
+
+		b := backoff.NewExponentialBackOff()
+		b.InitialInterval = 100 * time.Millisecond
+		b.MaxInterval = 5 * time.Second
+		b.MaxElapsedTime = 30 * time.Second
+
+		err := backoff.Retry(func() error {
+			instance, ok = s.instancesMap.Get(nodeName)
+			if ok {
+				return nil
+			}
+			return fmt.Errorf("instance %s not found", nodeName)
+		}, backoff.WithContext(b, ctx))
+
+		if err != nil {
+			s.log.Info("scheduler handle: instance not found after backoff, returning error",
+				"node", nodeName,
+				"port", port,
+			)
+			return nil, fmt.Errorf("instance %s not found after retry", nodeName)
+		}
+
+		s.log.Info("scheduler handle: instance appeared after backoff",
+			"node", nodeName,
+			"port", port,
+		)
 	}
 
 	// Instance exists - check if port is ready, retry with backoff if not
