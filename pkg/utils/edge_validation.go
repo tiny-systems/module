@@ -226,7 +226,27 @@ func formatValidationError(err *jsonschema.ValidationError) error {
 	if path == "" {
 		path = "/"
 	}
+
+	// Try to extract schema definition name for better context
+	if defName := extractDefName(leaf.KeywordLocation); defName != "" {
+		return fmt.Errorf("%s: does not match linked %s schema: %s", path, defName, leaf.Message)
+	}
 	return fmt.Errorf("%s: %s", path, leaf.Message)
+}
+
+// extractDefName pulls the definition name from a JSON Schema keyword location
+// e.g. "schema.json#/$defs/Context/required" -> "Context"
+func extractDefName(keywordLocation string) string {
+	const defsKey = "$defs/"
+	idx := strings.LastIndex(keywordLocation, defsKey)
+	if idx == -1 {
+		return ""
+	}
+	rest := keywordLocation[idx+len(defsKey):]
+	if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
+		return rest[:slashIdx]
+	}
+	return rest
 }
 
 // PropertyMismatch describes a property key in an edge schema definition that doesn't match
