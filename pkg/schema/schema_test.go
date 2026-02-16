@@ -174,6 +174,32 @@ func TestUpdateWithDefinitions(t *testing.T) {
 			// exact key match wins: Context properties from "Context" def, not "Other"
 			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"name":{"type":"string"}},"type":"object"}}}`),
 		},
+		{
+			name: "required stripped from configurable overlay",
+			args: args{
+				// Target port has bare Context (configurable, no properties)
+				realSchema: []byte(`{"$defs":{"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/Request"}`),
+				configurableDefinitionNodes: map[string]*ajson.Node{
+					// Source node's Context has required: ["endpoints"] from ticker settings
+					"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"endpoints":{"type":"array","items":{"type":"object"}}},"required":["endpoints"],"title":"Context","type":"object"}`))),
+				},
+			},
+			wantErr: false,
+			// Context should have properties from overlay BUT required must be stripped
+			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"endpoints":{"type":"array","items":{"type":"object"}}},"title":"Context","type":"object"},"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"}},"$ref":"#/$defs/Request"}`),
+		},
+		{
+			name: "required stripped even with path-based match",
+			args: args{
+				realSchema: []byte(`{"$defs":{"Start":{"path":"$","properties":{"context":{"$ref":"#/$defs/Startcontext"}},"type":"object"},"Startcontext":{"additionalProperties":{"type":"string"},"configurable":true,"path":"$.context","title":"Context","type":"object"}},"$ref":"#/$defs/Start"}`),
+				configurableDefinitionNodes: map[string]*ajson.Node{
+					"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"domain":{"type":"string"},"automatic_domain":{"type":"boolean"}},"required":["domain","automatic_domain"],"title":"Context","type":"object"}`))),
+				},
+			},
+			wantErr: false,
+			// Startcontext gets properties from Context via path match, but required is stripped
+			want: []byte(`{"$defs":{"Start":{"path":"$","properties":{"context":{"$ref":"#/$defs/Startcontext"}},"type":"object"},"Startcontext":{"configurable":true,"path":"$.context","properties":{"domain":{"type":"string"},"automatic_domain":{"type":"boolean"}},"title":"Context","type":"object"}},"$ref":"#/$defs/Start"}`),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
