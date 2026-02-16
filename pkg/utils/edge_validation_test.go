@@ -6,6 +6,7 @@ import (
 
 	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/pkg/schema"
 )
 
 func TestValidateEdgeSchema(t *testing.T) {
@@ -450,6 +451,609 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestValidateEdgeWithPrecomputedMaps_ConfigurableOverlay tests the full validation pipeline
+// that the platform uses in buildGraphEvents: GetFlowMaps → GetConfigurableDefinitions →
+// UpdateWithDefinitions → ValidateEdgeWithPrecomputedMaps.
+// This catches bugs where configurable definition overlays (type, required, etc.) from the
+// source node leak into the target schema and cause false validation errors.
+func TestValidateEdgeWithPrecomputedMaps_ConfigurableOverlay(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		// Source node: the node whose output port feeds the edge
+		sourceNodeName string
+		sourcePortName string
+		sourceSchema   string // schema for source output port
+		// Target node: receives data via the edge
+		targetNodeName string
+		targetPortName string
+		targetSchema   string // schema for target input port
+		// Settings: spec.ports with schema (for configurable definitions)
+		sourceSettingsSchema string // settings port schema on source node (optional)
+		targetSettingsSchema string // settings port schema on target node (optional)
+		// Edge configuration
+		edgeConfiguration string
+		// What we expect
+		wantErr     bool
+		errContains string
+	}{
+		// ============================================================
+		// Bare Context + configurable overlay — the "firestore → debug" bug
+		// ============================================================
+		{
+			name:           "bare context target: string mapped into context passes after overlay",
+			sourceNodeName: "firestore-listener",
+			sourcePortName: "error",
+			sourceSchema: `{
+				"$defs": {
+					"Error": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"error":{"type":"string"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object","properties":{"collection":{"type":"string"},"namespace":{"type":"string"}}}
+				},
+				"$ref": "#/$defs/Error"
+			}`,
+			targetNodeName: "debug",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"In": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context"},
+					"Inputdata": {"configurable":true,"path":"$.data","title":"Data"}
+				},
+				"$ref": "#/$defs/In"
+			}`,
+			edgeConfiguration: `{"context":"{{$.error}}","data":"{{$}}"}`,
+			wantErr:           false,
+		},
+		{
+			name:           "bare context target: object mapped into context passes after overlay",
+			sourceNodeName: "ticker",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object","properties":{"endpoints":{"type":"array","items":{"type":"object"}}}}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "debug",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"In": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context"},
+					"Inputdata": {"configurable":true,"path":"$.data","title":"Data"}
+				},
+				"$ref": "#/$defs/In"
+			}`,
+			edgeConfiguration: `{"context":"{{$.context}}","data":"{{$}}"}`,
+			wantErr:           false,
+		},
+		{
+			name:           "bare context target: null mapped into context passes",
+			sourceNodeName: "source",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"value":{"type":"string"}},"type":"object"}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "debug",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"In": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context"},
+					"Inputdata": {"configurable":true,"path":"$.data","title":"Data"}
+				},
+				"$ref": "#/$defs/In"
+			}`,
+			edgeConfiguration: `{"context":null,"data":"{{$}}"}`,
+			wantErr:           false,
+		},
+		// ============================================================
+		// Required stripping — the "status page endpoints" bug
+		// ============================================================
+		{
+			name:           "required stripped: target context without required field passes",
+			sourceNodeName: "ticker",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object","properties":{"endpoints":{"type":"array","items":{"type":"object","properties":{"url":{"type":"string"},"method":{"type":"string"}}}},"project_name":{"type":"string"}},"required":["endpoints","project_name"]}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "http-request",
+			targetPortName: "request",
+			targetSchema: `{
+				"$defs": {
+					"Request": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"url":{"type":"string"},"method":{"type":"string"},"timeout":{"type":"integer"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context"}
+				},
+				"$ref": "#/$defs/Request"
+			}`,
+			// After split, individual endpoint item goes to http_request — no "endpoints" array
+			edgeConfiguration: `{"context":"{{$.context}}","url":"{{$.context.endpoints[0].url}}","method":"GET","timeout":10}`,
+			wantErr:           false,
+		},
+		// ============================================================
+		// Typed Context target — validation SHOULD enforce type
+		// ============================================================
+		{
+			name:           "typed context target: string value correctly rejected",
+			sourceNodeName: "source",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"error":{"type":"string"}},"type":"object"}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "typed-target",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"Request": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"type":"string"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object"}
+				},
+				"$ref": "#/$defs/Request"
+			}`,
+			edgeConfiguration: `{"context":"{{$.error}}","data":"{{$.error}}"}`,
+			wantErr:           true,
+			errContains:       "expected object",
+		},
+		{
+			name:           "typed context target: object value passes",
+			sourceNodeName: "source",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"ctx":{"type":"object","properties":{"key":{"type":"string"}}}},"type":"object"}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "typed-target",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"Request": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object"}
+				},
+				"$ref": "#/$defs/Request"
+			}`,
+			edgeConfiguration: `{"context":"{{$.ctx}}"}`,
+			wantErr:           false,
+		},
+		// ============================================================
+		// Settings-based configurable overlay via path match (Startcontext)
+		// ============================================================
+		{
+			name:           "path-matched overlay: HTTP server Start with configurable Startcontext",
+			sourceNodeName: "ticker",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object","properties":{"hostname":{"type":"string"},"auto_hostname":{"type":"boolean"}}}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			// sourceSettingsSchema provides the configurable Context definition
+			// (in real world, ticker's _settings Spec.Port has the rich schema)
+			sourceSettingsSchema: `{
+				"$defs": {
+					"Settings": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"delay":{"type":"integer"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object","properties":{"hostname":{"type":"string"},"auto_hostname":{"type":"boolean"}}}
+				},
+				"$ref": "#/$defs/Settings"
+			}`,
+			targetNodeName: "http-server",
+			targetPortName: "start",
+			targetSchema: `{
+				"$defs": {
+					"Start": {"path":"$","properties":{"context":{"$ref":"#/$defs/Startcontext"},"port":{"type":"integer"},"readTimeout":{"type":"integer"}},"type":"object"},
+					"Startcontext": {"additionalProperties":{"type":"string"},"configurable":true,"path":"$.context","title":"Context","type":"object"}
+				},
+				"$ref": "#/$defs/Start"
+			}`,
+			edgeConfiguration: `{"context":"{{$.context}}","port":8080,"readTimeout":30}`,
+			wantErr:           false,
+		},
+		// ============================================================
+		// Empty edge schema — always valid
+		// ============================================================
+		{
+			name:           "empty edge schema: always valid",
+			sourceNodeName: "source",
+			sourcePortName: "out",
+			sourceSchema:   `{"type":"object"}`,
+			targetNodeName: "target",
+			targetPortName: "in",
+			targetSchema:   `{"type":"object"}`,
+			edgeConfiguration: `{"anything":"goes"}`,
+			wantErr:           false,
+		},
+		// ============================================================
+		// No configurable defs — native schema used as-is
+		// ============================================================
+		{
+			name:           "no configurable defs: native schema validates correctly",
+			sourceNodeName: "source",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"message":{"type":"string"}},"type":"object"}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "target",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"Input": {"path":"$","properties":{"data":{"type":"string"},"count":{"type":"integer"}},"required":["data"],"type":"object"}
+				},
+				"$ref": "#/$defs/Input"
+			}`,
+			edgeConfiguration: `{"data":"{{$.message}}","count":1}`,
+			wantErr:           false,
+		},
+		{
+			name:           "no configurable defs: missing required field fails",
+			sourceNodeName: "source",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"message":{"type":"string"}},"type":"object"}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "target",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"Input": {"path":"$","properties":{"data":{"type":"string"},"count":{"type":"integer"}},"required":["data"],"type":"object"}
+				},
+				"$ref": "#/$defs/Input"
+			}`,
+			edgeConfiguration: `{"count":1}`,
+			wantErr:           true,
+			errContains:       "missing properties",
+		},
+		// ============================================================
+		// Expression error — bad path
+		// ============================================================
+		{
+			name:           "expression error: nonexistent path returns null",
+			sourceNodeName: "source",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"value":{"type":"string"}},"type":"object"}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "target",
+			targetPortName: "in",
+			targetSchema: `{
+				"$defs": {
+					"Input": {"path":"$","properties":{"data":{"type":"string"}},"type":"object"}
+				},
+				"$ref": "#/$defs/Input"
+			}`,
+			edgeConfiguration: `{"data":"{{$.nonexistent.deep.path}}"}`,
+			wantErr:           true,
+		},
+		// ============================================================
+		// Settings-based configurable definitions from target node's Spec.Ports
+		// ============================================================
+		{
+			name:           "target settings schema provides configurable definitions for overlay",
+			sourceNodeName: "ticker",
+			sourcePortName: "out",
+			sourceSchema: `{
+				"$defs": {
+					"Output": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context","type":"object","properties":{"api_key":{"type":"string"}}}
+				},
+				"$ref": "#/$defs/Output"
+			}`,
+			targetNodeName: "api-client",
+			targetPortName: "request",
+			targetSchema: `{
+				"$defs": {
+					"Request": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"endpoint":{"type":"string"}},"type":"object"},
+					"Context": {"configurable":true,"path":"$.context","title":"Context"}
+				},
+				"$ref": "#/$defs/Request"
+			}`,
+			// Context is bare on target, overlay from source adds type:object + properties
+			// With type stripping, string should still pass
+			edgeConfiguration: `{"context":"{{$.context}}","endpoint":"/api/v1/data"}`,
+			wantErr:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build source node
+			sourceNode := v1alpha1.TinyNode{
+				Spec: v1alpha1.TinyNodeSpec{
+					Component: tt.sourceNodeName + "-component",
+					Edges: []v1alpha1.TinyNodeEdge{
+						{
+							ID:   "edge-1",
+							Port: tt.sourcePortName,
+							To:   tt.targetNodeName + ":" + tt.targetPortName,
+						},
+					},
+				},
+				Status: v1alpha1.TinyNodeStatus{
+					Ports: []v1alpha1.TinyNodePortStatus{
+						{
+							Name:   tt.sourcePortName,
+							Source: true,
+							Schema: []byte(tt.sourceSchema),
+						},
+					},
+				},
+			}
+			sourceNode.Name = tt.sourceNodeName
+
+			// Build target node
+			targetNode := v1alpha1.TinyNode{
+				Spec: v1alpha1.TinyNodeSpec{
+					Component: tt.targetNodeName + "-component",
+					Ports: []v1alpha1.TinyNodePortConfig{
+						{
+							Port:          tt.targetPortName,
+							From:          tt.sourceNodeName + ":" + tt.sourcePortName,
+							Configuration: []byte(tt.edgeConfiguration),
+						},
+					},
+				},
+				Status: v1alpha1.TinyNodeStatus{
+					Ports: []v1alpha1.TinyNodePortStatus{
+						{
+							Name:   tt.targetPortName,
+							Source: false,
+							Schema: []byte(tt.targetSchema),
+						},
+					},
+				},
+			}
+			targetNode.Name = tt.targetNodeName
+
+			// Add settings port schemas if provided
+			if tt.sourceSettingsSchema != "" {
+				sourceNode.Spec.Ports = append(sourceNode.Spec.Ports, v1alpha1.TinyNodePortConfig{
+					Port:   "_settings",
+					Schema: []byte(tt.sourceSettingsSchema),
+				})
+			}
+			if tt.targetSettingsSchema != "" {
+				targetNode.Spec.Ports = append(targetNode.Spec.Ports, v1alpha1.TinyNodePortConfig{
+					Port:   "_settings",
+					Schema: []byte(tt.targetSettingsSchema),
+				})
+			}
+
+			nodesMap := map[string]v1alpha1.TinyNode{
+				tt.sourceNodeName: sourceNode,
+				tt.targetNodeName: targetNode,
+			}
+
+			// Step 1: Build flow maps (same as platform does)
+			_, _, destinationsMap, portSchemaMap, _, err := GetFlowMaps(nodesMap)
+			if err != nil {
+				t.Fatalf("GetFlowMaps() error: %v", err)
+			}
+
+			// Step 2: Get configurable definitions from both nodes
+			sourcePortFullName := tt.sourceNodeName + ":" + tt.sourcePortName
+			targetPortFullName := tt.targetNodeName + ":" + tt.targetPortName
+			defs := GetConfigurableDefinitions(sourceNode, nil)
+			targetDefs := GetConfigurableDefinitions(targetNode, &sourcePortFullName)
+			for k, v := range targetDefs {
+				defs[k] = v
+			}
+
+			// Step 3: Get the target port's schema from portSchemaMap and apply overlay
+			targetPortSchemaNode := portSchemaMap[targetPortFullName]
+			if targetPortSchemaNode == nil {
+				if tt.wantErr {
+					return // no schema means no validation
+				}
+				t.Fatalf("target port schema not found in portSchemaMap for %s", targetPortFullName)
+			}
+
+			edgeSchemaBytes, err := ajson.Marshal(targetPortSchemaNode)
+			if err != nil {
+				t.Fatalf("Marshal target port schema: %v", err)
+			}
+
+			// Step 4: Apply configurable overlay (same as buildGraphEvents)
+			overlaidSchema, err := schema.UpdateWithDefinitions(edgeSchemaBytes, defs)
+			if err != nil {
+				t.Fatalf("UpdateWithDefinitions() error: %v", err)
+			}
+
+			// Step 5: Validate using precomputed maps
+			err = ValidateEdgeWithPrecomputedMaps(
+				ctx,
+				portSchemaMap,
+				destinationsMap,
+				sourcePortFullName,
+				[]byte(tt.edgeConfiguration),
+				overlaidSchema,
+				nil, // no runtime data
+			)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateEdgeWithPrecomputedMaps() error = %v, wantErr %v\n  overlaid schema: %s", err, tt.wantErr, overlaidSchema)
+				return
+			}
+
+			if tt.wantErr && tt.errContains != "" {
+				if err == nil || !containsString(err.Error(), tt.errContains) {
+					t.Errorf("error = %v, want error containing %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateEdgeWithPrecomputedMaps_Basic tests the function with manually constructed maps.
+func TestValidateEdgeWithPrecomputedMaps_Basic(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name              string
+		portSchemaMap     map[string]string
+		destinations      map[string][]Destination
+		sourcePort        string
+		edgeConfig        string
+		edgeSchema        string
+		runtimeData       map[string][]byte
+		wantErr           bool
+		errContains       string
+	}{
+		{
+			name: "empty edge schema - always valid",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object","properties":{"x":{"type":"string"}}}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{"y":"test"}`,
+			edgeSchema: "",
+			wantErr:    false,
+		},
+		{
+			name: "valid static config against simple schema",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object","properties":{"msg":{"type":"string"}}}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{"text":"hello"}`,
+			edgeSchema: `{"type":"object","properties":{"text":{"type":"string"}}}`,
+			wantErr:    false,
+		},
+		{
+			name: "valid expression resolves correctly",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object","properties":{"msg":{"type":"string"}}}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{"text":"{{$.msg}}"}`,
+			edgeSchema: `{"type":"object","properties":{"text":{"type":"string"}}}`,
+			wantErr:    false,
+		},
+		{
+			name: "type mismatch - expression resolves to wrong type",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object","properties":{"count":{"type":"integer"}}}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{"text":"{{$.count}}"}`,
+			edgeSchema: `{"type":"object","properties":{"text":{"type":"string"}}}`,
+			wantErr:    true,
+			errContains: "expected string",
+		},
+		{
+			name: "runtime data overrides simulated data",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object","properties":{"msg":{"type":"string"}}}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{"text":"{{$.msg}}"}`,
+			edgeSchema: `{"type":"object","properties":{"text":{"type":"string"}}}`,
+			runtimeData: map[string][]byte{
+				"src:out": []byte(`{"msg":"runtime value"}`),
+			},
+			wantErr: false,
+		},
+		{
+			name: "schema with $defs and $ref",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer"}}}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{"user_name":"{{$.name}}","user_age":"{{$.age}}"}`,
+			edgeSchema: `{"$defs":{"User":{"type":"object","properties":{"user_name":{"type":"string"},"user_age":{"type":"integer"}}}},"$ref":"#/$defs/User"}`,
+			wantErr:    false,
+		},
+		{
+			name: "missing required field in edge config",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object","properties":{"x":{"type":"string"}}}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{}`,
+			edgeSchema: `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`,
+			wantErr:    true,
+			errContains: "missing properties",
+		},
+		{
+			name: "invalid edge schema JSON",
+			portSchemaMap: map[string]string{
+				"src:out": `{"type":"object"}`,
+			},
+			sourcePort: "src:out",
+			edgeConfig: `{}`,
+			edgeSchema: `{invalid json`,
+			wantErr:    true,
+			errContains: "invalid edge schema",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build portSchemaMap from strings
+			psm := make(map[string]*ajson.Node)
+			for k, v := range tt.portSchemaMap {
+				node, err := ajson.Unmarshal([]byte(v))
+				if err != nil {
+					t.Fatalf("invalid port schema for %s: %v", k, err)
+				}
+				psm[k] = node
+			}
+
+			destinations := tt.destinations
+			if destinations == nil {
+				destinations = make(map[string][]Destination)
+			}
+
+			var edgeSchemaBytes []byte
+			if tt.edgeSchema != "" {
+				edgeSchemaBytes = []byte(tt.edgeSchema)
+			}
+
+			err := ValidateEdgeWithPrecomputedMaps(
+				ctx,
+				psm,
+				destinations,
+				tt.sourcePort,
+				[]byte(tt.edgeConfig),
+				edgeSchemaBytes,
+				tt.runtimeData,
+			)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && tt.errContains != "" {
+				if err == nil || !containsString(err.Error(), tt.errContains) {
+					t.Errorf("error = %v, want error containing %q", err, tt.errContains)
+				}
+			}
+		})
+	}
 }
 
 func TestCrossValidateEdgeSchemaKeys(t *testing.T) {
