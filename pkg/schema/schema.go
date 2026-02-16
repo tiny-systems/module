@@ -90,6 +90,15 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 			if readonly, _ := GetBool("readonly", realSchemaDef); readonly {
 				_ = SetBool("readonly", readonly, confCopy)
 			}
+
+			// Strip "required" from the overlay — configurable definitions carry
+			// required constraints from the originating node (e.g. ticker's Context
+			// requires "endpoints"), but those constraints don't apply at downstream
+			// edges where users freely map different data into configurable fields.
+			if req, _ := confCopy.GetKey("required"); req != nil {
+				req.Delete()
+			}
+
 			// update real schema from configurable definitions but copy path,configurable,propertyOrder props from status real schema
 			if err = realSchemaDef.SetNode(confCopy); err != nil {
 				return nil, err
