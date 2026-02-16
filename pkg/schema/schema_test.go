@@ -177,16 +177,44 @@ func TestUpdateWithDefinitions(t *testing.T) {
 		{
 			name: "required stripped from configurable overlay",
 			args: args{
-				// Target port has bare Context (configurable, no properties)
+				// Target port has bare Context (configurable, no properties, no type)
 				realSchema: []byte(`{"$defs":{"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/Request"}`),
 				configurableDefinitionNodes: map[string]*ajson.Node{
-					// Source node's Context has required: ["endpoints"] from ticker settings
+					// Source node's Context has required: ["endpoints"] and type: "object"
 					"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"endpoints":{"type":"array","items":{"type":"object"}}},"required":["endpoints"],"title":"Context","type":"object"}`))),
 				},
 			},
 			wantErr: false,
-			// Context should have properties from overlay BUT required must be stripped
-			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"endpoints":{"type":"array","items":{"type":"object"}}},"title":"Context","type":"object"},"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"}},"$ref":"#/$defs/Request"}`),
+			// required stripped, AND type stripped (original Context was bare — no type)
+			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"endpoints":{"type":"array","items":{"type":"object"}}},"title":"Context"},"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"}},"$ref":"#/$defs/Request"}`),
+		},
+		{
+			name: "type stripped from bare configurable — string into context",
+			args: args{
+				// Target port (e.g. Debug's IN) has bare Context — no type, accepts anything
+				realSchema: []byte(`{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"},"Inputdata":{"configurable":true,"path":"$.data","title":"Data"}},"$ref":"#/$defs/In"}`),
+				configurableDefinitionNodes: map[string]*ajson.Node{
+					// Source node's Context is type:"object" with properties
+					"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"collection":{"type":"string"},"namespace":{"type":"string"}},"title":"Context","type":"object"}`))),
+				},
+			},
+			wantErr: false,
+			// Context gets properties for UI display but type:"object" is stripped
+			// so mapping a string (e.g. $.error) into context won't fail validation
+			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"collection":{"type":"string"},"namespace":{"type":"string"}},"title":"Context"},"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},"Inputdata":{"configurable":true,"path":"$.data","title":"Data"}},"$ref":"#/$defs/In"}`),
+		},
+		{
+			name: "type preserved when original definition has type",
+			args: args{
+				// Target port has Context WITH explicit type:"object"
+				realSchema: []byte(`{"$defs":{"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context","type":"object"}},"$ref":"#/$defs/Request"}`),
+				configurableDefinitionNodes: map[string]*ajson.Node{
+					"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"name":{"type":"string"}},"title":"Context","type":"object"}`))),
+				},
+			},
+			wantErr: false,
+			// type:"object" preserved because original already had it
+			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"name":{"type":"string"}},"title":"Context","type":"object"},"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"}},"$ref":"#/$defs/Request"}`),
 		},
 		{
 			name: "required stripped even with path-based match",
