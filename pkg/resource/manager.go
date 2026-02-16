@@ -913,6 +913,26 @@ func (m Manager) DeleteNode(ctx context.Context, n *v1alpha1.TinyNode) error {
 	return m.client.Delete(ctx, n)
 }
 
+// CleanupNodeReferences removes edges and port configs referencing a deleted
+// node from all remaining nodes in the project. Call after DeleteNode succeeds.
+func (m Manager) CleanupNodeReferences(ctx context.Context, projectName, deletedNodeName string) error {
+	nodes, err := m.GetProjectNodes(ctx, projectName)
+	if err != nil {
+		return fmt.Errorf("get project nodes: %w", err)
+	}
+	for i := range nodes {
+		if nodes[i].Name == deletedNodeName {
+			continue
+		}
+		if utils.RemoveNodeReferences(&nodes[i], deletedNodeName) {
+			if err := m.UpdateNode(ctx, &nodes[i]); err != nil {
+				log.Warn().Err(err).Str("node", nodes[i].Name).Msg("failed to clean up edges after node deletion")
+			}
+		}
+	}
+	return nil
+}
+
 func (m Manager) DeleteFlowNodes(ctx context.Context, projectResourceName string, flowResourceName string) error {
 
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
