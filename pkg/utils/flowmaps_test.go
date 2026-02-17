@@ -222,6 +222,30 @@ func TestGetFlowMaps_PortSchemaMap(t *testing.T) {
 			wantInSchema: `"data"`,
 		},
 		{
+			name: "incomplete Spec schema without $ref does not override Status schema",
+			nodesMap: map[string]v1alpha1.TinyNode{
+				"node-a": {
+					Spec: v1alpha1.TinyNodeSpec{
+						Component: "comp-a",
+						Ports: []v1alpha1.TinyNodePortConfig{
+							{
+								Port: "in",
+								// Schema from import: has $defs but no $ref
+								Schema: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","type":"object","properties":{"custom":{"type":"string"}}}}}`),
+							},
+						},
+					},
+					Status: v1alpha1.TinyNodeStatus{
+						Ports: []v1alpha1.TinyNodePortStatus{
+							{Name: "in", Source: false, Schema: []byte(`{"$defs":{"Inmessage":{"type":"object","properties":{"context":{"$ref":"#/$defs/Context"},"array":{"type":"array"}}},"Context":{"type":"object","configurable":true}},"$ref":"#/$defs/Inmessage"}`)},
+						},
+					},
+				},
+			},
+			checkPort:    "node-a:in",
+			wantInSchema: `"$ref"`, // Status schema with $ref must be preserved
+		},
+		{
 			name: "settings port schema overrides status schema",
 			nodesMap: map[string]v1alpha1.TinyNode{
 				"node-a": {
