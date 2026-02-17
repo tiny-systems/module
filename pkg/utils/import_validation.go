@@ -125,12 +125,10 @@ func validateImportNode(index int, id string, elem map[string]interface{}, flowS
 			continue
 		}
 
-		// Check schema completeness on target handles that have schema.
-		// Handle schema issues are warnings only — the SDK derives proper schemas
-		// from component Go structs at runtime regardless of what's in the import.
+		// Handle schema issues are warnings only — CollectDefinitions() only reads
+		// $defs (for configurable overlays), so missing $ref doesn't break anything.
 		if schemaRaw, hasSchema := handleMap["schema"]; hasSchema && schemaRaw != nil {
 			e, w := validateSchemaCompleteness(hPrefix, schemaRaw)
-			// Downgrade handle schema errors to warnings (handle schemas are informational)
 			warnings = append(warnings, e...)
 			warnings = append(warnings, w...)
 		}
