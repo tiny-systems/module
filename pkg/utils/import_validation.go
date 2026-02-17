@@ -119,9 +119,9 @@ func validateImportNode(index int, id string, elem map[string]interface{}, flowS
 		handleType := GetStr(handleMap["type"])
 		hPrefix := fmt.Sprintf("%s handle %q", prefix, handleID)
 
-		// No source port handles
+		// Source port handles are harmless (import code skips them) but unnecessary
 		if handleType == "source" {
-			errors = append(errors, fmt.Sprintf("%s: source port — remove it, source ports are runtime-generated (handle index %d)", hPrefix, j))
+			warnings = append(warnings, fmt.Sprintf("%s: source port handle included — will be skipped (handle index %d)", hPrefix, j))
 			continue
 		}
 
@@ -313,7 +313,9 @@ func validateConfigExpressions(prefix string, config interface{}) (errors, warni
 			warnings = append(warnings, w...)
 		}
 	case string:
-		errors = append(errors, checkExpressionSyntax(prefix, v)...)
+		e, w := checkExpressionSyntax(prefix, v)
+		errors = append(errors, e...)
+		warnings = append(warnings, w...)
 	case []interface{}:
 		for _, item := range v {
 			e, w := validateConfigExpressions(prefix, item)
@@ -325,8 +327,8 @@ func validateConfigExpressions(prefix string, config interface{}) (errors, warni
 }
 
 // checkExpressionSyntax checks a string value for expression syntax issues.
-func checkExpressionSyntax(prefix, value string) []string {
-	var errs []string
+// Returns errors (blocking) and warnings (informational).
+func checkExpressionSyntax(prefix, value string) (errs, warns []string) {
 	start := 0
 	for {
 		idx := strings.Index(value[start:], "{{")
@@ -348,12 +350,12 @@ func checkExpressionSyntax(prefix, value string) []string {
 
 		// Check for single quotes — ajson requires double quotes
 		if strings.Contains(expr, "'") {
-			errs = append(errs, fmt.Sprintf("%s: expression {{%s}} uses single quotes — ajson requires double quotes (use \\\" in JSON)", prefix, strings.TrimSpace(expr)))
+			warns = append(warns, fmt.Sprintf("%s: expression {{%s}} uses single quotes — ajson requires double quotes (use \\\" in JSON)", prefix, strings.TrimSpace(expr)))
 		}
 
 		start = end + 2
 	}
-	return errs
+	return errs, warns
 }
 
 // validateConfigKeysMatchSchema checks that edge configuration keys match the schema's root type properties.
