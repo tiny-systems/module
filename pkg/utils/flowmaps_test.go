@@ -246,6 +246,32 @@ func TestGetFlowMaps_PortSchemaMap(t *testing.T) {
 			wantInSchema: `"$ref"`, // Status schema with $ref must be preserved
 		},
 		{
+			name: "Spec schema without $ref merges enriched $defs into Status schema",
+			nodesMap: map[string]v1alpha1.TinyNode{
+				"node-a": {
+					Spec: v1alpha1.TinyNodeSpec{
+						Component: "comp-a",
+						Ports: []v1alpha1.TinyNodePortConfig{
+							{
+								Port: "in",
+								// Import handle schema: no $ref but Itemcontext has properties
+								Schema: []byte(`{"$defs":{"Context":{"configurable":true,"type":"object","properties":{"cred":{"type":"string"}}},"Itemcontext":{"shared":true,"type":"object","properties":{"event_id":{"type":"string"},"summary":{"type":"string"}}}}}`),
+							},
+						},
+					},
+					Status: v1alpha1.TinyNodeStatus{
+						Ports: []v1alpha1.TinyNodePortStatus{
+							// Status schema: complete with $ref, but Itemcontext is bare
+							{Name: "in", Source: false, Schema: []byte(`{"$defs":{"Inmessage":{"type":"object","properties":{"context":{"$ref":"#/$defs/Context"},"array":{"type":"array","items":{"$ref":"#/$defs/Itemcontext"}}}},"Context":{"configurable":true,"type":"object"},"Itemcontext":{"shared":true,"type":"object"}},"$ref":"#/$defs/Inmessage"}`)},
+						},
+					},
+				},
+			},
+			checkPort:       "node-a:in",
+			wantInSchema:    `"event_id"`,    // Itemcontext properties merged from Spec
+			wantNotInSchema: "",
+		},
+		{
 			name: "settings port schema overrides status schema",
 			nodesMap: map[string]v1alpha1.TinyNode{
 				"node-a": {
