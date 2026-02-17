@@ -426,15 +426,11 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 			if err != nil {
 				continue
 			}
-			// Only override Status schema if Spec schema has $ref (is complete).
-			// Incomplete schemas (e.g. from import with only $defs) break the
-			// generator which needs $ref to find the root type.
-			// GetConfigurableDefinitions reads Spec.Ports directly, so $defs
-			// are still accessible for configurable definition overlays.
+			portID := GetPortFullName(node.Name, pc.Port)
 			if refNode, _ := s.GetKey("$ref"); refNode == nil {
 				continue
 			}
-			portSchemaMap[GetPortFullName(node.Name, pc.Port)] = s
+			portSchemaMap[portID] = s
 		}
 
 		// collect node definitions from source ports with custom property `port` added
@@ -498,6 +494,58 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 				if port.Name == v1alpha1.SettingsPort {
 					nodeSettingsDefinitions[k] = v
 				}
+			}
+
+			// Enrich definitions from Spec handle schemas (From == "", no $ref).
+			// Import may provide richer definitions (e.g. Itemcontext with properties)
+			// than the Status schema (which has bare interface{} types).
+			// Use SetNode to modify in-place — replacePortDefs for target ports
+			// uses nodeSettingsDefinitions, not nodeTargetDefinitions.
+			for _, pc := range node.Spec.Ports {
+				if pc.From != "" || pc.Port != port.Name || len(pc.Schema) == 0 {
+					continue
+				}
+				specSchema, err := ajson.Unmarshal(pc.Schema)
+				if err != nil {
+					break
+				}
+				if refNode, _ := specSchema.GetKey("$ref"); refNode != nil {
+					break // Complete schema already replaced Status in first pass
+				}
+				specDefs, _ := specSchema.GetKey("$defs")
+				if specDefs == nil || !specDefs.IsObject() {
+					break
+				}
+				specDefsMap, sErr := specDefs.GetObject()
+				if sErr != nil {
+					break
+				}
+				for sk, sv := range specDefsMap {
+					existing, exists := nodeTargetDefinitions[sk]
+					if !exists {
+						continue
+					}
+					specProps, _ := sv.GetKey("properties")
+					if specProps == nil || !specProps.IsObject() || len(specProps.Keys()) == 0 {
+						continue
+					}
+					exProps, _ := existing.GetKey("properties")
+					if exProps != nil && exProps.IsObject() && len(exProps.Keys()) > 0 {
+						continue // Already has properties
+					}
+					// Carry port annotation to enriched definition
+					if portNode, pErr := existing.GetKey("port"); pErr == nil && portNode != nil {
+						if ps, pErr2 := portNode.Unpack(); pErr2 == nil {
+							if portStr, ok := ps.(string); ok && portStr != "" {
+								_ = sv.AppendObject("port", ajson.StringNode("", portStr))
+							}
+						}
+					}
+					// SetNode modifies in-place so portSchemaMap entry is also updated
+					_ = existing.SetNode(sv)
+					nodeTargetDefinitions[sk] = sv
+				}
+				break
 			}
 
 			// Also enrich definitions from edge schemas (Spec.Ports with From != "").
