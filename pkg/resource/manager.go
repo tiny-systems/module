@@ -958,6 +958,63 @@ func (m Manager) CleanupWidgetReferences(ctx context.Context, projectName, delet
 	return nil
 }
 
+// CleanupFlowWidgetReferences removes widgets referencing any node belonging
+// to the given flow from all widget pages in the project.
+// Call before DeleteFlow to prevent dangling widgets.
+func (m Manager) CleanupFlowWidgetReferences(ctx context.Context, projectName, flowResourceName string) error {
+	// List nodes belonging to this flow
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			v1alpha1.ProjectNameLabel: projectName,
+			v1alpha1.FlowNameLabel:    flowResourceName,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("build selector: %w", err)
+	}
+	list := &v1alpha1.TinyNodeList{}
+	if err := m.client.List(ctx, list, client.MatchingLabelsSelector{Selector: selector}, client.InNamespace(m.namespace)); err != nil {
+		return fmt.Errorf("list flow nodes: %w", err)
+	}
+	if len(list.Items) == 0 {
+		return nil
+	}
+
+	// Build set of node name prefixes
+	prefixes := make([]string, len(list.Items))
+	for i, node := range list.Items {
+		prefixes[i] = node.Name + ":"
+	}
+
+	// Get widget pages and filter out matching widgets
+	pages, err := m.GetProjectPageWidgets(ctx, projectName)
+	if err != nil {
+		return fmt.Errorf("get widget pages: %w", err)
+	}
+	for i := range pages {
+		filtered := make([]v1alpha1.TinyWidget, 0, len(pages[i].Spec.Widgets))
+		for _, w := range pages[i].Spec.Widgets {
+			keep := true
+			for _, prefix := range prefixes {
+				if strings.HasPrefix(w.Port, prefix) {
+					keep = false
+					break
+				}
+			}
+			if keep {
+				filtered = append(filtered, w)
+			}
+		}
+		if len(filtered) != len(pages[i].Spec.Widgets) {
+			pages[i].Spec.Widgets = filtered
+			if err := m.UpdatePage(ctx, &pages[i]); err != nil {
+				log.Warn().Err(err).Str("page", pages[i].Name).Msg("failed to clean up widgets after flow deletion")
+			}
+		}
+	}
+	return nil
+}
+
 func (m Manager) DeleteFlowNodes(ctx context.Context, projectResourceName string, flowResourceName string) error {
 
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
