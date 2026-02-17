@@ -99,16 +99,6 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 				req.Delete()
 			}
 
-			// Strip "type" from the overlay when the original definition was bare
-			// (no explicit type, e.g. `type Context any`). This prevents the source's
-			// type constraint (e.g. "object") from being imposed on a flexible target
-			// field. Without this, mapping a string into a configurable Context that
-			// was overlaid with type:"object" causes "expected object, but got string".
-			if _, hasOrigType := GetStr("type", realSchemaDef); !hasOrigType {
-				if typeNode, _ := confCopy.GetKey("type"); typeNode != nil {
-					typeNode.Delete()
-				}
-			}
 
 			// update real schema from configurable definitions but copy path,configurable,propertyOrder props from status real schema
 			if err = realSchemaDef.SetNode(confCopy); err != nil {

@@ -190,13 +190,13 @@ func TestUpdateWithDefinitions(t *testing.T) {
 				},
 			},
 			wantErr: false,
-			// required stripped, AND type stripped (original Context was bare — no type)
-			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"endpoints":{"type":"array","items":{"type":"object"}}},"title":"Context"},"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"}},"$ref":"#/$defs/Request"}`),
+			// required stripped; type:"object" preserved because overlay has properties
+			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"endpoints":{"type":"array","items":{"type":"object"}}},"title":"Context","type":"object"},"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"}},"$ref":"#/$defs/Request"}`),
 		},
 		{
-			name: "type stripped from bare configurable — string into context",
+			name: "type preserved when overlay has properties — UI renders form fields",
 			args: args{
-				// Target port (e.g. Debug's IN) has bare Context — no type, accepts anything
+				// Target port (e.g. Debug's IN) has bare Context — no type
 				realSchema: []byte(`{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"},"Inputdata":{"configurable":true,"path":"$.data","title":"Data"}},"$ref":"#/$defs/In"}`),
 				configurableDefinitionNodes: map[string]*ajson.Node{
 					// Source node's Context is type:"object" with properties
@@ -204,9 +204,8 @@ func TestUpdateWithDefinitions(t *testing.T) {
 				},
 			},
 			wantErr: false,
-			// Context gets properties for UI display but type:"object" is stripped
-			// so mapping a string (e.g. $.error) into context won't fail validation
-			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"collection":{"type":"string"},"namespace":{"type":"string"}},"title":"Context"},"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},"Inputdata":{"configurable":true,"path":"$.data","title":"Data"}},"$ref":"#/$defs/In"}`),
+			// type:"object" preserved because overlay has explicit properties
+			want: []byte(`{"$defs":{"Context":{"configurable":true,"path":"$.context","properties":{"collection":{"type":"string"},"namespace":{"type":"string"}},"title":"Context","type":"object"},"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},"Inputdata":{"configurable":true,"path":"$.data","title":"Data"}},"$ref":"#/$defs/In"}`),
 		},
 		{
 			name: "type preserved when original definition has type",
@@ -266,58 +265,54 @@ func TestUpdateWithDefinitions_ValidationIntegration(t *testing.T) {
 		// ============================================================
 		// Bare Context target (type Context any) — accepts any type
 		// ============================================================
+		// Overlay WITH properties → type:"object" preserved for UI form rendering
 		{
-			name: "bare context: string value passes (firestore error → debug)",
-			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"},"Inputdata":{"configurable":true,"path":"$.data","title":"Data"}},"$ref":"#/$defs/In"}`,
-			configurableDefinitionNodes: map[string]*ajson.Node{
-				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"collection":{"type":"string"},"namespace":{"type":"string"}},"title":"Context","type":"object"}`))),
-			},
-			dataToValidate: `{"context":"some error string","data":null}`,
-			wantValid:      true,
-		},
-		{
-			name: "bare context: number value passes",
-			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
-			configurableDefinitionNodes: map[string]*ajson.Node{
-				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"count":{"type":"integer"}},"title":"Context","type":"object"}`))),
-			},
-			dataToValidate: `{"context":42}`,
-			wantValid:      true,
-		},
-		{
-			name: "bare context: boolean value passes",
-			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
-			configurableDefinitionNodes: map[string]*ajson.Node{
-				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"flag":{"type":"boolean"}},"title":"Context","type":"object"}`))),
-			},
-			dataToValidate: `{"context":true}`,
-			wantValid:      true,
-		},
-		{
-			name: "bare context: array value passes",
-			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
-			configurableDefinitionNodes: map[string]*ajson.Node{
-				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"items":{"type":"array"}},"title":"Context","type":"object"}`))),
-			},
-			dataToValidate: `{"context":["a","b","c"]}`,
-			wantValid:      true,
-		},
-		{
-			name: "bare context: null value passes",
-			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
-			configurableDefinitionNodes: map[string]*ajson.Node{
-				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"x":{"type":"string"}},"title":"Context","type":"object"}`))),
-			},
-			dataToValidate: `{"context":null}`,
-			wantValid:      true,
-		},
-		{
-			name: "bare context: object value also passes",
+			name: "rich overlay: object value passes",
 			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
 			configurableDefinitionNodes: map[string]*ajson.Node{
 				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"name":{"type":"string"}},"title":"Context","type":"object"}`))),
 			},
 			dataToValidate: `{"context":{"name":"Alice"}}`,
+			wantValid:      true,
+		},
+		{
+			name: "rich overlay: string value rejected — type:object preserved",
+			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Inputdata"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"},"Inputdata":{"configurable":true,"path":"$.data","title":"Data"}},"$ref":"#/$defs/In"}`,
+			configurableDefinitionNodes: map[string]*ajson.Node{
+				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"collection":{"type":"string"},"namespace":{"type":"string"}},"title":"Context","type":"object"}`))),
+			},
+			dataToValidate: `{"context":"some error string","data":null}`,
+			wantValid:      false,
+			errContains:    "expected object",
+		},
+		{
+			name: "rich overlay: number value rejected",
+			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
+			configurableDefinitionNodes: map[string]*ajson.Node{
+				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"count":{"type":"integer"}},"title":"Context","type":"object"}`))),
+			},
+			dataToValidate: `{"context":42}`,
+			wantValid:      false,
+			errContains:    "expected object",
+		},
+		// Bare overlay (no properties but type:"object") — type preserved
+		{
+			name: "bare overlay with type: string value rejected",
+			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
+			configurableDefinitionNodes: map[string]*ajson.Node{
+				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","title":"Context","type":"object"}`))),
+			},
+			dataToValidate: `{"context":"any string"}`,
+			wantValid:      false,
+			errContains:    "expected object",
+		},
+		{
+			name: "bare overlay with type: object value passes",
+			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
+			configurableDefinitionNodes: map[string]*ajson.Node{
+				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","title":"Context","type":"object"}`))),
+			},
+			dataToValidate: `{"context":{}}`,
 			wantValid:      true,
 		},
 		// ============================================================
@@ -407,14 +402,25 @@ func TestUpdateWithDefinitions_ValidationIntegration(t *testing.T) {
 		// Multiple configurable defs — mixed bare and typed
 		// ============================================================
 		{
-			name: "multiple defs: bare Context accepts string, typed Data keeps type",
+			name: "multiple defs: rich overlay Context rejects string, typed Data keeps type",
 			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Data"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"},"Data":{"configurable":true,"path":"$.data","title":"Data","type":"object"}},"$ref":"#/$defs/In"}`,
 			configurableDefinitionNodes: map[string]*ajson.Node{
 				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"x":{"type":"string"}},"title":"Context","type":"object"}`))),
 				"Data":    ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.data","properties":{"y":{"type":"integer"}},"title":"Data","type":"object"}`))),
 			},
-			// Context is bare → string value OK; Data has type:"object" → object required
+			// Both overlays have properties → type:"object" preserved on both
 			dataToValidate: `{"context":"just a string","data":{"y":42}}`,
+			wantValid:      false,
+			errContains:    "expected object",
+		},
+		{
+			name: "multiple defs: both objects pass",
+			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"data":{"$ref":"#/$defs/Data"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"},"Data":{"configurable":true,"path":"$.data","title":"Data","type":"object"}},"$ref":"#/$defs/In"}`,
+			configurableDefinitionNodes: map[string]*ajson.Node{
+				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"x":{"type":"string"}},"title":"Context","type":"object"}`))),
+				"Data":    ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.data","properties":{"y":{"type":"integer"}},"title":"Data","type":"object"}`))),
+			},
+			dataToValidate: `{"context":{"x":"hello"},"data":{"y":42}}`,
 			wantValid:      true,
 		},
 		{
@@ -432,30 +438,31 @@ func TestUpdateWithDefinitions_ValidationIntegration(t *testing.T) {
 		// Edge cases: overlay with enum, minProperties, additionalProperties:false
 		// ============================================================
 		{
-			name: "bare context: overlay with additionalProperties false still accepts any type",
+			name: "rich overlay: additionalProperties false rejects string — type preserved",
 			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
 			configurableDefinitionNodes: map[string]*ajson.Node{
 				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"x":{"type":"string"}},"additionalProperties":false,"title":"Context","type":"object"}`))),
 			},
-			// type stripped → string should pass even with additionalProperties:false
-			// (additionalProperties only applies to objects, and since type isn't enforced, string passes)
+			// overlay has properties → type:"object" preserved → string rejected
 			dataToValidate: `{"context":"a string value"}`,
-			wantValid:      true,
+			wantValid:      false,
+			errContains:    "expected object",
 		},
 		{
-			name: "bare context: overlay with enum on property — passes when context is non-object",
+			name: "rich overlay: enum on property rejects non-object — type preserved",
 			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
 			configurableDefinitionNodes: map[string]*ajson.Node{
 				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"status":{"type":"string","enum":["active","inactive"]}},"title":"Context","type":"object"}`))),
 			},
 			dataToValidate: `{"context":12345}`,
-			wantValid:      true,
+			wantValid:      false,
+			errContains:    "expected object",
 		},
 		// ============================================================
 		// Real-world scenario: ticker → split → http_request chain
 		// ============================================================
 		{
-			name: "status page: single endpoint item passes http_request Context (required stripped + type stripped)",
+			name: "status page: single endpoint item passes http_request Context (required stripped, type preserved)",
 			targetPortSchema: `{"$defs":{"Request":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"url":{"type":"string"},"method":{"type":"string"},"contentType":{"type":"string"},"timeout":{"type":"integer"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/Request"}`,
 			configurableDefinitionNodes: map[string]*ajson.Node{
 				// From ticker's settings: Context has endpoints array with required
