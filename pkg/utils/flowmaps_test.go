@@ -653,6 +653,216 @@ func TestFullPipeline_FirestoreToDebug(t *testing.T) {
 	}
 }
 
+// TestMergeConfigurableDefinitions verifies that bare source definitions don't
+// overwrite rich target definitions during merge.
+func TestMergeConfigurableDefinitions(t *testing.T) {
+	t.Run("bare source does not overwrite rich target", func(t *testing.T) {
+		targetDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"properties":{"bot_email":{"type":"string"}},"title":"Context","type":"object"}`))),
+		}
+		sourceDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"title":"Context"}`))),
+		}
+		merged := MergeConfigurableDefinitions(targetDefs, sourceDefs)
+		if !schema.HasProperties(merged["Context"]) {
+			t.Error("bare source Context overwrote rich target Context")
+		}
+	})
+
+	t.Run("rich source overwrites bare target", func(t *testing.T) {
+		targetDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"title":"Context"}`))),
+		}
+		sourceDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"properties":{"calendar_id":{"type":"string"}},"title":"Context","type":"object"}`))),
+		}
+		merged := MergeConfigurableDefinitions(targetDefs, sourceDefs)
+		if !schema.HasProperties(merged["Context"]) {
+			t.Error("rich source Context should overwrite bare target Context")
+		}
+	})
+
+	t.Run("rich source overwrites rich target", func(t *testing.T) {
+		targetDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"properties":{"old_field":{"type":"string"}},"title":"Context","type":"object"}`))),
+		}
+		sourceDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"properties":{"new_field":{"type":"integer"}},"title":"Context","type":"object"}`))),
+		}
+		merged := MergeConfigurableDefinitions(targetDefs, sourceDefs)
+		b, _ := ajson.Marshal(merged["Context"])
+		if !strings.Contains(string(b), "new_field") {
+			t.Errorf("rich source should overwrite rich target, got: %s", b)
+		}
+	})
+
+	t.Run("source adds new definition", func(t *testing.T) {
+		targetDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"title":"Context","type":"string"}`))),
+		}
+		sourceDefs := map[string]*ajson.Node{
+			"Data": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"title":"Data","type":"object"}`))),
+		}
+		merged := MergeConfigurableDefinitions(targetDefs, sourceDefs)
+		if _, ok := merged["Data"]; !ok {
+			t.Error("source Data definition should be added")
+		}
+		if _, ok := merged["Context"]; !ok {
+			t.Error("target Context definition should be preserved")
+		}
+	})
+
+	t.Run("bare source does not overwrite typed target without properties", func(t *testing.T) {
+		// debug's _settings Context has type:string (no properties)
+		// router's input Context is bare (no type, no properties)
+		// target's type:string should be preserved
+		targetDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"title":"Context","type":"string"}`))),
+		}
+		sourceDefs := map[string]*ajson.Node{
+			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"title":"Context"}`))),
+		}
+		merged := MergeConfigurableDefinitions(targetDefs, sourceDefs)
+		b, _ := ajson.Marshal(merged["Context"])
+		if !strings.Contains(string(b), `"type":"string"`) {
+			t.Errorf("target Context type:string should be preserved, got: %s", b)
+		}
+	})
+}
+
+// TestFullPipeline_RouterToDebug tests the exact scenario: router (bare Context)
+// → debug (Context type:string from _settings). The merge should preserve debug's
+// typed Context.
+func TestFullPipeline_RouterToDebug(t *testing.T) {
+	ctx := context.Background()
+
+	// Router node: input handle has bare configurable Context
+	routerNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "router",
+			Edges: []v1alpha1.TinyNodeEdge{
+				{ID: "edge-rt-db", Port: "default", To: "debug:in"},
+			},
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port: "_settings",
+					Schema: []byte(`{
+						"$defs": {
+							"Settings": {"properties":{"routes":{"type":"array","items":{"type":"string"}},"enableDefaultPort":{"type":"boolean"}},"type":"object"}
+						},
+						"$ref": "#/$defs/Settings"
+					}`),
+				},
+				{
+					Port: "input",
+					Schema: []byte(`{
+						"$defs": {
+							"Inmessage": {"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"conditions":{"type":"array"}},"type":"object"},
+							"Context": {"configurable":true,"path":"$.context","title":"Context"}
+						},
+						"$ref": "#/$defs/Inmessage"
+					}`),
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "input", Source: false, Schema: []byte(`{"$defs":{"Inmessage":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"},"conditions":{"type":"array"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/Inmessage"}`)},
+				{Name: "default", Source: true, Schema: []byte(`{"$defs":{"Output":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/Output"}`)},
+			},
+		},
+	}
+	routerNode.Name = "router"
+
+	// Debug node: _settings has Context type:string, in port has bare Context
+	debugNode := v1alpha1.TinyNode{
+		Spec: v1alpha1.TinyNodeSpec{
+			Component: "debug",
+			Ports: []v1alpha1.TinyNodePortConfig{
+				{
+					Port: "_settings",
+					Schema: []byte(`{
+						"$defs": {
+							"Settings": {"properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},
+							"Context": {"configurable":true,"path":"$.context","title":"Context","type":"string"}
+						},
+						"$ref": "#/$defs/Settings"
+					}`),
+				},
+				{
+					Port:          "in",
+					From:          "router:default",
+					Configuration: []byte(`{"context":"default route"}`),
+				},
+			},
+		},
+		Status: v1alpha1.TinyNodeStatus{
+			Ports: []v1alpha1.TinyNodePortStatus{
+				{Name: "_settings", Source: false, Schema: []byte(`{"$defs":{"Settings":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/Settings"}`)},
+				{Name: "in", Source: false, Schema: []byte(`{"$defs":{"Inmessage":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/Inmessage"}`)},
+			},
+		},
+	}
+	debugNode.Name = "debug"
+
+	nodesMap := map[string]v1alpha1.TinyNode{
+		"router": routerNode,
+		"debug":  debugNode,
+	}
+
+	_, _, _, portSchemaMap, _, err := GetFlowMaps(nodesMap)
+	if err != nil {
+		t.Fatalf("GetFlowMaps() error: %v", err)
+	}
+
+	sourcePortFull := "router:default"
+
+	// Merge: target first, then source — using MergeConfigurableDefinitions
+	defs := GetConfigurableDefinitions(debugNode, &sourcePortFull)
+	sourceDefs := GetConfigurableDefinitions(routerNode, nil)
+	MergeConfigurableDefinitions(defs, sourceDefs)
+
+	// Verify Context has type:string from debug's _settings (not bare from router)
+	contextDef, ok := defs["Context"]
+	if !ok {
+		t.Fatal("Context definition not collected")
+	}
+	contextBytes, _ := ajson.Marshal(contextDef)
+	if !strings.Contains(string(contextBytes), `"type":"string"`) {
+		t.Errorf("Context should have type:string from debug _settings, got: %s", contextBytes)
+	}
+
+	// Apply overlay to edge schema
+	targetSchema := portSchemaMap["debug:in"]
+	if targetSchema == nil {
+		t.Fatalf("target port schema not found")
+	}
+	targetSchemaBytes, _ := ajson.Marshal(targetSchema)
+	overlaidSchema, err := schema.UpdateWithDefinitions(targetSchemaBytes, defs)
+	if err != nil {
+		t.Fatalf("UpdateWithDefinitions() error: %v", err)
+	}
+
+	// Verify overlaid schema has Context with type:string
+	if !strings.Contains(string(overlaidSchema), `"type":"string"`) {
+		t.Errorf("overlaid schema should have Context type:string, got: %s", overlaidSchema)
+	}
+
+	// Validate: string value into Context should pass
+	err = ValidateEdgeWithPrecomputedMaps(
+		ctx,
+		portSchemaMap,
+		map[string][]Destination{"router:default": {{Name: "debug:in"}}},
+		sourcePortFull,
+		[]byte(`{"context":"default route"}`),
+		overlaidSchema,
+		nil,
+	)
+	if err != nil {
+		t.Errorf("expected no error (string into Context type:string), got: %v\n  overlaid schema: %s", err, overlaidSchema)
+	}
+}
+
 // TestFullPipeline_TypedContextRejectsString verifies that typed Context (with explicit
 // type:"object" in the native schema) correctly rejects string values.
 func TestFullPipeline_TypedContextRejectsString(t *testing.T) {
