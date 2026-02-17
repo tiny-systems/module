@@ -66,24 +66,66 @@ func StripSchemaInternalFields(data *ProjectExport) {
 			if !ok {
 				continue
 			}
-			schemaMap, ok := handleMap["schema"].(map[string]interface{})
-			if !ok {
-				continue
-			}
-			defs, ok := schemaMap["$defs"].(map[string]interface{})
-			if !ok {
-				continue
-			}
-			for _, defRaw := range defs {
-				defMap, ok := defRaw.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if path, ok := defMap["path"].(string); ok && strings.HasPrefix(path, "$") {
-					delete(defMap, "path")
-				}
-			}
+			stripPathFromSchema(handleMap)
 		}
+	}
+}
+
+// stripPathFromSchema strips "path" fields from $defs in a handle's schema.
+// Handles both parsed map[string]interface{} and json.RawMessage schemas.
+func stripPathFromSchema(handleMap map[string]interface{}) {
+	schemaRaw := handleMap["schema"]
+	if schemaRaw == nil {
+		return
+	}
+
+	// Schema may be a parsed map or json.RawMessage ([]byte)
+	var schemaMap map[string]interface{}
+	switch s := schemaRaw.(type) {
+	case map[string]interface{}:
+		schemaMap = s
+	case json.RawMessage:
+		if err := json.Unmarshal(s, &schemaMap); err != nil {
+			return
+		}
+	case []byte:
+		if err := json.Unmarshal(s, &schemaMap); err != nil {
+			return
+		}
+	default:
+		return
+	}
+
+	defs, ok := schemaMap["$defs"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	changed := false
+	for _, defRaw := range defs {
+		defMap, ok := defRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if path, ok := defMap["path"].(string); ok && strings.HasPrefix(path, "$") {
+			delete(defMap, "path")
+			changed = true
+		}
+	}
+
+	if !changed {
+		return
+	}
+
+	// If schema was raw bytes, re-marshal and store back
+	switch schemaRaw.(type) {
+	case json.RawMessage, []byte:
+		if b, err := json.Marshal(schemaMap); err == nil {
+			handleMap["schema"] = json.RawMessage(b)
+		}
+	default:
+		// Already a map — mutations applied in-place
+		handleMap["schema"] = schemaMap
 	}
 }
 
