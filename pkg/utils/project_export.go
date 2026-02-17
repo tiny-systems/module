@@ -44,6 +44,49 @@ type ProjectExport struct {
 // CurrentExportVersion is the current version of the export format
 const CurrentExportVersion = 1
 
+// StripSchemaInternalFields removes runtime-internal fields from schema
+// definitions in all elements. The "path" field is generated at runtime
+// by the SDK and should not appear in import/export data.
+func StripSchemaInternalFields(data *ProjectExport) {
+	for _, elem := range data.Elements {
+		elemType, _ := elem["type"].(string)
+		if elemType != TinyNodeType {
+			continue
+		}
+		dataMap, ok := elem["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		handles, ok := dataMap["handles"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, h := range handles {
+			handleMap, ok := h.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			schemaMap, ok := handleMap["schema"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			defs, ok := schemaMap["$defs"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			for _, defRaw := range defs {
+				defMap, ok := defRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if path, ok := defMap["path"].(string); ok && strings.HasPrefix(path, "$") {
+					delete(defMap, "path")
+				}
+			}
+		}
+	}
+}
+
 // ValidateProjectExport validates the import data and logs warnings for issues.
 // This is a warn-only validation - issues are logged but import can proceed.
 // Returns the set of valid flow resource names for reference validation.
