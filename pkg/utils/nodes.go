@@ -426,8 +426,15 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 			if err != nil {
 				continue
 			}
-			// useful when settings apply custom schema
-			portSchemaMap[GetPortFullName(node.Name, pc.Port)] = s // override schema from statuses by configs (edges)
+			// Only override Status schema if Spec schema has $ref (is complete).
+			// Incomplete schemas (e.g. from import with only $defs) break the
+			// generator which needs $ref to find the root type.
+			// GetConfigurableDefinitions reads Spec.Ports directly, so $defs
+			// are still accessible for configurable definition overlays.
+			if refNode, _ := s.GetKey("$ref"); refNode == nil {
+				continue
+			}
+			portSchemaMap[GetPortFullName(node.Name, pc.Port)] = s
 		}
 
 		// collect node definitions from source ports with custom property `port` added
@@ -435,10 +442,14 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 			// default schema from status
 			var schemaBytes = port.Schema
 
-			// find schema from configs for given port
+			// find schema from configs for given port — only use if complete ($ref present)
 			for _, pc := range node.Spec.Ports {
-				if pc.From == "" && pc.Port == port.Name {
-					schemaBytes = pc.Schema
+				if pc.From == "" && pc.Port == port.Name && len(pc.Schema) > 0 {
+					if specSchema, sErr := ajson.Unmarshal(pc.Schema); sErr == nil {
+						if refNode, _ := specSchema.GetKey("$ref"); refNode != nil {
+							schemaBytes = pc.Schema
+						}
+					}
 					break
 				}
 			}
