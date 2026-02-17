@@ -933,6 +933,31 @@ func (m Manager) CleanupNodeReferences(ctx context.Context, projectName, deleted
 	return nil
 }
 
+// CleanupWidgetReferences removes widgets referencing a deleted node
+// from all widget pages in the project. Call after DeleteNode succeeds.
+func (m Manager) CleanupWidgetReferences(ctx context.Context, projectName, deletedNodeName string) error {
+	pages, err := m.GetProjectPageWidgets(ctx, projectName)
+	if err != nil {
+		return fmt.Errorf("get widget pages: %w", err)
+	}
+	prefix := deletedNodeName + ":"
+	for i := range pages {
+		filtered := make([]v1alpha1.TinyWidget, 0, len(pages[i].Spec.Widgets))
+		for _, w := range pages[i].Spec.Widgets {
+			if !strings.HasPrefix(w.Port, prefix) {
+				filtered = append(filtered, w)
+			}
+		}
+		if len(filtered) != len(pages[i].Spec.Widgets) {
+			pages[i].Spec.Widgets = filtered
+			if err := m.UpdatePage(ctx, &pages[i]); err != nil {
+				log.Warn().Err(err).Str("page", pages[i].Name).Msg("failed to clean up widgets after node deletion")
+			}
+		}
+	}
+	return nil
+}
+
 func (m Manager) DeleteFlowNodes(ctx context.Context, projectResourceName string, flowResourceName string) error {
 
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
