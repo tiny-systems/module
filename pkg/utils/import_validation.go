@@ -185,10 +185,11 @@ func validateImportEdge(index int, elem map[string]interface{}, flowSet map[stri
 		return
 	}
 
-	// Configuration — optional (some edges pass data without transformation)
+	// Configuration — required for data to flow through the edge.
+	// Without config, the target port receives its zero-value struct (source data is ignored).
 	config := edgeData["configuration"]
 	if config == nil {
-		warnings = append(warnings, prefix+": no data.configuration — edge will pass data without transformation")
+		errors = append(errors, prefix+": missing data.configuration — without config the target port receives its default value, not the source data")
 	} else {
 		e, w := validateConfigExpressions(prefix, config)
 		errors = append(errors, e...)
