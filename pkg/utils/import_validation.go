@@ -125,11 +125,10 @@ func validateImportNode(index int, id string, elem map[string]interface{}, flowS
 			continue
 		}
 
-		// Handle schema issues are warnings only — CollectDefinitions() only reads
-		// $defs (for configurable overlays), so missing $ref doesn't break anything.
+		// Validate handle schema completeness
 		if schemaRaw, hasSchema := handleMap["schema"]; hasSchema && schemaRaw != nil {
 			e, w := validateSchemaCompleteness(hPrefix, schemaRaw)
-			warnings = append(warnings, e...)
+			errors = append(errors, e...)
 			warnings = append(warnings, w...)
 		}
 	}
@@ -296,13 +295,13 @@ func validateSchemaCompleteness(prefix string, schemaRaw interface{}) (errors, w
 		}
 	}
 
-	// Check for arrays without items in $defs properties
+	// Check for schema inconsistencies (arrays without items, properties without type: object)
 	for defName, defRaw := range defsMap {
 		defMap, ok := defRaw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		warnings = append(warnings, findSchemaInconsistencies(fmt.Sprintf("%s $defs[%s]", prefix, defName), defMap)...)
+		errors = append(errors, findSchemaInconsistencies(fmt.Sprintf("%s $defs[%s]", prefix, defName), defMap)...)
 	}
 
 	return

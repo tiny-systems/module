@@ -521,8 +521,8 @@ func TestFullPipeline_StatusPage(t *testing.T) {
 		t.Fatalf("UpdateWithDefinitions() error: %v", err)
 	}
 
-	// Step 4: Verify the overlaid schema doesn't have type:"object" on Context
-	// (since original was bare — no type)
+	// Step 4: Verify the overlaid schema HAS type:"object" on Context
+	// (overlay has properties → type preserved for UI form rendering)
 	overlaidNode, _ := ajson.Unmarshal(overlaidSchema)
 	if overlaidNode != nil {
 		overlaidDefs, _ := overlaidNode.GetKey("$defs")
@@ -530,10 +530,12 @@ func TestFullPipeline_StatusPage(t *testing.T) {
 			overlaidContext, _ := overlaidDefs.GetKey("Context")
 			if overlaidContext != nil {
 				typeNode, _ := overlaidContext.GetKey("type")
-				if typeNode != nil {
+				if typeNode == nil {
+					t.Error("Context in overlaid schema should have type:object (overlay has properties)")
+				} else {
 					typeStr, _ := typeNode.GetString()
-					if typeStr == "object" {
-						t.Error("Context in overlaid schema should NOT have type:object (original was bare)")
+					if typeStr != "object" {
+						t.Errorf("Context type should be 'object', got %q", typeStr)
 					}
 				}
 				// Also check required is stripped
@@ -634,9 +636,9 @@ func TestFullPipeline_FirestoreToDebug(t *testing.T) {
 		t.Fatalf("UpdateWithDefinitions() error: %v", err)
 	}
 
-	// The edge maps $.error (a string) into context — this must pass
-	// because debug's Context is bare (no type), even though firestore's
-	// Context overlay has type:"object"
+	// The edge maps $.error (a string) into context. No configurable definitions
+	// exist in Spec ports, so no overlay is applied — bare Context stays bare,
+	// string value passes validation.
 	err = ValidateEdgeWithPrecomputedMaps(
 		ctx,
 		portSchemaMap,
@@ -647,7 +649,7 @@ func TestFullPipeline_FirestoreToDebug(t *testing.T) {
 		nil,
 	)
 	if err != nil {
-		t.Errorf("expected no error (string into bare context), got: %v\n  overlaid schema: %s", err, overlaidSchema)
+		t.Errorf("expected no error (no overlay applied, bare context accepts string), got: %v\n  overlaid schema: %s", err, overlaidSchema)
 	}
 }
 
@@ -985,34 +987,37 @@ func TestValidateEdgeSchema_WithOverlaidSchema(t *testing.T) {
 		errContains      string
 	}{
 		{
-			name:             "bare context: integer mapped via expression passes",
+			name:             "rich overlay: integer mapped into context rejected — type:object preserved",
 			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
 			overlayDefs: map[string]*ajson.Node{
 				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"count":{"type":"integer"}},"title":"Context","type":"object"}`))),
 			},
-			portData:   map[string]interface{}{"num": 42},
-			edgeConfig: `{"context":"{{$.num}}"}`,
-			wantErr:    false,
+			portData:    map[string]interface{}{"num": 42},
+			edgeConfig:  `{"context":"{{$.num}}"}`,
+			wantErr:     true,
+			errContains: "expected object",
 		},
 		{
-			name:             "bare context: array mapped via expression passes",
+			name:             "rich overlay: array mapped into context rejected — type:object preserved",
 			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
 			overlayDefs: map[string]*ajson.Node{
 				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"items":{"type":"array"}},"title":"Context","type":"object"}`))),
 			},
-			portData:   map[string]interface{}{"list": []interface{}{"a", "b"}},
-			edgeConfig: `{"context":"{{$.list}}"}`,
-			wantErr:    false,
+			portData:    map[string]interface{}{"list": []interface{}{"a", "b"}},
+			edgeConfig:  `{"context":"{{$.list}}"}`,
+			wantErr:     true,
+			errContains: "expected object",
 		},
 		{
-			name:             "bare context: boolean mapped passes",
+			name:             "rich overlay: boolean mapped into context rejected — type:object preserved",
 			targetPortSchema: `{"$defs":{"In":{"path":"$","properties":{"context":{"$ref":"#/$defs/Context"}},"type":"object"},"Context":{"configurable":true,"path":"$.context","title":"Context"}},"$ref":"#/$defs/In"}`,
 			overlayDefs: map[string]*ajson.Node{
 				"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"path":"$.context","properties":{"flag":{"type":"boolean"}},"title":"Context","type":"object"}`))),
 			},
-			portData:   map[string]interface{}{"flag": true},
-			edgeConfig: `{"context":"{{$.flag}}"}`,
-			wantErr:    false,
+			portData:    map[string]interface{}{"flag": true},
+			edgeConfig:  `{"context":"{{$.flag}}"}`,
+			wantErr:     true,
+			errContains: "expected object",
 		},
 		{
 			name:             "typed context: non-object correctly rejected",
