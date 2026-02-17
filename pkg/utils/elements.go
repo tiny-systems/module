@@ -34,6 +34,21 @@ func IsEdge(n map[string]interface{}) bool {
 		n["sourceHandle"] != nil
 }
 
+// ResolveSharedFlows maps import flow names in a shared_with_flows annotation
+// to actual cluster flow resource names using the provided mapping.
+func ResolveSharedFlows(sharedWith string, flowNameMap map[string]string) string {
+	var resolved []string
+	for _, f := range strings.Split(sharedWith, ",") {
+		f = strings.TrimSpace(f)
+		if mapped, ok := flowNameMap[f]; ok && mapped != "" {
+			resolved = append(resolved, mapped)
+		} else {
+			resolved = append(resolved, f)
+		}
+	}
+	return strings.Join(resolved, ",")
+}
+
 // GetStr safely extracts a string from an interface{}.
 func GetStr(i interface{}) string {
 	if i == nil {
