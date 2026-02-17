@@ -107,13 +107,13 @@ func (se *JSONSchemaBasedDataGenerator) Generate(node *ajson.Node, clb Callback)
 	case "string", "number", "integer":
 		return getDefaultValue(typ, node)
 	case "array":
-		itemsNode, err := node.GetKey("items")
-		if err != nil {
-			return nil, fmt.Errorf("items node error: %v", err)
-		}
 		def, err := getDefaultValue(typ, node)
 		if err == nil {
 			return def, nil
+		}
+		itemsNode, _ := node.GetKey("items")
+		if itemsNode == nil {
+			return []interface{}{}, nil
 		}
 		generateItem, err := se.Generate(itemsNode, clb)
 		if err != nil {

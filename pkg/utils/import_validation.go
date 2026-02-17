@@ -296,6 +296,15 @@ func validateSchemaCompleteness(prefix string, schemaRaw interface{}) (errors, w
 		}
 	}
 
+	// Check for arrays without items in $defs properties
+	for defName, defRaw := range defsMap {
+		defMap, ok := defRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		warnings = append(warnings, findArraysWithoutItems(fmt.Sprintf("%s $defs[%s]", prefix, defName), defMap)...)
+	}
+
 	return
 }
 
@@ -414,6 +423,32 @@ func validateConfigKeysMatchSchema(prefix string, config, schemaRaw interface{})
 		}
 	}
 	return errs
+}
+
+// findArraysWithoutItems recursively checks an object's properties for arrays missing "items".
+func findArraysWithoutItems(prefix string, obj map[string]interface{}) []string {
+	var warnings []string
+	props, ok := obj["properties"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	for propName, propRaw := range props {
+		propMap, ok := propRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		typ, _ := propMap["type"].(string)
+		if typ == "array" {
+			if _, hasItems := propMap["items"]; !hasItems {
+				warnings = append(warnings, fmt.Sprintf("%s property %q: type is \"array\" but missing \"items\" — generator will produce empty array", prefix, propName))
+			}
+		}
+		// Recurse into nested objects
+		if typ == "object" {
+			warnings = append(warnings, findArraysWithoutItems(fmt.Sprintf("%s.%s", prefix, propName), propMap)...)
+		}
+	}
+	return warnings
 }
 
 // shortID returns a readable short identifier for error messages.
