@@ -27,9 +27,11 @@ func ValidateProjectImport(data *ProjectExport) (errors, warnings []string) {
 		errors = append(errors, "no flows defined in tinyFlows")
 	}
 
-	// First pass: collect node IDs and build node-to-component map
+	// First pass: collect node IDs, labels, and handle schemas
 	nodeIDs := make(map[string]bool)
 	nodeLabels := make(map[string]string) // nodeID -> label or component for readable messages
+	// nodeHandleSchemas: nodeID -> handleID -> schema map
+	nodeHandleSchemas := make(map[string]map[string]map[string]interface{})
 	for _, elem := range data.Elements {
 		elemType, _ := elem["type"].(string)
 		if elemType != TinyNodeType {
@@ -44,6 +46,26 @@ func ValidateProjectImport(data *ProjectExport) (errors, warnings []string) {
 					label = GetStr(dataMap["component"])
 				}
 				nodeLabels[elemID] = label
+				// Index handle schemas for edge validation
+				if handles, ok := dataMap["handles"].([]interface{}); ok {
+					for _, h := range handles {
+						hMap, ok := h.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						hID := GetStr(hMap["id"])
+						hType := GetStr(hMap["type"])
+						if hID == "" || hType != "target" {
+							continue
+						}
+						if schemaMap, ok := hMap["schema"].(map[string]interface{}); ok {
+							if nodeHandleSchemas[elemID] == nil {
+								nodeHandleSchemas[elemID] = make(map[string]map[string]interface{})
+							}
+							nodeHandleSchemas[elemID][hID] = schemaMap
+						}
+					}
+				}
 			}
 		}
 	}
@@ -59,7 +81,7 @@ func ValidateProjectImport(data *ProjectExport) (errors, warnings []string) {
 			errors = append(errors, e...)
 			warnings = append(warnings, w...)
 		case TinyEdgeType, "edge":
-			e, w := validateImportEdge(i, elem, flowSet, nodeIDs, nodeLabels)
+			e, w := validateImportEdge(i, elem, flowSet, nodeIDs, nodeLabels, nodeHandleSchemas)
 			errors = append(errors, e...)
 			warnings = append(warnings, w...)
 		default:
@@ -137,7 +159,7 @@ func validateImportNode(index int, id string, elem map[string]interface{}, flowS
 }
 
 // validateImportEdge validates an edge element for import.
-func validateImportEdge(index int, elem map[string]interface{}, flowSet map[string]bool, nodeIDs map[string]bool, nodeLabels map[string]string) (errors, warnings []string) {
+func validateImportEdge(index int, elem map[string]interface{}, flowSet map[string]bool, nodeIDs map[string]bool, nodeLabels map[string]string, nodeHandleSchemas map[string]map[string]map[string]interface{}) (errors, warnings []string) {
 	source := GetStr(elem["source"])
 	target := GetStr(elem["target"])
 	sourceHandle := GetStr(elem["sourceHandle"])
@@ -209,6 +231,12 @@ func validateImportEdge(index int, elem map[string]interface{}, flowSet map[stri
 		if config != nil {
 			errors = append(errors, validateConfigKeysMatchSchema(prefix, config, schemaRaw)...)
 		}
+	}
+
+	// Validate configurable fields: if edge maps structured data into a field
+	// whose $def is configurable but bare, the faker/validator won't know the types.
+	if config != nil && target != "" && targetHandle != "" {
+		errors = append(errors, validateConfigurableFieldSchemas(prefix, config, target, targetHandle, nodeHandleSchemas)...)
 	}
 
 	return
@@ -461,6 +489,95 @@ func findSchemaInconsistencies(prefix string, obj map[string]interface{}) []stri
 		}
 	}
 	return warnings
+}
+
+// validateConfigurableFieldSchemas checks that when an edge maps structured data (object)
+// into a field that $refs a configurable $def, that $def has properties defined.
+// Without properties, faker generates null and validation fails at runtime.
+func validateConfigurableFieldSchemas(prefix string, config interface{}, targetNodeID, targetHandleID string, nodeHandleSchemas map[string]map[string]map[string]interface{}) []string {
+	configMap, ok := config.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	handleSchemas, ok := nodeHandleSchemas[targetNodeID]
+	if !ok {
+		return nil
+	}
+	schemaMap, ok := handleSchemas[targetHandleID]
+	if !ok {
+		return nil
+	}
+
+	defs, ok := schemaMap["$defs"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Find root type properties to map config keys to $refs
+	rootRef, ok := schemaMap["$ref"].(string)
+	if !ok {
+		return nil
+	}
+	rootTypeName := rootRef[strings.LastIndex(rootRef, "/")+1:]
+	rootDef, ok := defs[rootTypeName].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	rootProps, ok := rootDef["properties"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	var errs []string
+	for configKey, configVal := range configMap {
+		// Only check fields where the edge config provides a structured object
+		if _, isObject := configVal.(map[string]interface{}); !isObject {
+			continue
+		}
+
+		// Find the property in the root schema
+		propDef, ok := rootProps[configKey].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check if it $refs a definition
+		ref, ok := propDef["$ref"].(string)
+		if !ok {
+			continue
+		}
+		defName := ref[strings.LastIndex(ref, "/")+1:]
+
+		// Look up the definition
+		def, ok := defs[defName].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check if configurable
+		configurable, _ := def["configurable"].(bool)
+		if !configurable {
+			continue
+		}
+
+		// Check if bare (no properties)
+		props, hasProps := def["properties"].(map[string]interface{})
+		if hasProps && len(props) > 0 {
+			continue // Has properties — OK
+		}
+
+		// Bare configurable with structured edge config — error
+		structuredFields := make([]string, 0)
+		for k := range configVal.(map[string]interface{}) {
+			structuredFields = append(structuredFields, k)
+		}
+		sort.Strings(structuredFields)
+		errs = append(errs, fmt.Sprintf(
+			"%s: edge maps %d fields into %q ($def %q, configurable) but definition has no properties — add property schema so faker generates correct types (fields: %s)",
+			prefix, len(structuredFields), configKey, defName, strings.Join(structuredFields, ", ")))
+	}
+	return errs
 }
 
 // shortID returns a readable short identifier for error messages.
