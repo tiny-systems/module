@@ -185,20 +185,20 @@ func validateImportEdge(index int, elem map[string]interface{}, flowSet map[stri
 		return
 	}
 
-	// Configuration present
+	// Configuration — optional (some edges pass data without transformation)
 	config := edgeData["configuration"]
 	if config == nil {
-		errors = append(errors, prefix+": missing data.configuration")
+		warnings = append(warnings, prefix+": no data.configuration — edge will pass data without transformation")
 	} else {
 		e, w := validateConfigExpressions(prefix, config)
 		errors = append(errors, e...)
 		warnings = append(warnings, w...)
 	}
 
-	// Schema present
+	// Schema — optional (derived at runtime from native port schema)
 	schemaRaw := edgeData["schema"]
 	if schemaRaw == nil {
-		errors = append(errors, prefix+": missing data.schema — export this edge from a running system to get the complete schema")
+		warnings = append(warnings, prefix+": no data.schema — will be derived from target port at runtime")
 	} else {
 		e, w := validateSchemaCompleteness(prefix+" schema", schemaRaw)
 		errors = append(errors, e...)
