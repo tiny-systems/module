@@ -302,7 +302,7 @@ func validateSchemaCompleteness(prefix string, schemaRaw interface{}) (errors, w
 		if !ok {
 			continue
 		}
-		warnings = append(warnings, findArraysWithoutItems(fmt.Sprintf("%s $defs[%s]", prefix, defName), defMap)...)
+		warnings = append(warnings, findSchemaInconsistencies(fmt.Sprintf("%s $defs[%s]", prefix, defName), defMap)...)
 	}
 
 	return
@@ -425,27 +425,40 @@ func validateConfigKeysMatchSchema(prefix string, config, schemaRaw interface{})
 	return errs
 }
 
-// findArraysWithoutItems recursively checks an object's properties for arrays missing "items".
-func findArraysWithoutItems(prefix string, obj map[string]interface{}) []string {
+// findSchemaInconsistencies recursively checks schema definitions for common issues:
+// - arrays missing "items"
+// - definitions with "properties" but missing "type": "object"
+func findSchemaInconsistencies(prefix string, obj map[string]interface{}) []string {
 	var warnings []string
+
+	// Check this definition itself: has properties but no type: "object"
+	typ, _ := obj["type"].(string)
+	if _, hasProps := obj["properties"]; hasProps && typ != "object" {
+		if typ == "" {
+			warnings = append(warnings, fmt.Sprintf("%s: has \"properties\" but missing \"type\": \"object\" — will render as JSON instead of form fields", prefix))
+		} else {
+			warnings = append(warnings, fmt.Sprintf("%s: has \"properties\" but type is %q, not \"object\" — properties will be ignored", prefix, typ))
+		}
+	}
+
 	props, ok := obj["properties"].(map[string]interface{})
 	if !ok {
-		return nil
+		return warnings
 	}
 	for propName, propRaw := range props {
 		propMap, ok := propRaw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		typ, _ := propMap["type"].(string)
-		if typ == "array" {
+		propType, _ := propMap["type"].(string)
+		if propType == "array" {
 			if _, hasItems := propMap["items"]; !hasItems {
 				warnings = append(warnings, fmt.Sprintf("%s property %q: type is \"array\" but missing \"items\" — generator will produce empty array", prefix, propName))
 			}
 		}
-		// Recurse into nested objects
-		if typ == "object" {
-			warnings = append(warnings, findArraysWithoutItems(fmt.Sprintf("%s.%s", prefix, propName), propMap)...)
+		// Recurse into nested objects or definitions with properties
+		if propType == "object" || propMap["properties"] != nil {
+			warnings = append(warnings, findSchemaInconsistencies(fmt.Sprintf("%s.%s", prefix, propName), propMap)...)
 		}
 	}
 	return warnings
