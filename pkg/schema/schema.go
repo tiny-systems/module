@@ -33,7 +33,7 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 	for _, conf := range configurableDefinitionNodes {
 		if p, ok := GetStr("path", conf); ok && p != "" {
 			// prefer richer definitions (with explicit properties) over bare ones
-			if existing, exists := pathToConf[p]; !exists || !hasProperties(existing) {
+			if existing, exists := pathToConf[p]; !exists || !HasProperties(existing) {
 				pathToConf[p] = conf
 			}
 		}
@@ -56,9 +56,9 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 		// check if there's a richer definition available via path matching.
 		// This handles the case where target node has bare "Startcontext" and source node
 		// has rich "Context" — both with path "$.context".
-		if ok && !hasProperties(conf) {
+		if ok && !HasProperties(conf) {
 			if p, hasPath := GetStr("path", realSchemaDef); hasPath && p != "" {
-				if pathConf, pathOk := pathToConf[p]; pathOk && hasProperties(pathConf) {
+				if pathConf, pathOk := pathToConf[p]; pathOk && HasProperties(pathConf) {
 					conf = pathConf
 				}
 			}
@@ -109,9 +109,9 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 	return ajson.Marshal(realSchemaNode)
 }
 
-// hasProperties returns true if the node has a "properties" key with at least one child.
+// HasProperties returns true if the node has a "properties" key with at least one child.
 // Bare definitions (only additionalProperties, no explicit properties) return false.
-func hasProperties(n *ajson.Node) bool {
+func HasProperties(n *ajson.Node) bool {
 	props, err := n.GetKey("properties")
 	if err != nil || props == nil {
 		return false
