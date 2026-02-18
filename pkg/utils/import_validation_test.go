@@ -252,6 +252,84 @@ func TestValidateProjectImport_PassthroughContextIsOK(t *testing.T) {
 	}
 }
 
+func TestValidateProjectImport_EmptyObjectIsOK(t *testing.T) {
+	// Edge maps empty object {} into a bare configurable field.
+	// This is normal — means "no custom data for this field". Should NOT error.
+	data := &ProjectExport{
+		TinyFlows: []ExportFlow{{ResourceName: "flow1", Name: "Flow 1"}},
+		Elements: []map[string]interface{}{
+			{
+				"id":   "node-target",
+				"type": TinyNodeType,
+				"flow": "flow1",
+				"data": map[string]interface{}{
+					"component": "go_template",
+					"module":    "tinysystems/encoding-module-v0",
+					"handles": []interface{}{
+						map[string]interface{}{
+							"id":   "request",
+							"type": "target",
+							"schema": map[string]interface{}{
+								"$ref": "#/$defs/Request",
+								"$defs": map[string]interface{}{
+									"Renderdata": map[string]interface{}{
+										"configurable": true,
+										// Bare — no properties
+									},
+									"Request": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"renderData": map[string]interface{}{
+												"$ref": "#/$defs/Renderdata",
+											},
+											"template": map[string]interface{}{
+												"type": "string",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				"id":   "node-source",
+				"type": TinyNodeType,
+				"flow": "flow1",
+				"data": map[string]interface{}{
+					"component": "router",
+					"module":    "tinysystems/common-module-v0",
+					"handles":   []interface{}{},
+				},
+			},
+			{
+				"id":           "edge1",
+				"type":         TinyEdgeType,
+				"flow":         "flow1",
+				"source":       "node-source",
+				"sourceHandle": "default",
+				"target":       "node-target",
+				"targetHandle": "request",
+				"data": map[string]interface{}{
+					"configuration": map[string]interface{}{
+						"renderData": map[string]interface{}{},
+						"template":   "home.html",
+					},
+				},
+			},
+		},
+	}
+
+	errors, _ := ValidateProjectImport(data)
+
+	for _, e := range errors {
+		if strings.Contains(e, "configurable") && strings.Contains(e, "no properties") {
+			t.Errorf("unexpected error for empty object mapping: %s", e)
+		}
+	}
+}
+
 func TestValidateProjectImport_NonConfigurableFieldIsIgnored(t *testing.T) {
 	// Edge maps object into a field whose $def is NOT configurable — should be ignored.
 	data := &ProjectExport{
