@@ -531,8 +531,9 @@ func validateConfigurableFieldSchemas(prefix string, config interface{}, targetN
 
 	var errs []string
 	for configKey, configVal := range configMap {
-		// Only check fields where the edge config provides a structured object
-		if _, isObject := configVal.(map[string]interface{}); !isObject {
+		// Only check fields where the edge config provides a structured object with actual fields
+		objVal, isObject := configVal.(map[string]interface{})
+		if !isObject || len(objVal) == 0 {
 			continue
 		}
 
@@ -569,7 +570,7 @@ func validateConfigurableFieldSchemas(prefix string, config interface{}, targetN
 
 		// Bare configurable with structured edge config — error
 		structuredFields := make([]string, 0)
-		for k := range configVal.(map[string]interface{}) {
+		for k := range objVal {
 			structuredFields = append(structuredFields, k)
 		}
 		sort.Strings(structuredFields)
