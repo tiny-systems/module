@@ -669,7 +669,7 @@ func TestMergeConfigurableDefinitions(t *testing.T) {
 		}
 	})
 
-	t.Run("rich source overwrites bare target", func(t *testing.T) {
+	t.Run("rich source does not overwrite bare target", func(t *testing.T) {
 		targetDefs := map[string]*ajson.Node{
 			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"title":"Context"}`))),
 		}
@@ -677,12 +677,13 @@ func TestMergeConfigurableDefinitions(t *testing.T) {
 			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"properties":{"calendar_id":{"type":"string"}},"title":"Context","type":"object"}`))),
 		}
 		merged := MergeConfigurableDefinitions(targetDefs, sourceDefs)
-		if !schema.HasProperties(merged["Context"]) {
-			t.Error("rich source Context should overwrite bare target Context")
+		// Target always wins — bare target stays bare (accepts any type)
+		if schema.HasProperties(merged["Context"]) {
+			t.Error("source Context should not overwrite target Context")
 		}
 	})
 
-	t.Run("rich source overwrites rich target", func(t *testing.T) {
+	t.Run("rich source does not overwrite rich target", func(t *testing.T) {
 		targetDefs := map[string]*ajson.Node{
 			"Context": ajson.Must(ajson.Unmarshal([]byte(`{"configurable":true,"properties":{"old_field":{"type":"string"}},"title":"Context","type":"object"}`))),
 		}
@@ -691,8 +692,9 @@ func TestMergeConfigurableDefinitions(t *testing.T) {
 		}
 		merged := MergeConfigurableDefinitions(targetDefs, sourceDefs)
 		b, _ := ajson.Marshal(merged["Context"])
-		if !strings.Contains(string(b), "new_field") {
-			t.Errorf("rich source should overwrite rich target, got: %s", b)
+		// Target always wins
+		if !strings.Contains(string(b), "old_field") {
+			t.Errorf("target Context should be preserved, got: %s", b)
 		}
 	})
 

@@ -272,31 +272,17 @@ func GetConfigurableDefinitions(node v1alpha1.TinyNode, from *string) map[string
 }
 
 // MergeConfigurableDefinitions merges source node definitions into target node definitions.
-// Bare source definitions (no properties, no type) never overwrite rich target definitions
-// (ones that have properties or an explicit type). This prevents e.g. a router's bare
-// Context from overwriting debug's typed Context (type:string).
-// When both are rich or both are bare, source wins (most up-to-date).
+// Target definitions always take precedence — they define what the target port accepts.
+// Source definitions only fill in gaps (defs that the target doesn't have at all).
 func MergeConfigurableDefinitions(targetDefs, sourceDefs map[string]*ajson.Node) map[string]*ajson.Node {
 	for k, v := range sourceDefs {
-		existing, ok := targetDefs[k]
-		if !ok {
-			targetDefs[k] = v
-			continue
-		}
-		// Only protect rich target from bare source
-		sourceIsBare := !schema.HasProperties(v) && !hasDefType(v)
-		targetIsRich := schema.HasProperties(existing) || hasDefType(existing)
-		if !(targetIsRich && sourceIsBare) {
+		if _, ok := targetDefs[k]; !ok {
 			targetDefs[k] = v
 		}
 	}
 	return targetDefs
 }
 
-func hasDefType(n *ajson.Node) bool {
-	_, ok := schema.GetStr("type", n)
-	return ok
-}
 
 func checkSliceStr(str string, sl []string) bool {
 	for _, s := range sl {
