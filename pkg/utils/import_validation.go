@@ -329,7 +329,7 @@ func validateSchemaCompleteness(prefix string, schemaRaw interface{}) (errors, w
 		if !ok {
 			continue
 		}
-		errors = append(errors, findSchemaInconsistencies(fmt.Sprintf("%s $defs[%s]", prefix, defName), defMap)...)
+		warnings = append(warnings, findSchemaInconsistencies(fmt.Sprintf("%s $defs[%s]", prefix, defName), defMap)...)
 	}
 
 	return
