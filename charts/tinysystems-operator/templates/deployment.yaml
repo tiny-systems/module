@@ -26,7 +26,11 @@ spec:
         {{- end }}
     spec:
       containers:
-      - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
+      - args:
+        {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
+        - --name={{ .Values.controllerManager.manager.moduleName | default (include "tinysystems-operator.fullname" .) }}
+        - --version={{ .Values.controllerManager.manager.moduleVersion | default .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
+        - --namespace={{ .Release.Namespace }}
         command:
         - /manager
         ports:
