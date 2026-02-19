@@ -9,7 +9,9 @@ controllerManager:
       - pre-delete
     installArgs:
       - pre-install
-    extraEnv: []
+    extraEnv:
+      - name: OTLP_DSN
+        value: "http://token@tinysystems-otel-collector:2345"
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
