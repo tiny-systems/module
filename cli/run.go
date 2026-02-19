@@ -91,17 +91,22 @@ var runCmd = &cobra.Command{
 
 		// re-use zerolog
 		l := zerologr.New(&log.Logger)
-		err := metrics.ConfigureOpenTelemetry(
-			metrics.WithDSN(os.Getenv("OTLP_DSN")),
-			metrics.WithBatchSpanProcessorOption(func(o *sdktrace.BatchSpanProcessorOptions) {
-				o.BatchTimeout = 500 * time.Millisecond // Very responsive
-				// Optional: also reduce batch size for faster sends
-				o.MaxExportBatchSize = 10
-			}),
-		)
-		if err != nil {
-			l.Error(err, "configure opentelemetry error")
-			os.Exit(1)
+		otlpDSN := os.Getenv("OTLP_DSN")
+		if otlpDSN != "" {
+			err := metrics.ConfigureOpenTelemetry(
+				metrics.WithDSN(otlpDSN),
+				metrics.WithBatchSpanProcessorOption(func(o *sdktrace.BatchSpanProcessorOptions) {
+					o.BatchTimeout = 500 * time.Millisecond // Very responsive
+					// Optional: also reduce batch size for faster sends
+					o.MaxExportBatchSize = 10
+				}),
+			)
+			if err != nil {
+				l.Error(err, "configure opentelemetry error")
+				os.Exit(1)
+			}
+		} else {
+			l.Info("OTLP_DSN not set, telemetry disabled")
 		}
 
 		// Send buffered spans and free resources.
