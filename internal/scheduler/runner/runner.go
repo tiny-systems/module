@@ -284,6 +284,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // Ensure context is cancelled when handler returns
 
+	// Cache Done channel before spawning goroutine to avoid Go context race
+	// where concurrent access to cancelCtx.Done() can panic if the internal
+	// atomic.Value holds a function instead of chan struct{} (Go issue #73866).
+	done := ctx.Done()
+
 	go func() {
 		select {
 		case <-c.closeCh:
@@ -292,7 +297,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 				"node", c.name,
 			)
 			cancel()
-		case <-ctx.Done():
+		case <-done:
 			// Handler completed or parent context cancelled - exit goroutine
 		}
 	}()
@@ -489,7 +494,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		go func() {
 			for {
 				select {
-				case <-ctx.Done():
+				case <-done:
 					return
 				case t := <-ticker.C:
 					c.setGauge(t.Unix(), msg.EdgeID)
