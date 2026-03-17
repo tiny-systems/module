@@ -693,6 +693,76 @@ func (m Manager) UpdatePage(ctx context.Context, page *v1alpha1.TinyWidgetPage) 
 	return m.client.Update(ctx, page)
 }
 
+func (m Manager) CreateScenario(ctx context.Context, scenarioName, projectName string) (*v1alpha1.TinyScenario, error) {
+	scenario := &v1alpha1.TinyScenario{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:    m.namespace,
+			GenerateName: utils.SanitizeResourceName(scenarioName),
+			Labels: map[string]string{
+				v1alpha1.ProjectNameLabel: projectName,
+			},
+			Annotations: map[string]string{
+				v1alpha1.ScenarioNameAnnotation: scenarioName,
+			},
+		},
+	}
+
+	project, err := m.GetProject(ctx, projectName, m.namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project for owner reference: %w", err)
+	}
+
+	scenario.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion: project.APIVersion,
+			Kind:       project.Kind,
+			Name:       project.Name,
+			UID:        project.UID,
+			Controller: func() *bool { b := true; return &b }(),
+		},
+	}
+
+	if err := m.client.Create(ctx, scenario); err != nil {
+		return nil, fmt.Errorf("failed to create scenario: %w", err)
+	}
+	return scenario, nil
+}
+
+func (m Manager) GetProjectScenarios(ctx context.Context, projectName string) ([]v1alpha1.TinyScenario, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			v1alpha1.ProjectNameLabel: projectName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build selector error: %w", err)
+	}
+
+	list := &v1alpha1.TinyScenarioList{}
+	if err := m.client.List(ctx, list, client.MatchingLabelsSelector{
+		Selector: selector,
+	}, client.InNamespace(m.namespace)); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (m Manager) GetScenario(ctx context.Context, name, namespace string) (*v1alpha1.TinyScenario, error) {
+	scenario := &v1alpha1.TinyScenario{}
+	if err := m.client.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, scenario); err != nil {
+		return nil, err
+	}
+	return scenario, nil
+}
+
+func (m Manager) UpdateScenario(ctx context.Context, scenario *v1alpha1.TinyScenario) error {
+	return m.client.Update(ctx, scenario)
+}
+
+func (m Manager) DeleteScenario(ctx context.Context, scenario *v1alpha1.TinyScenario) error {
+	return m.client.Delete(ctx, scenario)
+}
+
 func (m Manager) GetProjectFlowNodes(ctx context.Context, projectName string, flowName string) ([]v1alpha1.TinyNode, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{

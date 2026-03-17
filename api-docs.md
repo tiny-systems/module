@@ -17,12 +17,14 @@ Package v1alpha1 contains API Schema definitions for the operator v1alpha1 API g
 - [TinyNodeList](#tinynodelist)
 - [TinyProject](#tinyproject)
 - [TinyProjectList](#tinyprojectlist)
+- [TinyScenario](#tinyscenario)
+- [TinyScenarioList](#tinyscenariolist)
 - [TinySignal](#tinysignal)
 - [TinySignalList](#tinysignallist)
-- [TinyTracker](#tinytracker)
-- [TinyTrackerList](#tinytrackerlist)
 - [TinyWidgetPage](#tinywidgetpage)
 - [TinyWidgetPageList](#tinywidgetpagelist)
+
+
 
 
 
@@ -35,6 +37,21 @@ _Underlying type:_ _integer_
 _Appears in:_
 - [TinyNodePortStatus](#tinynodeportstatus)
 
+
+
+#### ScenarioPortData
+
+
+
+ScenarioPortData stores the sample data for a single port
+
+_Appears in:_
+- [TinyScenarioSpec](#tinyscenariospec)
+
+| Field | Description |
+| --- | --- |
+| `port` _string_ | Port is the full port name (e.g., "flowid.module.component-suffix:portname") |
+| `data` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Data is the JSON-encoded sample payload for this port |
 
 
 #### TinyFlow
@@ -180,6 +197,7 @@ _Appears in:_
 | `addr` _string_ | INSERT ADDITIONAL STATUS FIELD - define observed state of cluster<br /><br />Important: Run "make" to regenerate code after modifying this file |
 | `name` _string_ |  |
 | `version` _string_ |  |
+| `sdkVersion` _string_ |  |
 | `components` _[TinyModuleComponentStatus](#tinymodulecomponentstatus) array_ |  |
 
 
@@ -267,6 +285,7 @@ _Appears in:_
 | --- | --- |
 | `name` _string_ |  |
 | `version` _string_ |  |
+| `sdkVersion` _string_ |  |
 
 
 #### TinyNodePortConfig
@@ -318,7 +337,6 @@ _Appears in:_
 | Field | Description |
 | --- | --- |
 | `module` _string_ | Module name - container image repo + tag |
-| `module_version` _string_ | Module version semver v2 compatible (without v prefix) |
 | `component` _string_ | Component name within a module |
 | `ports` _[TinyNodePortConfig](#tinynodeportconfig) array_ | Port configurations |
 | `edges` _[TinyNodeEdge](#tinynodeedge) array_ | Edges to send message next |
@@ -392,6 +410,9 @@ TinyProjectSpec defines the desired state of TinyProject
 _Appears in:_
 - [TinyProject](#tinyproject)
 
+| Field | Description |
+| --- | --- |
+| `description` _string_ | Description is a markdown description of the project |
 
 
 #### TinyProjectStatus
@@ -402,6 +423,69 @@ TinyProjectStatus defines the observed state of TinyProject
 
 _Appears in:_
 - [TinyProject](#tinyproject)
+
+
+
+#### TinyScenario
+
+
+
+TinyScenario is the Schema for the tinyscenarios API
+
+_Appears in:_
+- [TinyScenarioList](#tinyscenariolist)
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyScenario`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `spec` _[TinyScenarioSpec](#tinyscenariospec)_ |  |
+| `status` _[TinyScenarioStatus](#tinyscenariostatus)_ |  |
+
+
+#### TinyScenarioList
+
+
+
+TinyScenarioList contains a list of TinyScenario
+
+
+
+| Field | Description |
+| --- | --- |
+| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
+| `kind` _string_ | `TinyScenarioList`
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
+| `items` _[TinyScenario](#tinyscenario) array_ |  |
+
+
+#### TinyScenarioSpec
+
+
+
+TinyScenarioSpec defines the desired state of TinyScenario
+
+_Appears in:_
+- [TinyScenario](#tinyscenario)
+
+| Field | Description |
+| --- | --- |
+| `ports` _[ScenarioPortData](#scenarioportdata) array_ | Ports contains per-port sample data entries |
+
+
+#### TinyScenarioStatus
+
+
+
+TinyScenarioStatus defines the observed state of TinyScenario
+
+_Appears in:_
+- [TinyScenario](#tinyscenario)
 
 
 
@@ -467,66 +551,6 @@ TinySignalStatus defines the observed state of TinySignal
 
 _Appears in:_
 - [TinySignal](#tinysignal)
-
-
-
-#### TinyTracker
-
-
-
-TinyTracker is the Schema for the tinytrackers API
-
-_Appears in:_
-- [TinyTrackerList](#tinytrackerlist)
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinyTracker`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `spec` _[TinyTrackerSpec](#tinytrackerspec)_ |  |
-| `status` _[TinyTrackerStatus](#tinytrackerstatus)_ |  |
-
-
-#### TinyTrackerList
-
-
-
-TinyTrackerList contains a list of TinyTracker
-
-
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinyTrackerList`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `items` _[TinyTracker](#tinytracker) array_ |  |
-
-
-#### TinyTrackerSpec
-
-
-
-TinyTrackerSpec defines the desired state of Tracker
-
-_Appears in:_
-- [TinyTracker](#tinytracker)
-
-
-
-#### TinyTrackerStatus
-
-
-
-TinyTrackerStatus defines the observed state of TinyTracker
-
-_Appears in:_
-- [TinyTracker](#tinytracker)
 
 
 

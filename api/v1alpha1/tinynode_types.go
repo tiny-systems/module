@@ -53,6 +53,8 @@ const (
 	NodeCommentAnnotation = "tinysystems.io/node-comment"
 
 	IngressHostNameSuffixAnnotation = "tinysystems.io/ingress-hostname-suffix"
+
+	ScenarioNameAnnotation = "tinysystems.io/scenario-name"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
