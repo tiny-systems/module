@@ -45,7 +45,7 @@ type ManagerInterface interface {
 	UpdateNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	DeleteNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	GetNode(ctx context.Context, name, namespace string) (*v1alpha1.TinyNode, error)
-	CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte) error
+	CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte, traceID ...string) error
 }
 
 func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
@@ -559,7 +559,7 @@ func (m Manager) CreateProject(ctx context.Context, ns string, name string) (*v1
 	return &proj, nil
 }
 
-func (m Manager) CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte) error {
+func (m Manager) CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte, traceID ...string) error {
 
 	// Get the target node to set as owner
 	node, err := m.GetNode(ctx, nodeName, nodeNamespace)
@@ -599,6 +599,9 @@ func (m Manager) CreateSignal(ctx context.Context, nodeName, nodeNamespace strin
 		Node: nodeName,
 		Port: port,
 		Data: data,
+	}
+	if len(traceID) > 0 && traceID[0] != "" {
+		newSignal.Spec.TraceID = traceID[0]
 	}
 
 	if errors.IsNotFound(err) {

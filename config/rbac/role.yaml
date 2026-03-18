@@ -12,9 +12,10 @@ rules:
   - create
   - patch
 - apiGroups:
-  - apps
+  - ""
   resources:
-  - deployments
+  - pods
+  - services
   verbs:
   - get
   - list
@@ -22,10 +23,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ""
+  - apps
   resources:
-  - pods
-  - services
+  - deployments
   verbs:
   - get
   - list

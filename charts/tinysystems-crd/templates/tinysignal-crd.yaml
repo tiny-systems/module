@@ -3,7 +3,7 @@ kind: CustomResourceDefinition
 metadata:
   name: tinysignals.operator.tinysystems.io
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.1
+    controller-gen.kubebuilder.io/version: v0.20.1
   labels:
   {{- include "tinysystems-crd.labels" . | nindent 4 }}
 spec:
@@ -49,6 +49,12 @@ spec:
                 type: string
               port:
                 description: Port is the port on the node to send the signal to
+                type: string
+              traceID:
+                description: |-
+                  TraceID is an optional trace ID to use for the signal's execution trace.
+                  If set, the delivery span will use this as the parent trace ID,
+                  allowing callers to look up the trace by a known ID.
                 type: string
             required:
             - node

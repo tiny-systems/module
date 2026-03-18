@@ -3,7 +3,7 @@ kind: CustomResourceDefinition
 metadata:
   name: tinywidgetpages.operator.tinysystems.io
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.1
+    controller-gen.kubebuilder.io/version: v0.20.1
   labels:
   {{- include "tinysystems-crd.labels" . | nindent 4 }}
 spec:

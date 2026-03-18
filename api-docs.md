@@ -541,6 +541,7 @@ _Appears in:_
 | `node` _string_ | Node is the name of the TinyNode to signal |
 | `port` _string_ | Port is the port on the node to send the signal to |
 | `data` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Data is the payload to send with the signal |
+| `traceID` _string_ | TraceID is an optional trace ID to use for the signal's execution trace.<br /><br />If set, the delivery span will use this as the parent trace ID,<br /><br />allowing callers to look up the trace by a known ID. |
 
 
 #### TinySignalStatus

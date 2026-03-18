@@ -43,7 +43,7 @@ func (m *mockManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNode) error 
 func (m *mockManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
 func (m *mockManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
 func (m *mockManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) { return nil, nil }
-func (m *mockManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte) error    { return nil }
+func (m *mockManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error { return nil }
 
 func (m *mockManager) getPatchCount() int {
 	m.mu.Lock()
@@ -93,7 +93,7 @@ func (m *patchCapturingManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNo
 func (m *patchCapturingManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
 func (m *patchCapturingManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
 func (m *patchCapturingManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) { return nil, nil }
-func (m *patchCapturingManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte) error    { return nil }
+func (m *patchCapturingManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error { return nil }
 
 var _ resource.ManagerInterface = (*patchCapturingManager)(nil)
 
