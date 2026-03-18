@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/hex"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -104,6 +106,24 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		deliveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		deliveryCtx = utils.WithLeader(deliveryCtx, true)
+
+		// If a trace ID was provided, inject it as a remote span context
+		// so the execution trace uses the caller's known trace ID
+		if signal.Spec.TraceID != "" {
+			if traceIDBytes, err := hex.DecodeString(signal.Spec.TraceID); err == nil && len(traceIDBytes) == 16 {
+				var tid trace.TraceID
+				copy(tid[:], traceIDBytes)
+				// Use a fixed span ID — the tracer will create child spans under this
+				spanID := trace.SpanID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+				sc := trace.NewSpanContext(trace.SpanContextConfig{
+					TraceID:    tid,
+					SpanID:     spanID,
+					TraceFlags: trace.FlagsSampled,
+					Remote:     true,
+				})
+				deliveryCtx = trace.ContextWithRemoteSpanContext(deliveryCtx, sc)
+			}
+		}
 
 		_, err := r.Scheduler.Handle(deliveryCtx, &runner.Msg{
 			From: runner.FromSignal,

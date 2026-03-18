@@ -36,6 +36,12 @@ type TinySignalSpec struct {
 	// +kubebuilder:validation:Optional
 	// Data is the payload to send with the signal
 	Data []byte `json:"data"`
+
+	// +kubebuilder:validation:Optional
+	// TraceID is an optional trace ID to use for the signal's execution trace.
+	// If set, the delivery span will use this as the parent trace ID,
+	// allowing callers to look up the trace by a known ID.
+	TraceID string `json:"traceID,omitempty"`
 }
 
 // TinySignalStatus defines the observed state of TinySignal
