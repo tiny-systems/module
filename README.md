@@ -109,6 +109,7 @@ Ports enable component communication:
   - `_client`: Receives Kubernetes client for resource operations
   - `_settings`: Configuration port
   - `_control`: Dashboard control port
+  - `_identity`: Receives node identity (name, namespace, flow, project) for resource namespacing
 
 Each port can have:
 - **Configuration**: JSON schema defining expected input structure
@@ -575,6 +576,11 @@ func (c *MyComponent) Handle(
     case "_reconcile":
         // Handle reconciliation (called periodically)
         // Use this for cleanup, state sync, etc.
+
+    case v1alpha1.IdentityPort:
+        // Receive node identity for resource namespacing
+        id := message.(v1alpha1.NodeIdentity)
+        c.storagePath = filepath.Join(os.Getenv("STORAGE_PATH"), id.NodeName)
     }
 
     return nil
@@ -655,6 +661,21 @@ case "_client":
     node, err := client.GetNode(ctx, "node-name")
 ```
 
+##### `_identity` Port
+Receives node identity so components can namespace local resources (e.g., paths on a shared PVC):
+
+```go
+case v1alpha1.IdentityPort:
+    id, ok := message.(v1alpha1.NodeIdentity)
+    if !ok {
+        return fmt.Errorf("invalid identity")
+    }
+    // Use id.NodeName to create a unique storage path
+    c.storagePath = filepath.Join(os.Getenv("STORAGE_PATH"), id.NodeName)
+```
+
+`NodeIdentity` fields: `NodeName`, `Namespace`, `FlowName`, `ProjectName`.
+
 ##### `_settings` Port
 Receives initial configuration (no "from" connection required):
 
@@ -666,7 +687,7 @@ case "_settings":
 
 #### Port Delivery Ordering
 
-**There is no guaranteed delivery order between system ports.** The `_settings`, `_reconcile`, and `_control` ports may fire in any sequence after a pod restart or during normal operation. Module creators must handle all possible orderings.
+**There is no guaranteed delivery order between system ports.** The `_settings`, `_reconcile`, `_control`, and `_identity` ports may fire in any sequence after a pod restart or during normal operation. Module creators must handle all possible orderings.
 
 Common pitfall: a component restores state from metadata via `_reconcile`, then a `_settings` delivery arrives with stale CRD values and overwrites it. The SDK does not enforce any ordering — **it is the module creator's responsibility to handle this**.
 
@@ -891,7 +912,7 @@ If Slack Command does `_ = handler(...)` and returns `nil`, the Response is lost
 
 **Rules:**
 - Always `return handler(ctx, port, data)` for output ports
-- Exception: `_reconcile` port calls can ignore returns (internal system port)
+- Exception: `_reconcile` and `_identity` port calls can ignore returns (internal system ports)
 - Exception: Fire-and-forget async operations where no response is expected
 
 #### Component Naming Convention

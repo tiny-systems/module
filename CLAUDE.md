@@ -36,9 +36,25 @@ When writing components, always ask: "Does this handler call need to return a re
 
 ## CRITICAL: System Port Delivery Order
 
-**System ports (`_settings`, `_control`, `_reconcile`) have NO guaranteed delivery order.**
+**System ports (`_settings`, `_control`, `_reconcile`, `_identity`) have NO guaranteed delivery order.**
 
 On pod restart or leadership change, `_reconcile` may fire before `_settings`. Components that persist state to metadata must guard against reconcile overwriting fresh in-memory values with stale metadata.
+
+## Identity Port
+
+The `_identity` port delivers a `v1alpha1.NodeIdentity` struct with the node's resource name, namespace, flow, and project. Use it when a component needs to namespace local resources (e.g., filesystem paths on a shared PVC).
+
+```go
+case v1alpha1.IdentityPort:
+    id, ok := msg.(v1alpha1.NodeIdentity)
+    if !ok {
+        return fmt.Errorf("invalid identity")
+    }
+    c.storagePath = filepath.Join(os.Getenv("STORAGE_PATH"), id.NodeName)
+    return nil
+```
+
+`NodeIdentity` fields: `NodeName`, `Namespace`, `FlowName`, `ProjectName`. Delivered once during reconciliation, like `_client`.
 
 **Pattern: use a guard flag to prevent stale overwrites:**
 
