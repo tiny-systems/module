@@ -191,7 +191,7 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 	var ports []m.Port
 	// trim system ports
 	for _, p := range c.getNodePorts() {
-		if p.Name == v1alpha1.ReconcilePort || p.Name == v1alpha1.ClientPort {
+		if p.Name == v1alpha1.ReconcilePort || p.Name == v1alpha1.ClientPort || p.Name == v1alpha1.IdentityPort {
 			continue
 		}
 		ports = append(ports, p)
