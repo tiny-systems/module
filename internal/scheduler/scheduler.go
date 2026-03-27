@@ -345,6 +345,15 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 		case v1alpha1.ClientPort:
 			// provide kubernetes resource manager client
 			portResp = cmpInstance.Handle(ctx, nil, p.Name, s.manager)
+
+		case v1alpha1.IdentityPort:
+			// provide node identity so components can namespace resources
+			portResp = cmpInstance.Handle(ctx, nil, p.Name, v1alpha1.NodeIdentity{
+				NodeName:    node.Name,
+				Namespace:   node.Namespace,
+				FlowName:    node.Labels[v1alpha1.FlowNameLabel],
+				ProjectName: node.Labels[v1alpha1.ProjectNameLabel],
+			})
 		}
 
 		respErr := utils.CheckForError(portResp)
