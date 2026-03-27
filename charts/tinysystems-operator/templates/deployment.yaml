@@ -42,7 +42,16 @@ spec:
           - containerPort: 8483
             name: grpc
             protocol: TCP
+        {{- if .Values.storage.enabled }}
+        volumeMounts:
+          - name: data
+            mountPath: {{ .Values.storage.mountPath }}
+        {{- end }}
         env:
+          {{- if .Values.storage.enabled }}
+          - name: STORAGE_PATH
+            value: {{ .Values.storage.mountPath }}
+          {{- end }}
           {{- if .Values.controllerManager.manager.extraEnv }}
             {{- toYaml .Values.controllerManager.manager.extraEnv | nindent 10 }}
           {{- end }}
@@ -74,3 +83,9 @@ spec:
         runAsUser: 65532
       serviceAccountName: {{ include "tinysystems-operator.fullname" . }}-controller-manager
       terminationGracePeriodSeconds: 10
+      {{- if .Values.storage.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "tinysystems-operator.fullname" . }}-data
+      {{- end }}
