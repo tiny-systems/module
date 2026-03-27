@@ -51,6 +51,17 @@ rbac:
   #     resources: ["jobs"]
   #     verbs: ["*"]
   extraRules: []
+storage:
+  # Enable persistent storage for the module (creates a PVC)
+  enabled: false
+  # Storage size
+  size: 1Gi
+  # Storage class name (optional, uses cluster default if empty)
+  storageClassName: ""
+  # Mount path inside the container
+  mountPath: /data
+  # Access mode
+  accessMode: ReadWriteOnce
 managerIngress:
   ingress:
     annotations: {}
