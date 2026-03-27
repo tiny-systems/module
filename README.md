@@ -1,10 +1,10 @@
-# TinySystems Module SDK
+# Tiny Systems Module SDK
 
 A Kubebuilder-based Kubernetes operator SDK for building flow-based workflow engines. This SDK provides the complete infrastructure for developing modular operators that can be composed into visual workflows.
 
 ## Overview
 
-TinySystems Module SDK enables developers to create **module operators** (like `common-module`, `http-module`, `grpc-module`) that bring specific functionality into a Kubernetes-native flow engine. Each module provides reusable components that can be connected through a port-based architecture to create complex workflows.
+Tiny Systems Module SDK enables developers to create **module operators** (like `common-module`, `http-module`, `grpc-module`) that bring specific functionality into a Kubernetes-native flow engine. Each module provides reusable components that can be connected through a port-based architecture to create complex workflows.
 
 ### Key Features
 
@@ -874,7 +874,7 @@ func TestHello(t *testing.T) {
 
 **ALWAYS return the result of `handler()` calls. Never ignore the return value.**
 
-The TinySystems SDK uses blocking I/O for request-response patterns. When a component like HTTP Server sends a request, it **blocks** waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out.
+The Tiny Systems SDK uses blocking I/O for request-response patterns. When a component like HTTP Server sends a request, it **blocks** waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out.
 
 **BAD - Breaks blocking I/O:**
 ```go
