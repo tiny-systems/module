@@ -433,10 +433,8 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		return nil, err
 	}
 
-	// Create non-cancellable context that preserves parent span for proper trace hierarchy
-	// This ensures context cancellation doesn't interfere with telemetry submission
-	spanCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
-	spanCtx, inputSpan := c.tracer.Start(spanCtx, u.String(),
+	// Create non-cancellable context that preserves trace hierarchy (including remote span contexts)
+	spanCtx, inputSpan := c.tracer.Start(context.WithoutCancel(ctx), u.String(),
 		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
 		trace.WithAttributes(attribute.String("from", msg.From)),
 		trace.WithAttributes(attribute.String("flowID", c.flowName)),
@@ -628,10 +626,8 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			return err
 		}
 
-		// Create non-cancellable context that preserves parent span for proper trace hierarchy
-		// This ensures context cancellation doesn't interfere with telemetry submission
-		spanCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(outputCtx))
-		spanCtx, outputSpan := c.tracer.Start(spanCtx, u.String(), trace.WithAttributes(
+		// Create non-cancellable context that preserves trace hierarchy
+		spanCtx, outputSpan := c.tracer.Start(context.WithoutCancel(outputCtx), u.String(), trace.WithAttributes(
 			attribute.String("port", utils.GetPortFullName(c.name, outputPort)),
 			attribute.String("flowID", c.flowName),
 			attribute.String("projectID", c.projectName),
