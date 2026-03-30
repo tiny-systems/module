@@ -32,6 +32,18 @@ type ExportWidget struct {
 	SchemaPatch json.RawMessage `json:"schemaPatch,omitempty"`
 }
 
+// ExportScenario represents a scenario in the export format
+type ExportScenario struct {
+	Name  string                   `json:"name"`
+	Ports []ExportScenarioPortData `json:"ports"`
+}
+
+// ExportScenarioPortData stores the sample data for a single port in an export
+type ExportScenarioPortData struct {
+	Port string          `json:"port"`
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
 // ProjectExport represents the full project export format
 type ProjectExport struct {
 	Version     int                      `json:"version"`
@@ -39,6 +51,7 @@ type ProjectExport struct {
 	TinyFlows   []ExportFlow             `json:"tinyFlows"`
 	Elements    []map[string]interface{} `json:"elements"`
 	Pages       []ExportPage             `json:"pages"`
+	Scenarios   []ExportScenario         `json:"scenarios,omitempty"`
 }
 
 // CurrentExportVersion is the current version of the export format
