@@ -84,6 +84,12 @@ type Runner struct {
 	// When SetNode detects an edge was removed, it cancels the in-flight send,
 	// which propagates through gRPC to the target component.
 	edgeCancels cmap.ConcurrentMap[string, context.CancelFunc]
+
+	// runCtx is the runner's lifecycle context, cancelled when the runner stops.
+	// Used for async operations (debounced patches) instead of context.Background()
+	// to prevent stale writes after runner shutdown.
+	runCtx    context.Context
+	runCancel context.CancelFunc
 }
 
 const (
@@ -91,6 +97,7 @@ const (
 )
 
 func NewRunner(component m.Component) *Runner {
+	runCtx, runCancel := context.WithCancel(context.Background())
 	return &Runner{
 		component: component,
 		nodeLock:  &sync.Mutex{},
@@ -113,6 +120,10 @@ func NewRunner(component m.Component) *Runner {
 		edgeCancels: cmap.New[context.CancelFunc](),
 
 		closeCh: make(chan struct{}),
+
+		// lifecycle context for async operations (debounced patches)
+		runCtx:    runCtx,
+		runCancel: runCancel,
 	}
 }
 
@@ -551,7 +562,7 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 				c.pendingNodeUpdaters = nil
 				c.pendingNodeUpdatersLock.Unlock()
 
-				err := c.manager.PatchNode(context.Background(), currentNode, func(node *v1alpha1.TinyNode) error {
+				err := c.manager.PatchNode(c.runCtx, currentNode, func(node *v1alpha1.TinyNode) error {
 					// Apply ALL accumulated metadata updates first
 					for _, updater := range updaters {
 						if err := updater(node); err != nil {
@@ -589,7 +600,7 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 				c.pendingNodeUpdaters = nil
 				c.pendingNodeUpdatersLock.Unlock()
 
-				err := c.manager.PatchNode(context.Background(), currentNode, func(node *v1alpha1.TinyNode) error {
+				err := c.manager.PatchNode(c.runCtx, currentNode, func(node *v1alpha1.TinyNode) error {
 					// Apply ALL accumulated metadata updates
 					for _, updater := range updaters {
 						if err := updater(node); err != nil {
@@ -711,6 +722,10 @@ func (c *Runner) Stop() {
 		c.reconcileDebouncer.Flush()
 	}
 
+	// Cancel lifecycle context after flush so flushed patches complete,
+	// but any new async patches are prevented
+	c.runCancel()
+
 	// Unregister gauge callback to prevent leaks
 	if c.gaugeRegistration != nil {
 		_ = c.gaugeRegistration.Unregister()
@@ -740,6 +755,9 @@ func (c *Runner) StopWithoutCleanup() {
 	if c.reconcileDebouncer != nil {
 		c.reconcileDebouncer.Flush()
 	}
+
+	// Cancel lifecycle context after flush
+	c.runCancel()
 
 	// Unregister gauge callback to prevent leaks
 	if c.gaugeRegistration != nil {

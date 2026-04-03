@@ -11,6 +11,10 @@ type Msg struct {
 	To   string `json:"to"`
 	Data []byte `json:"data"`
 
+	// Depth tracks how many node hops this message has traversed.
+	// Used to detect cycles and prevent stack overflow in blocking I/O chains.
+	Depth int `json:"depth"`
+
 	//
 	Resp interface{} `json:"-"`
 }

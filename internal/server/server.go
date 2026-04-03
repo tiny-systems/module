@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -18,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -67,11 +69,20 @@ func (s *server) Start(globalCtx context.Context, handler runner.Handler, listen
 		ctx, cancel := mergeContext(ctx, globalCtx)
 		defer cancel()
 
+		// Extract message depth from gRPC metadata for cross-module cycle detection
+		var depth int
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if vals := md.Get("x-message-depth"); len(vals) > 0 {
+				depth, _ = strconv.Atoi(vals[0])
+			}
+		}
+
 		res, err := handler(ctx, &runner.Msg{
 			EdgeID: req.EdgeID,
 			To:     req.To,
 			Data:   req.Payload,
 			From:   req.From,
+			Depth:  depth,
 		})
 		if err != nil {
 			return nil, err

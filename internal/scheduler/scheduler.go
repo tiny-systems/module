@@ -3,18 +3,20 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
-	"time"
 )
 
 type Scheduler interface {
@@ -53,6 +55,11 @@ type Schedule struct {
 	// pretty much self-explanatory
 	msgHandler runner.Handler
 }
+
+// MaxMessageDepth is the maximum number of node hops a message can traverse.
+// Exceeding this limit returns a permanent error, preventing infinite loops
+// in cyclic flow graphs under the blocking I/O execution model.
+const MaxMessageDepth = 256
 
 func New(outsideHandler runner.Handler) *Schedule {
 	return &Schedule{
@@ -93,6 +100,10 @@ func (s *Schedule) Install(component module.Component) error {
 
 // Handle could be external and synchronous
 func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
+	if msg.Depth > MaxMessageDepth {
+		return nil, &perrors.PermanentError{Err: fmt.Errorf("max message depth %d exceeded (possible cycle in flow graph)", MaxMessageDepth)}
+	}
+
 	nodeName, port := utils.ParseFullPortName(msg.To)
 
 	s.log.Info("scheduler handle: received message",
@@ -216,11 +227,15 @@ func (s *Schedule) sendMsg(ctx context.Context, instance *runner.Runner, msg *ru
 			return nil, fmt.Errorf("empty port in handle's output")
 		}
 
+		// Increment depth for cycle detection
+		outMsg.Depth = msg.Depth + 1
+
 		s.log.Info("scheduler send msg: forwarding output to handler",
 			"to", outMsg.To,
 			"from", outMsg.From,
 			"edgeID", outMsg.EdgeID,
 			"dataSize", len(outMsg.Data),
+			"depth", outMsg.Depth,
 		)
 		return s.msgHandler(outCtx, outMsg)
 	})

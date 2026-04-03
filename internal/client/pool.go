@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -15,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 )
 
 type Pool interface {
@@ -29,6 +32,7 @@ type AddressPool struct {
 	conns        cmap.ConcurrentMap[string, *grpc.ClientConn] // Store connections for lifecycle management
 	errGroup     *errgroup.Group
 	runCtx       context.Context
+	runCtxMu     sync.RWMutex
 }
 
 func (p *AddressPool) Register(moduleName, addr string) {
@@ -39,9 +43,13 @@ func (p *AddressPool) Register(moduleName, addr string) {
 	p.addressTable.Set(moduleName, addr)
 
 	// Pre-warm connection in background to avoid cold start latency on first request
-	if p.runCtx != nil {
+	p.runCtxMu.RLock()
+	ctx := p.runCtx
+	p.runCtxMu.RUnlock()
+
+	if ctx != nil {
 		go func() {
-			if _, err := p.getClient(p.runCtx, addr); err != nil {
+			if _, err := p.getClient(ctx, addr); err != nil {
 				p.log.Error(err, "address pool: failed to pre-warm connection",
 					"module", moduleName,
 					"addr", addr,
@@ -121,6 +129,12 @@ func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) ([]byte, err
 		return nil, err
 	}
 
+	// Propagate message depth as gRPC metadata for cross-module cycle detection
+	if msg.Depth > 0 {
+		md := metadata.Pairs("x-message-depth", strconv.Itoa(msg.Depth))
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
+
 	resp, err := client.Message(ctx, &module.MessageRequest{
 		From:    msg.From,
 		Payload: msg.Data,
@@ -135,8 +149,11 @@ func (p *AddressPool) Handler(ctx context.Context, msg *runner.Msg) ([]byte, err
 }
 
 func (p *AddressPool) Start(ctx context.Context) error {
+	p.runCtxMu.Lock()
 	p.runCtx = ctx
-	<-p.runCtx.Done()
+	p.runCtxMu.Unlock()
+
+	<-ctx.Done()
 	return p.errGroup.Wait()
 }
 
@@ -165,11 +182,17 @@ func (p *AddressPool) getClient(ctx context.Context, addr string) (module.Module
 
 	p.conns.Set(addr, conn)
 
-	p.errGroup.Go(func() error {
-		<-p.runCtx.Done()
-		_ = conn.Close()
-		return nil
-	})
+	p.runCtxMu.RLock()
+	runCtx := p.runCtx
+	p.runCtxMu.RUnlock()
+
+	if runCtx != nil {
+		p.errGroup.Go(func() error {
+			<-runCtx.Done()
+			_ = conn.Close()
+			return nil
+		})
+	}
 
 	client := module.NewModuleServiceClient(conn)
 	p.clients.Set(addr, client)
