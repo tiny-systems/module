@@ -89,10 +89,10 @@ class MarkdownStyle extends HTMLElement {
     }
 }
 customElements.define('markdown-style', MarkdownStyle);</script><markdown-style style="max-width: 960px; margin: 0 auto 60px auto; padding: 8px;" class="markdown-style">
-    <h1 id="tinysystems-module-sdk"><a class="anchor" aria-hidden="true" tabindex="-1" href="#tinysystems-module-sdk"><span class="octicon octicon-link"></span></a>TinySystems Module SDK</h1>
+    <h1 id="tiny-systems-module-sdk"><a class="anchor" aria-hidden="true" tabindex="-1" href="#tiny-systems-module-sdk"><span class="octicon octicon-link"></span></a>Tiny Systems Module SDK</h1>
     <p>A Kubebuilder-based Kubernetes operator SDK for building flow-based workflow engines. This SDK provides the complete infrastructure for developing modular operators that can be composed into visual workflows.</p>
     <h2 id="overview"><a class="anchor" aria-hidden="true" tabindex="-1" href="#overview"><span class="octicon octicon-link"></span></a>Overview</h2>
-    <p>TinySystems Module SDK enables developers to create <strong>module operators</strong> (like <code>common-module</code>, <code>http-module</code>, <code>grpc-module</code>) that bring specific functionality into a Kubernetes-native flow engine. Each module provides reusable components that can be connected through a port-based architecture to create complex workflows.</p>
+    <p>Tiny Systems Module SDK enables developers to create <strong>module operators</strong> (like <code>common-module</code>, <code>http-module</code>, <code>grpc-module</code>) that bring specific functionality into a Kubernetes-native flow engine. Each module provides reusable components that can be connected through a port-based architecture to create complex workflows.</p>
     <h3 id="key-features"><a class="anchor" aria-hidden="true" tabindex="-1" href="#key-features"><span class="octicon octicon-link"></span></a>Key Features</h3>
     <ul>
       <li><strong>Port-Based Component Architecture</strong>: Visual programming model with input/output ports</li>
@@ -1310,7 +1310,7 @@ func TestHello(t *testing.T) {
     </ol>
     <h4 id="critical-handler-response-propagation"><a class="anchor" aria-hidden="true" tabindex="-1" href="#critical-handler-response-propagation"><span class="octicon octicon-link"></span></a>CRITICAL: Handler Response Propagation</h4>
     <p><strong>ALWAYS return the result of <code>handler()</code> calls. Never ignore the return value.</strong></p>
-    <p>The TinySystems SDK uses blocking I/O for request-response patterns. When a component like HTTP Server sends a request, it <strong>blocks</strong> waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out.</p>
+    <p>The Tiny Systems SDK uses blocking I/O for request-response patterns. When a component like HTTP Server sends a request, it <strong>blocks</strong> waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out.</p>
     <p><strong>BAD - Breaks blocking I/O:</strong></p>
     <pre class="language-go"><code class="language-go code-highlight"><span class="code-line line-number" line="1"><span class="token keyword">func</span> <span class="token punctuation">(</span>c <span class="token operator">*</span>Component<span class="token punctuation">)</span> <span class="token function">handleError</span><span class="token punctuation">(</span>ctx context<span class="token punctuation">.</span>Context<span class="token punctuation">,</span> handler module<span class="token punctuation">.</span>Handler<span class="token punctuation">,</span> req Request<span class="token punctuation">,</span> errMsg <span class="token builtin">string</span><span class="token punctuation">)</span> any <span class="token punctuation">{</span>
 </span><span class="code-line line-number" line="2">    <span class="token keyword">if</span> c<span class="token punctuation">.</span>settings<span class="token punctuation">.</span>EnableErrorPort <span class="token punctuation">{</span>
