@@ -18,18 +18,20 @@ package controller
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
+	"github.com/go-logr/logr"
 	clientpool "github.com/tiny-systems/module/internal/client"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/registry"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sync/atomic"
 
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 )
@@ -57,7 +59,7 @@ type TinyModuleReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	l := log.FromContext(ctx)
+	l := ctrllog.FromContext(ctx)
 
 	instance := &operatorv1alpha1.TinyModule{}
 	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
@@ -85,7 +87,7 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	instance.Status.Version = r.Module.Version
 	instance.Status.Name = r.Module.Name
 	instance.Status.SDKVersion = r.Module.SDKVersion
-	instance.Status.Components = r.buildComponentStatus()
+	instance.Status.Components = r.buildComponentStatus(l)
 
 	if err := r.Status().Update(ctx, instance); err != nil {
 		l.Error(err, "failed to update module status")
@@ -95,7 +97,16 @@ func (r *TinyModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
-func (r *TinyModuleReconciler) buildComponentStatus() []operatorv1alpha1.TinyModuleComponentStatus {
+// buildComponentStatus walks the component registry and produces a
+// TinyModuleComponentStatus entry per component, including each
+// component's ports with their JSON schemas. Publishing port schemas
+// at the module level lets tooling (MCP servers, the hosted platform,
+// any gRPC client) discover a component's shape without first placing
+// a TinyNode.
+//
+// System ports (_reconcile, _client, _identity) are filtered out —
+// they're internal plumbing that external callers don't wire.
+func (r *TinyModuleReconciler) buildComponentStatus(l logr.Logger) []operatorv1alpha1.TinyModuleComponentStatus {
 	components := registry.Get()
 	status := make([]operatorv1alpha1.TinyModuleComponentStatus, len(components))
 	for i, cmp := range components {
@@ -105,9 +116,47 @@ func (r *TinyModuleReconciler) buildComponentStatus() []operatorv1alpha1.TinyMod
 			Description: info.Description,
 			Info:        info.Info,
 			Tags:        info.Tags,
+			Ports:       buildComponentPorts(l, cmp, info.Name),
 		}
 	}
 	return status
+}
+
+// buildComponentPorts converts a component's Ports() into the
+// TinyModuleComponentPort slice published in TinyModule status. Schema
+// generation errors are logged and the port is still emitted with an
+// empty Schema so tooling can at least know the port exists.
+func buildComponentPorts(l logr.Logger, cmp module.Component, componentName string) []operatorv1alpha1.TinyModuleComponentPort {
+	ports := cmp.Ports()
+	out := make([]operatorv1alpha1.TinyModuleComponentPort, 0, len(ports))
+	for _, p := range ports {
+		if p.Name == operatorv1alpha1.ReconcilePort ||
+			p.Name == operatorv1alpha1.ClientPort ||
+			p.Name == operatorv1alpha1.IdentityPort {
+			continue
+		}
+
+		entry := operatorv1alpha1.TinyModuleComponentPort{
+			Name:     p.Name,
+			Label:    p.Label,
+			Source:   p.Source,
+			Position: operatorv1alpha1.Position(p.Position),
+		}
+		if p.Configuration != nil {
+			schemaConf, err := schema.CreateSchema(p.Configuration)
+			if err != nil {
+				l.Error(err, "buildComponentPorts: schema generation failed",
+					"component", componentName, "port", p.Name)
+			} else if schemaBytes, mErr := schemaConf.MarshalJSON(); mErr != nil {
+				l.Error(mErr, "buildComponentPorts: schema marshal failed",
+					"component", componentName, "port", p.Name)
+			} else {
+				entry.Schema = schemaBytes
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // SetupWithManager sets up the controller with the Manager.

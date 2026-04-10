@@ -48,6 +48,32 @@ type TinyModuleComponentStatus struct {
 	Description string   `json:"description"`
 	Info        string   `json:"info"`
 	Tags        []string `json:"tags,omitempty"`
+
+	// Ports carries component-level port metadata (name, direction,
+	// JSON schema) so tooling can discover what a component looks like
+	// without placing a TinyNode first.
+	// +kubebuilder:validation:Optional
+	Ports []TinyModuleComponentPort `json:"ports,omitempty"`
+}
+
+// TinyModuleComponentPort describes a single port on a component as
+// published by the module operator in TinyModule status. This is the
+// static, component-level view (independent of any placed TinyNode)
+// that lets MCP/LLM tooling inspect port schemas before building flows.
+type TinyModuleComponentPort struct {
+	// Name is the port identifier (e.g. "request", "response", "out").
+	Name string `json:"name"`
+	// Label is the human-readable port name.
+	// +kubebuilder:validation:Optional
+	Label string `json:"label,omitempty"`
+	// Source is true for output ports, false for input ports.
+	Source bool `json:"source"`
+	// Position is the visual port placement hint (Top/Right/Bottom/Left).
+	// +kubebuilder:validation:Optional
+	Position Position `json:"position,omitempty"`
+	// Schema is the JSON schema describing the port's data structure.
+	// +kubebuilder:validation:Optional
+	Schema []byte `json:"schema,omitempty"`
 }
 
 //+kubebuilder:object:root=true

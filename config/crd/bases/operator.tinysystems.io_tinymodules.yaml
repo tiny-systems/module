@@ -61,6 +61,37 @@ spec:
                       type: string
                     name:
                       type: string
+                    ports:
+                      description: |-
+                        Ports carries component-level port metadata (name, direction,
+                        JSON schema) so tooling can discover what a component looks like
+                        without placing a TinyNode first.
+                      items:
+                        description: |-
+                          TinyModuleComponentPort describes a single port on a component as
+                          published by the module operator in TinyModule status.
+                        properties:
+                          label:
+                            description: Label is the human-readable port name.
+                            type: string
+                          name:
+                            description: Name is the port identifier (e.g. "request", "response", "out").
+                            type: string
+                          position:
+                            description: Position is the visual port placement hint (Top/Right/Bottom/Left).
+                            type: integer
+                          schema:
+                            description: Schema is the JSON schema describing the port's data structure.
+                            format: byte
+                            type: string
+                          source:
+                            description: Source is true for output ports, false for input ports.
+                            type: boolean
+                        required:
+                        - name
+                        - source
+                        type: object
+                      type: array
                     tags:
                       items:
                         type: string
