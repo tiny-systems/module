@@ -62,6 +62,13 @@ spec:
                       type: string
                     name:
                       type: string
+                    examples:
+                      description: |-
+                        Examples are short usage snippets (free-form description + code
+                        block) that show how to wire this component in common flows.
+                      items:
+                        type: string
+                      type: array
                     ports:
                       description: |-
                         Ports carries component-level port metadata (name, direction,

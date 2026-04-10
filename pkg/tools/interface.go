@@ -1,0 +1,397 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+)
+
+// ToolResult represents the result of a tool execution
+type ToolResult struct {
+	Success bool
+	Output  interface{}
+	Error   string
+}
+
+// FlowSaver is an interface for saving flow changes
+type FlowSaver interface {
+	// SaveFlowElements saves the flow elements and returns an error if it fails
+	SaveFlowElements(ctx context.Context, projectName, flowName string, elements []map[string]interface{}) error
+}
+
+// ProjectElements contains all project data for LLM context
+type ProjectElements struct {
+	Flows    []FlowInfo               `json:"flows"`
+	Elements []map[string]interface{} `json:"elements"`
+}
+
+// FlowInfo contains basic flow information
+type FlowInfo struct {
+	ResourceName string `json:"resource_name"`
+	Title        string `json:"title"`
+}
+
+// ProjectReader is an interface for reading entire project state
+type ProjectReader interface {
+	// ReadProjectElements reads all elements from the project with flow ownership info
+	ReadProjectElements(ctx context.Context, projectName string) (*ProjectElements, error)
+}
+
+// FlowModifier is an interface for applying flow changes (used by delete_node, delete_edge)
+type FlowModifier interface {
+	// ApplyFlowChanges applies operations to the flow and returns results per operation
+	ApplyFlowChanges(ctx context.Context, projectName, flowName string, operations []FlowOperation) ([]OperationResult, error)
+}
+
+// FlowOperation represents a single operation to apply to the flow
+type FlowOperation struct {
+	Op      string                 `json:"op"`      // "add", "update", "delete"
+	ID      string                 `json:"id"`      // Element ID (for update/delete)
+	Element map[string]interface{} `json:"element"` // Element data (for add/update)
+}
+
+// OperationResult represents the result of a single operation
+type OperationResult struct {
+	Op      string `json:"op"`
+	ID      string `json:"id"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+	// For add operations, the generated ID
+	GeneratedID string `json:"generated_id,omitempty"`
+	// Hint provides actionable guidance for fixing the error
+	Hint string `json:"hint,omitempty"`
+}
+
+// EdgeValidation represents edge validation results
+type EdgeValidation struct {
+	EdgeID string `json:"edge_id"`
+	Valid  bool   `json:"valid"`
+	Error  string `json:"error,omitempty"`
+}
+
+// SolutionSearcher is an interface for searching and retrieving solutions.
+// Platform implementations hit a DB; public MCP implementations hit the
+// public REST catalog on tinysystems.io. Keep the interface backend-agnostic.
+type SolutionSearcher interface {
+	// SearchSolutions searches for solutions by keyword/tags
+	SearchSolutions(ctx context.Context, keyword string, tags []string, limit int) ([]SolutionSummary, error)
+	// GetSolution gets full solution details including flows and nodes
+	GetSolution(ctx context.Context, uuid string) (*SolutionDetails, error)
+}
+
+// PortInspectResult contains the result of inspecting a port
+type PortInspectResult struct {
+	NodeID       string                 `json:"node_id"`
+	PortName     string                 `json:"port_name"`
+	PortType     string                 `json:"port_type"` // "source" or "target"
+	Schema       map[string]interface{} `json:"schema"`
+	ExampleData  interface{}            `json:"example_data"`
+	HasRealData  bool                   `json:"has_real_data,omitempty"` // true if example_data is from trace
+	Configurable bool                   `json:"configurable,omitempty"`  // true if schema can be customized
+	Description  string                 `json:"description,omitempty"`
+}
+
+// PortInspector is an interface for inspecting port schemas and data
+// This uses recursive simulation through the flow graph, not static schema lookup
+type PortInspector interface {
+	// InspectPort returns the actual schema and simulated/real data for a port
+	// If traceID is provided, uses real trace data instead of mocks
+	InspectPort(ctx context.Context, projectName, nodeID, portName, traceID string) (*PortInspectResult, error)
+}
+
+// PortDetail contains port metadata including schema for system prompt injection
+type PortDetail struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Schema      json.RawMessage `json:"schema,omitempty"`
+	Example     json.RawMessage `json:"example,omitempty"`
+}
+
+// ComponentInfo contains component metadata for validation and discovery
+type ComponentInfo struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	InputPorts  []string `json:"input_ports"`
+	OutputPorts []string `json:"output_ports"`
+	// Detailed port info with schemas — populated by GetModule, optional for ListModules
+	InputPortDetails  []PortDetail `json:"input_port_details,omitempty"`
+	OutputPortDetails []PortDetail `json:"output_port_details,omitempty"`
+	// Examples are usage snippets published by the module operator.
+	// Callers (get_component_info, list_modules) surface them so LLMs
+	// can copy known-good patterns instead of deriving from scratch.
+	Examples []string `json:"examples,omitempty"`
+}
+
+// ModuleInfo contains module metadata with its components
+type ModuleInfo struct {
+	Name        string          `json:"name"`
+	Version     string          `json:"version,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Components  []ComponentInfo `json:"components"`
+}
+
+// ModuleCatalog provides discovery of modules and their components.
+// Platform implementations read from the workspace DB; public MCP
+// implementations read from TinyModule CRDs in the current namespace.
+// Scope (workspace vs namespace) is implicit in the implementation.
+type ModuleCatalog interface {
+	// ListModules returns all available modules with basic component info
+	// (names and port names, no schemas). Used by list_modules tool.
+	ListModules(ctx context.Context) ([]ModuleInfo, error)
+	// GetModule returns a specific module with full component details
+	// including port schemas and examples. Used by get_component_info tool.
+	// Module name may be a workspace-qualified name (e.g. "tinysystems/http-module-v0")
+	// or a bare name — implementations should match both.
+	// Returns nil if module not found (no error).
+	GetModule(ctx context.Context, moduleName string) (*ModuleInfo, error)
+}
+
+// NodeAdder is an interface for adding nodes with semantic operations
+type NodeAdder interface {
+	// AddNode adds a node and returns its generated ID and ports
+	// tracker is used to check positions of nodes added in current session (not yet in cluster)
+	AddNode(ctx context.Context, projectName, flowName, component, module string, tracker PositionTracker) (*AddNodeResult, error)
+}
+
+// AddNodeResult contains the result of adding a node
+type AddNodeResult struct {
+	NodeID string   `json:"node_id"`
+	Ports  []string `json:"ports"`
+	PosX   int      `json:"pos_x"` // X position for tracking
+	PosY   int      `json:"pos_y"` // Y position for tracking
+}
+
+// EdgeAdder is an interface for adding edges with semantic operations
+type EdgeAdder interface {
+	// AddEdge connects two ports and returns edge info
+	AddEdge(ctx context.Context, projectName, flowName string, fromNode, fromPort, toNode, toPort string) (*AddEdgeResult, error)
+}
+
+// AddEdgeResult contains the result of adding an edge
+type AddEdgeResult struct {
+	EdgeID             string `json:"edge_id"`
+	NeedsConfiguration bool   `json:"needs_configuration"`
+}
+
+// EdgeConfigurer is an interface for configuring edges
+type EdgeConfigurer interface {
+	// ConfigureEdge sets edge configuration and validates it
+	// If traceID is provided, validates against real trace data
+	// schema is optional - if provided, it extends the schema for configurable fields on the target port
+	ConfigureEdge(ctx context.Context, projectName, flowName, edgeID string, config map[string]interface{}, schema map[string]interface{}, traceID string) (*ConfigureEdgeResult, error)
+}
+
+// ConfigureEdgeResult contains the result of configuring an edge
+type ConfigureEdgeResult struct {
+	Valid bool   `json:"valid"`
+	Error string `json:"error,omitempty"`
+	Hint  string `json:"hint,omitempty"`
+}
+
+// NodeSettingsConfigurer is an interface for configuring node settings
+type NodeSettingsConfigurer interface {
+	// ConfigureNodeSettings sets node settings (the _settings port configuration)
+	// schema is optional - if provided, it extends the schema for configurable fields (e.g., context)
+	ConfigureNodeSettings(ctx context.Context, projectName, flowName, nodeID string, settings map[string]interface{}, schema map[string]interface{}) (*ConfigureNodeSettingsResult, error)
+}
+
+// ConfigureNodeSettingsResult contains the result of configuring node settings
+type ConfigureNodeSettingsResult struct {
+	Valid bool     `json:"valid"`
+	Error string   `json:"error,omitempty"`
+	Hint  string   `json:"hint,omitempty"`
+	Ports []string `json:"ports,omitempty"` // Updated ports after settings change (e.g., router ports change based on routes)
+}
+
+// SolutionSummary is a brief overview of a solution for search results
+type SolutionSummary struct {
+	UUID        string   `json:"uuid"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
+}
+
+// SolutionDetails contains full solution structure
+type SolutionDetails struct {
+	UUID        string           `json:"uuid"`
+	Title       string           `json:"title"`
+	Description string           `json:"description"`
+	Tags        []string         `json:"tags"`
+	Flows       []SolutionFlow   `json:"flows"`
+	Variables   []map[string]any `json:"variables,omitempty"`
+}
+
+// SolutionFlow represents a flow within a solution
+type SolutionFlow struct {
+	Title string         `json:"title"`
+	Nodes []SolutionNode `json:"nodes"`
+	Edges []SolutionEdge `json:"edges"`
+}
+
+// SolutionNode represents a node in a solution flow
+type SolutionNode struct {
+	ID        string         `json:"id"`
+	Component string         `json:"component"`
+	Module    string         `json:"module"`
+	Settings  map[string]any `json:"settings,omitempty"`
+	Position  map[string]any `json:"position,omitempty"`
+}
+
+// SolutionEdge represents an edge in a solution flow
+type SolutionEdge struct {
+	Source        string         `json:"source"`
+	SourceHandle  string         `json:"source_handle"`
+	Target        string         `json:"target"`
+	TargetHandle  string         `json:"target_handle"`
+	Configuration map[string]any `json:"configuration,omitempty"`
+}
+
+// TraceSummary contains summary info for a single trace
+type TraceSummary struct {
+	ID       string `json:"id"`
+	Spans    int    `json:"spans"`
+	Errors   int    `json:"errors"`
+	Data     int    `json:"data"`
+	Duration int64  `json:"duration_ns"`
+	Start    int64  `json:"start_unix_micro"`
+	End      int64  `json:"end_unix_micro"`
+}
+
+// TraceSpanInfo contains a single span's details
+type TraceSpanInfo struct {
+	SpanID       string           `json:"span_id"`
+	ParentSpanID string           `json:"parent_span_id,omitempty"`
+	Name         string           `json:"name"`
+	From         string           `json:"from,omitempty"`
+	To           string           `json:"to,omitempty"`
+	Port         string           `json:"port,omitempty"`
+	DurationMs   float64          `json:"duration_ms"`
+	Status       string           `json:"status,omitempty"`
+	Events       []TraceEventInfo `json:"events,omitempty"`
+}
+
+// TraceEventInfo contains a single span event
+type TraceEventInfo struct {
+	Name string            `json:"name"`
+	Data map[string]string `json:"data,omitempty"`
+}
+
+// SignalSender sends a signal (TinySignal CRD) to a node's input port to trigger execution
+type SignalSender interface {
+	SendSignal(ctx context.Context, projectName, nodeID, portName string, data []byte, traceID string) error
+}
+
+// FlowCreator creates new flows within a project
+type FlowCreator interface {
+	CreateFlow(ctx context.Context, projectName, flowName string) (string, error)
+}
+
+// FlowDeleter deletes flows from a project
+type FlowDeleter interface {
+	DeleteFlow(ctx context.Context, projectName, flowName string) error
+}
+
+// ScenarioItem contains basic scenario info returned by list
+type ScenarioItem struct {
+	ResourceName string `json:"resource_name"`
+	Name         string `json:"name"`
+	PortCount    int    `json:"port_count"`
+}
+
+// ScenarioManager manages scenarios (sample data snapshots for edge validation).
+// Backed by TinyScenario CRDs — works identically in hosted and local modes.
+type ScenarioManager interface {
+	// CreateScenarioFromTrace creates a scenario from a trace's runtime data
+	CreateScenarioFromTrace(ctx context.Context, projectName, name, traceID string) (*ScenarioItem, error)
+	// CreateEmptyScenario creates an empty scenario for manual population via UpdateScenarioPort
+	CreateEmptyScenario(ctx context.Context, projectName, name string) (*ScenarioItem, error)
+	// DeleteScenario deletes a scenario by resource name
+	DeleteScenario(ctx context.Context, projectName, resourceName string) error
+	// ListScenarios lists all scenarios for a project
+	ListScenarios(ctx context.Context, projectName string) ([]ScenarioItem, error)
+	// UpdateScenarioPort sets or replaces the sample data for a specific port in a scenario
+	UpdateScenarioPort(ctx context.Context, projectName, resourceName, port string, data []byte) error
+}
+
+// TraceReader provides access to execution traces for observability.
+// Both hosted and local implementations talk to the same otel-server
+// (hosted: in-cluster direct; local: via kubectl port-forward).
+type TraceReader interface {
+	// ReadTraces returns recent traces for a project/flow within the given time window
+	ReadTraces(ctx context.Context, projectName, flowName string, lookback time.Duration, offset, limit int) ([]TraceSummary, error)
+	// ReadTraceDetail returns full span details for a specific trace
+	ReadTraceDetail(ctx context.Context, projectName, traceID string) ([]TraceSpanInfo, error)
+}
+
+// NodePosition tracks position of a node added during session
+type NodePosition struct {
+	NodeID   string
+	FlowName string
+	X        int
+	Y        int
+}
+
+// PositionTracker tracks node positions during a session to avoid overlap
+// when Kubernetes hasn't reconciled yet
+type PositionTracker interface {
+	// RecordPosition records a node's position
+	RecordPosition(flowName, nodeID string, x, y int)
+	// GetMaxX returns the maximum X position for nodes in a flow
+	GetMaxX(flowName string) int
+	// GetNextY returns the next available Y position for a given X column
+	// This spreads nodes vertically to avoid stacking at same Y
+	GetNextY(flowName string, targetX int, columnWidth int) int
+}
+
+// ExecutionContext contains contextual information for tool execution.
+// Fields here are the minimum needed for flow-building tools that work
+// identically in hosted and local modes. Platform adds its own
+// extended context for hosted-only concerns (workspaces, deployments, jobs, etc.).
+type ExecutionContext struct {
+	// Current project/flow (resource names, not DB IDs)
+	ProjectName string
+	FlowName    string
+	FlowTitle   string // Human-readable flow title, optional
+
+	// Flow state
+	ProjectReader ProjectReader
+	FlowSaver     FlowSaver
+	FlowModifier  FlowModifier
+
+	// Discovery
+	ModuleCatalog ModuleCatalog
+	PortInspector PortInspector
+
+	// Flow mutation
+	NodeAdder              NodeAdder
+	EdgeAdder              EdgeAdder
+	EdgeConfigurer         EdgeConfigurer
+	NodeSettingsConfigurer NodeSettingsConfigurer
+	FlowCreator            FlowCreator
+	FlowDeleter            FlowDeleter
+
+	// Execution and observability
+	SignalSender SignalSender
+	TraceReader  TraceReader
+
+	// Scenarios (TinyScenario CRD)
+	ScenarioManager ScenarioManager
+
+	// Solutions catalog (pluggable: DB or public REST)
+	SolutionSearcher SolutionSearcher
+
+	// Session-scoped utility
+	PositionTracker PositionTracker
+}
+
+// Tool is the interface that all LLM tools must implement
+type Tool interface {
+	// Name returns the unique identifier for this tool
+	Name() string
+	// Description returns a human-readable description of what this tool does
+	Description() string
+	// Schema returns the JSON Schema for the tool's input parameters
+	Schema() map[string]interface{}
+	// Execute runs the tool with the given input and returns the result
+	Execute(ctx context.Context, execCtx ExecutionContext, input map[string]interface{}) ToolResult
+}

@@ -57,6 +57,13 @@ spec:
                   properties:
                     description:
                       type: string
+                    examples:
+                      description: |-
+                        Examples are short usage snippets (free-form description + code
+                        block) that show how to wire this component in common flows.
+                      items:
+                        type: string
+                      type: array
                     info:
                       type: string
                     name:
