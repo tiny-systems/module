@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-// GetInstructionsTool returns the TinySystems platform guide so external
+// GetInstructionsTool returns the Tiny Systems platform guide so external
 // AI clients (MCP) can learn how to use the tools without manual explanation.
 type GetInstructionsTool struct {
 	instructions string
@@ -19,7 +19,7 @@ func (t *GetInstructionsTool) Name() string {
 }
 
 func (t *GetInstructionsTool) Description() string {
-	return `Get the TinySystems platform guide — how to build flows, use tools, expression syntax, signals, schema extension, and key rules. Call this FIRST before using any other tool if you are unfamiliar with TinySystems.`
+	return `Get the Tiny Systems platform guide — how to build flows, use tools, expression syntax, signals, schema extension, and key rules. Call this FIRST before using any other tool if you are unfamiliar with Tiny Systems.`
 }
 
 func (t *GetInstructionsTool) Schema() map[string]interface{} {

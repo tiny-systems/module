@@ -1,7 +1,7 @@
 package tools
 
 // CorePrompt is the backend-agnostic portion of the LLM system prompt for
-// building TinySystems flows. It contains flow-based programming rules,
+// building Tiny Systems flows. It contains flow-based programming rules,
 // expression syntax, schema rules, and common patterns that apply
 // regardless of whether the tools are hosted on the platform or run locally
 // via the public MCP server.
@@ -9,7 +9,9 @@ package tools
 // Each concrete MCP/chat integration should prepend its own appendix
 // describing client-specific concerns (workspaces, kubectl context, auth,
 // module installation flow, etc.).
-const CorePrompt = `You are an AI assistant for TinySystems, a visual flow-based programming platform that runs on Kubernetes.
+const CorePrompt = `You are an AI assistant for Tiny Systems, a visual flow-based programming platform that runs on Kubernetes.
+
+Always refer to the platform as "Tiny Systems" (two words) in prose. Never write "TinySystems". The one-word form only appears in machine-readable identifiers like module names, image repos, or the MCP server slug.
 
 ## Core Concepts
 

@@ -142,6 +142,112 @@ type ModuleCatalog interface {
 	GetModule(ctx context.Context, moduleName string) (*ModuleInfo, error)
 }
 
+// PublicModuleCatalog provides discovery of modules in the public Tiny
+// Systems catalog — the catalog counterpart to ModuleCatalog. Where
+// ModuleCatalog answers "what is installed in this cluster/workspace",
+// PublicModuleCatalog answers "what is available to install". LLMs
+// reach for it when list_modules returns empty or when a solution
+// being cloned references a module that is not yet installed.
+//
+// Public-mode mcp-server implements this against the platform REST API
+// at /v1/modules/search and /v1/modules/{name}. Hosted-platform
+// implementations can back it with the same gRPC ModuleService the UI
+// uses.
+type PublicModuleCatalog interface {
+	// SearchModules searches the public catalog by keyword.
+	// Returns summaries only — call GetPublicModule for full details.
+	SearchModules(ctx context.Context, keyword string, limit int) ([]PublicModuleSummary, error)
+	// GetPublicModule returns the full catalog entry for a module,
+	// including components with port schemas, RBAC permissions, and
+	// helm install instructions. Returns nil if not found (no error).
+	GetPublicModule(ctx context.Context, moduleName string) (*PublicModuleDetails, error)
+}
+
+// PublicModuleSummary is a brief overview of a module in the public
+// catalog, returned by search_modules.
+type PublicModuleSummary struct {
+	Name                     string `json:"name"`
+	FullName                 string `json:"full_name,omitempty"`
+	Description              string `json:"description"`
+	Verified                 bool   `json:"verified"`
+	LatestVersion            string `json:"latest_version,omitempty"`
+	SDKVersion               string `json:"sdk_version,omitempty"`
+	RequiresKubernetesAccess bool   `json:"requires_kubernetes_access,omitempty"`
+}
+
+// PublicModuleDetails is the full catalog payload returned by
+// get_module_info: summary + components with port schemas + RBAC
+// permissions + helm install configuration.
+type PublicModuleDetails struct {
+	Name                     string                 `json:"name"`
+	FullName                 string                 `json:"full_name,omitempty"`
+	Description              string                 `json:"description"`
+	Verified                 bool                   `json:"verified"`
+	LatestVersion            string                 `json:"latest_version,omitempty"`
+	SDKVersion               string                 `json:"sdk_version,omitempty"`
+	ReleaseNotes             string                 `json:"release_notes,omitempty"`
+	Repo                     string                 `json:"repo,omitempty"`
+	Tag                      string                 `json:"tag,omitempty"`
+	RequiresKubernetesAccess bool                   `json:"requires_kubernetes_access,omitempty"`
+	Components               []PublicModuleComponent `json:"components,omitempty"`
+	Permissions              []PublicModulePermission `json:"permissions,omitempty"`
+	HelmInstall              *PublicModuleHelmInstall `json:"helm_install,omitempty"`
+}
+
+// PublicModuleComponent describes one component inside a public module:
+// name + author-written description/info + tags + its typed ports.
+type PublicModuleComponent struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Info        string              `json:"info,omitempty"`
+	Tags        []string            `json:"tags,omitempty"`
+	Ports       []PublicModulePort  `json:"ports,omitempty"`
+}
+
+// PublicModulePort is the typed port metadata published alongside a
+// component in the public catalog.
+type PublicModulePort struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Type        string                 `json:"type"` // "source" or "target"
+	Schema      map[string]interface{} `json:"schema,omitempty"`
+	DefaultData map[string]interface{} `json:"default_data,omitempty"`
+}
+
+// PublicModulePermission is an RBAC rule the module needs to install.
+type PublicModulePermission struct {
+	APIGroups []string `json:"api_groups,omitempty"`
+	Resources []string `json:"resources,omitempty"`
+	Verbs     []string `json:"verbs,omitempty"`
+}
+
+// PublicModuleHelmInstall carries the helm install configuration used
+// by local installers — command template, user-fillable fields,
+// prerequisites, warnings, and the storage/ingress facet flags.
+type PublicModuleHelmInstall struct {
+	Command         string                   `json:"command,omitempty"`
+	ChartRepo       string                   `json:"chart_repo,omitempty"`
+	ChartName       string                   `json:"chart_name,omitempty"`
+	Prerequisites   []string                 `json:"prerequisites,omitempty"`
+	Warnings        []string                 `json:"warnings,omitempty"`
+	RequiresIngress bool                     `json:"requires_ingress,omitempty"`
+	RequiresStorage bool                     `json:"requires_storage,omitempty"`
+	Fields          []PublicModuleHelmField  `json:"fields,omitempty"`
+}
+
+// PublicModuleHelmField is one user-fillable field in the helm install
+// template.
+type PublicModuleHelmField struct {
+	Name         string   `json:"name"`
+	Label        string   `json:"label,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Placeholder  string   `json:"placeholder,omitempty"`
+	Required     bool     `json:"required,omitempty"`
+	Type         string   `json:"type,omitempty"`
+	Options      []string `json:"options,omitempty"`
+}
+
 // NodeAdder is an interface for adding nodes with semantic operations
 type NodeAdder interface {
 	// AddNode adds a node and returns its generated ID and ports
@@ -355,8 +461,9 @@ type ExecutionContext struct {
 	FlowModifier  FlowModifier
 
 	// Discovery
-	ModuleCatalog ModuleCatalog
-	PortInspector PortInspector
+	ModuleCatalog       ModuleCatalog       // installed modules (cluster-scoped)
+	PublicModuleCatalog PublicModuleCatalog // catalog of modules available to install
+	PortInspector       PortInspector
 
 	// Flow mutation
 	NodeAdder              NodeAdder
