@@ -54,11 +54,6 @@ type TinyModuleComponentStatus struct {
 	// without placing a TinyNode first.
 	// +kubebuilder:validation:Optional
 	Ports []TinyModuleComponentPort `json:"ports,omitempty"`
-
-	// Examples are short usage snippets (free-form description + code
-	// block) that show how to wire this component in common flows.
-	// +kubebuilder:validation:Optional
-	Examples []string `json:"examples,omitempty"`
 }
 
 // TinyModuleComponentPort describes a single port on a component as

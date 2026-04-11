@@ -117,7 +117,6 @@ func (r *TinyModuleReconciler) buildComponentStatus(l logr.Logger) []operatorv1a
 			Info:        info.Info,
 			Tags:        info.Tags,
 			Ports:       buildComponentPorts(l, cmp, info.Name),
-			Examples:    info.Examples,
 		}
 	}
 	return status

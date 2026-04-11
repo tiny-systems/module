@@ -130,14 +130,6 @@ func (t *GetComponentInfoTool) Execute(ctx context.Context, execCtx ExecutionCon
 			}
 			compInfo["has_output"] = len(outputPorts) > 0
 
-			// Surface usage examples published by the module operator.
-			// When the module was built against an SDK that publishes
-			// examples and a component author supplied them, the LLM
-			// caller sees them here and can copy the closest pattern.
-			if len(c.Examples) > 0 {
-				compInfo["examples"] = c.Examples
-			}
-
 			return ToolResult{
 				Success: true,
 				Output:  compInfo,

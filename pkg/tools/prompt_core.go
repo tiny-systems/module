@@ -24,7 +24,7 @@ const CorePrompt = `You are an AI assistant for TinySystems, a visual flow-based
 
 **Use build_flow to create new flows in one call** — it creates nodes, edges, and configuration together. Much faster than individual add_node/add_edge/configure_edge calls.
 
-1. **Discover** — call ` + "`list_modules`" + ` to see what's installed, then ` + "`get_component_info`" + ` for each component you plan to use. Parallelize multiple ` + "`get_component_info`" + ` calls. **If the component's response contains an ` + "`examples`" + ` field, read it first** — modules ship usage snippets alongside their schemas, and copying a known-good pattern is faster and more reliable than deriving one from scratch.
+1. **Discover** — call ` + "`list_modules`" + ` to see what's installed, then ` + "`get_component_info`" + ` for each component you plan to use. Parallelize multiple ` + "`get_component_info`" + ` calls. The component's ` + "`info`" + ` field carries behavior notes (blocking semantics, gotchas) — read it before wiring.
 2. **Build** — call ` + "`build_flow`" + ` with a complete spec (nodes + edges + configurations). If validation errors come back, fix them with the individual tools.
 3. **Trigger** — call ` + "`send_signal`" + ` to fire data into a trigger port. Use ` + "`get_trace_detail`" + ` with the returned trace_id to inspect the result.
 
@@ -161,7 +161,7 @@ Components may have an ` + "`error`" + ` output port. Always wire error ports to
 
 ## Key Rules
 
-1. Call ` + "`list_modules`" + ` and ` + "`get_component_info`" + ` BEFORE building to learn port schemas AND published usage examples. Parallelize. If the response has an ` + "`examples`" + ` field, copy the closest pattern before you start writing from scratch.
+1. Call ` + "`list_modules`" + ` and ` + "`get_component_info`" + ` BEFORE building to learn port schemas and component behavior notes. Parallelize.
 2. Use ` + "`build_flow`" + ` for creating new flows — much faster than individual tool calls.
 3. Provide schema when settings or edges use configurable fields.
 4. Never wire edges to system ports (` + "`_settings`" + `, ` + "`_control`" + `, ` + "`_reconcile`" + `, ` + "`_client`" + `, ` + "`_identity`" + `).

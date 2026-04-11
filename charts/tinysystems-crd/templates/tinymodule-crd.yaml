@@ -62,13 +62,6 @@ spec:
                       type: string
                     name:
                       type: string
-                    examples:
-                      description: |-
-                        Examples are short usage snippets (free-form description + code
-                        block) that show how to wire this component in common flows.
-                      items:
-                        type: string
-                      type: array
                     ports:
                       description: |-
                         Ports carries component-level port metadata (name, direction,
@@ -77,18 +70,29 @@ spec:
                       items:
                         description: |-
                           TinyModuleComponentPort describes a single port on a component as
-                          published by the module operator in TinyModule status.
+                          published by the module operator in TinyModule status. This is the
+                          static, component-level view (independent of any placed TinyNode)
+                          that lets MCP/LLM tooling inspect port schemas before building flows.
                         properties:
                           label:
+                            description: Label is the human-readable port name.
                             type: string
                           name:
+                            description: Name is the port identifier (e.g. "request",
+                              "response", "out").
                             type: string
                           position:
+                            description: Position is the visual port placement hint
+                              (Top/Right/Bottom/Left).
                             type: integer
                           schema:
+                            description: Schema is the JSON schema describing the port's
+                              data structure.
                             format: byte
                             type: string
                           source:
+                            description: Source is true for output ports, false for
+                              input ports.
                             type: boolean
                         required:
                         - name

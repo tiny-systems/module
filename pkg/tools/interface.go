@@ -116,10 +116,6 @@ type ComponentInfo struct {
 	// Detailed port info with schemas — populated by GetModule, optional for ListModules
 	InputPortDetails  []PortDetail `json:"input_port_details,omitempty"`
 	OutputPortDetails []PortDetail `json:"output_port_details,omitempty"`
-	// Examples are usage snippets published by the module operator.
-	// Callers (get_component_info, list_modules) surface them so LLMs
-	// can copy known-good patterns instead of deriving from scratch.
-	Examples []string `json:"examples,omitempty"`
 }
 
 // ModuleInfo contains module metadata with its components

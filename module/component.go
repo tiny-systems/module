@@ -9,10 +9,6 @@ type ComponentInfo struct {
 	Description string
 	Info        string
 	Tags        []string
-	// Examples are short usage snippets showing how to wire this
-	// component in common flows. Surfaced via MCP tooling so LLM
-	// callers can copy a known-good pattern instead of deriving one.
-	Examples []string
 }
 
 type Component interface {

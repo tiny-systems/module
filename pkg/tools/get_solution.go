@@ -16,17 +16,9 @@ func (t *GetSolutionTool) Name() string {
 }
 
 func (t *GetSolutionTool) Description() string {
-	return `Get full details of a solution including all flows, nodes, edges, and configurations.
+	return `Get full details of a published solution: every flow, every node with its component/module/settings, every edge with its full configuration, plus any solution-level variables.
 
-Returns:
-- flows: All flows in the solution with their nodes and edges
-- nodes: Node definitions with component, module, and settings
-- edges: Edge connections with full configurations
-
-Use this to:
-- Learn how a solution is structured
-- Copy patterns into the current project using apply_changes
-- Understand what configurations make edges work`
+Returns the complete SolutionDetails payload so the caller can recreate the solution end-to-end. Pair with search_solutions to discover UUIDs.`
 }
 
 func (t *GetSolutionTool) Schema() map[string]interface{} {
@@ -73,56 +65,14 @@ func (t *GetSolutionTool) Execute(ctx context.Context, execCtx ExecutionContext,
 		}
 	}
 
-	// Format flows with nodes and edges
-	flows := make([]map[string]interface{}, len(solution.Flows))
-	for i, flow := range solution.Flows {
-		nodes := make([]map[string]interface{}, len(flow.Nodes))
-		for j, node := range flow.Nodes {
-			nodeMap := map[string]interface{}{
-				"id":        node.ID,
-				"component": node.Component,
-				"module":    node.Module,
-			}
-			if node.Settings != nil {
-				nodeMap["settings"] = node.Settings
-			}
-			if node.Position != nil {
-				nodeMap["position"] = node.Position
-			}
-			nodes[j] = nodeMap
-		}
-
-		edges := make([]map[string]interface{}, len(flow.Edges))
-		for j, edge := range flow.Edges {
-			edgeMap := map[string]interface{}{
-				"source":        edge.Source,
-				"source_handle": edge.SourceHandle,
-				"target":        edge.Target,
-				"target_handle": edge.TargetHandle,
-			}
-			if edge.Configuration != nil {
-				edgeMap["configuration"] = edge.Configuration
-			}
-			edges[j] = edgeMap
-		}
-
-		flows[i] = map[string]interface{}{
-			"title": flow.Title,
-			"nodes": nodes,
-			"edges": edges,
-		}
-	}
-
+	// Return the full SolutionDetails struct directly. JSON tags on the
+	// struct handle serialization, so every field — uuid, title,
+	// description, tags, flows (with nested nodes/edges and their full
+	// configurations), and variables — reaches the caller without any
+	// manual reshaping that could drop fields.
 	return ToolResult{
 		Success: true,
-		Output: map[string]interface{}{
-			"uuid":        solution.UUID,
-			"title":       solution.Title,
-			"description": solution.Description,
-			"tags":        solution.Tags,
-			"flows":       flows,
-			"hint":        "Use apply_changes to recreate these patterns in the current project",
-		},
+		Output:  solution,
 	}
 }
 
