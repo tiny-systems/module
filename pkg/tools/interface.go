@@ -248,6 +248,32 @@ type PublicModuleHelmField struct {
 	Options      []string `json:"options,omitempty"`
 }
 
+// DashboardReader reads project dashboard widgets and their current
+// runtime values from TinyWidgetPage CRDs + TinyNode status ports.
+type DashboardReader interface {
+	ReadDashboard(ctx context.Context, projectName string) (*DashboardData, error)
+}
+
+// DashboardData is the full dashboard payload for a project.
+type DashboardData struct {
+	ProjectName string            `json:"project_name"`
+	Widgets     []DashboardWidget `json:"widgets"`
+}
+
+// DashboardWidget represents one widget on the dashboard with its
+// current runtime data resolved from the corresponding TinyNode
+// status port.
+type DashboardWidget struct {
+	Name     string                 `json:"name"`
+	NodeName string                 `json:"node_name"`
+	PortName string                 `json:"port_name"`
+	Data     map[string]interface{} `json:"data,omitempty"`
+	GridX    int                    `json:"grid_x"`
+	GridY    int                    `json:"grid_y"`
+	GridW    int                    `json:"grid_w"`
+	GridH    int                    `json:"grid_h"`
+}
+
 // NodeAdder is an interface for adding nodes with semantic operations
 type NodeAdder interface {
 	// AddNode adds a node and returns its generated ID and ports
@@ -482,6 +508,9 @@ type ExecutionContext struct {
 
 	// Solutions catalog (pluggable: DB or public REST)
 	SolutionSearcher SolutionSearcher
+
+	// Dashboard
+	DashboardReader DashboardReader
 
 	// Session-scoped utility
 	PositionTracker PositionTracker
