@@ -157,6 +157,24 @@ edge: encoded: "{{$.encoded}}"   ← typed as string → no scenario needed
 
 **From traces:** after a successful flow execution (` + "`send_signal`" + ` → no errors in ` + "`get_trace_detail`" + `), save real data: ` + "`create_scenario(name, trace_id)`" + `. Real data beats hand-crafted samples.
 
+## Flow Lifecycle — Starting, Stopping, Monitoring
+
+After building a flow, trigger nodes sit idle until started. The user will ask you to start, stop, or check their flows.
+
+**Starting trigger nodes** — use ` + "`send_signal`" + ` to the ` + "`_control`" + ` port:
+
+- **Ticker**: ` + "`send_signal(node_id, port: \"_control\", data: {\"start\": true, \"context\": {...}})`" + ` — starts periodic emission. Context carries credentials/config.
+- **Cron**: ` + "`send_signal(node_id, port: \"_control\", data: {\"start\": true, \"context\": {...}, \"schedule\": \"*/5 * * * *\"})`" + ` — starts on the given cron schedule.
+- **Signal**: ` + "`send_signal(node_id, port: \"_control\", data: {\"send\": true, \"context\": {...}})`" + ` — fires once immediately.
+
+**Stopping**: send ` + "`{\"stop\": true}`" + ` to the same ` + "`_control`" + ` port. The node stops emitting and persists its stopped state.
+
+**Checking status**: call ` + "`get_node_port_schema`" + ` on the ` + "`_control`" + ` port — the schema changes to show ` + "`ControlRunning`" + ` (with a Stop button) or ` + "`ControlStopped`" + ` (with a Start button). The ` + "`status`" + ` field reads "Running" or "Not running".
+
+**Monitoring execution**: after starting, use ` + "`get_traces`" + ` to see recent executions and ` + "`get_trace_detail`" + ` to inspect individual runs. Trace spans show which nodes ran, how long each took, and any errors.
+
+**After build, always offer to start the flow.** Don't leave the user with idle nodes — ask if they want to start the trigger, and if so, send the control signal immediately.
+
 ## Error Handling
 
 Components may have an ` + "`error`" + ` output port. Always wire error ports to something — either another node that processes the error, or back to a response port for HTTP-style flows. Unconnected error ports silently drop errors.
