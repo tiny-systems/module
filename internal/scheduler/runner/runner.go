@@ -1012,6 +1012,9 @@ type retryState struct {
 }
 
 func (c *Runner) ensureRetryGauge() {
+	if c.meter == nil {
+		return
+	}
 	c.retryGaugeOnce.Do(func() {
 		gauge, err := c.meter.Int64ObservableGauge(string(metrics.MetricEdgeRetryCount),
 			metric.WithUnit("1"),
@@ -1047,8 +1050,9 @@ func (c *Runner) ensureRetryGauge() {
 }
 
 // incRetry increments the retry counter for an edge and records the latest error.
+// Safe to call when the runner has no meter / uninitialized retryEdges (test harness).
 func (c *Runner) incRetry(edgeID string, err error) {
-	if edgeID == "" {
+	if edgeID == "" || c.meter == nil {
 		return
 	}
 	c.ensureRetryGauge()
@@ -1067,6 +1071,9 @@ func (c *Runner) incRetry(edgeID string, err error) {
 
 // clearRetry drops the retry state for an edge (called on success or terminal failure).
 func (c *Runner) clearRetry(edgeID string) {
+	if c.meter == nil {
+		return
+	}
 	c.retryEdges.Remove(edgeID)
 }
 
