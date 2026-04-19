@@ -11,6 +11,10 @@ const (
 	// EdgeBusyStatKey is the stats metric key for edge activity
 	EdgeBusyStatKey = "tiny_edge_busy"
 
+	// EdgeRetryCountStatKey is the stats metric key for the live retry counter.
+	// The "error" label carries the most recent transient error string.
+	EdgeRetryCountStatKey = "tiny_edge_retry_count"
+
 	// EdgeAnimationTimeout is the duration after which an edge is no longer considered "busy"
 	// If the edge hasn't had activity within this duration, animation should stop
 	EdgeAnimationTimeout = 7 * time.Second

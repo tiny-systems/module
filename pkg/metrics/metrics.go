@@ -15,7 +15,8 @@ import (
 type Metric string
 
 const (
-	MetricEdgeBusy = "tiny_edge_busy"
+	MetricEdgeBusy        = "tiny_edge_busy"
+	MetricEdgeRetryCount  = "tiny_edge_retry_count"
 )
 
 // ConfigureOpenTelemetry configures OpenTelemetry.

@@ -80,6 +80,13 @@ type Runner struct {
 	gaugeOnce         sync.Once
 	gaugeRegistration metric.Registration
 
+	// retryEdges tracks live retry attempts per edge with the latest error string.
+	// Populated while backoff.Retry loops inside sendToEdgeWithRetry; cleared on
+	// success, permanent failure, or context cancellation.
+	retryEdges             cmap.ConcurrentMap[string, *retryState]
+	retryGaugeOnce         sync.Once
+	retryGaugeRegistration metric.Registration
+
 	// edgeCancels tracks cancel funcs for in-flight edge sends.
 	// When SetNode detects an edge was removed, it cancels the in-flight send,
 	// which propagates through gRPC to the target component.
@@ -115,6 +122,9 @@ func NewRunner(component m.Component) *Runner {
 
 		// single gauge callback tracks all active edges
 		activeEdges: cmap.New[int64](),
+
+		// retry counters exposed as an observable gauge with "error" attribute
+		retryEdges: cmap.New[*retryState](),
 
 		// cancel funcs for in-flight edge sends
 		edgeCancels: cmap.New[context.CancelFunc](),
@@ -817,6 +827,11 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	b.MaxInterval = 30 * time.Second
 	b.MaxElapsedTime = 0
 
+	// First transient error counts as the initial retry attempt so the UI sees
+	// a non-zero counter immediately, not only after the second failure.
+	c.incRetry(edge.ID, err)
+	defer c.clearRetry(edge.ID)
+
 	var result any
 	retryErr := backoff.Retry(func() error {
 		res, err := handler(ctx, msg)
@@ -824,6 +839,7 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 			if perrors.IsPermanent(err) {
 				return backoff.Permanent(err)
 			}
+			c.incRetry(edge.ID, err)
 			return err
 		}
 		result = res
@@ -987,6 +1003,71 @@ func (c *Runner) setGauge(val int64, edgeID string) {
 
 func (c *Runner) clearGauge(edgeID string) {
 	c.activeEdges.Remove(edgeID)
+}
+
+// retryState holds the live retry counter and latest transient error for one edge.
+type retryState struct {
+	count    int64
+	lastErr  string
+}
+
+func (c *Runner) ensureRetryGauge() {
+	c.retryGaugeOnce.Do(func() {
+		gauge, err := c.meter.Int64ObservableGauge(string(metrics.MetricEdgeRetryCount),
+			metric.WithUnit("1"),
+		)
+		if err != nil {
+			c.log.Error(err, "failed to create edge retry gauge")
+			return
+		}
+
+		c.retryGaugeRegistration, err = c.meter.RegisterCallback(
+			func(ctx context.Context, o metric.Observer) error {
+				for item := range c.retryEdges.IterBuffered() {
+					state := item.Val
+					if state == nil {
+						continue
+					}
+					o.ObserveInt64(gauge, state.count,
+						metric.WithAttributes(
+							attribute.String("element", item.Key),
+							attribute.String("flowID", c.flowName),
+							attribute.String("projectID", c.projectName),
+							attribute.String("error", state.lastErr),
+						))
+				}
+				return nil
+			},
+			gauge,
+		)
+		if err != nil {
+			c.log.Error(err, "failed to register edge retry gauge callback")
+		}
+	})
+}
+
+// incRetry increments the retry counter for an edge and records the latest error.
+func (c *Runner) incRetry(edgeID string, err error) {
+	if edgeID == "" {
+		return
+	}
+	c.ensureRetryGauge()
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+	}
+	state, ok := c.retryEdges.Get(edgeID)
+	if !ok || state == nil {
+		state = &retryState{}
+	}
+	state.count++
+	state.lastErr = errStr
+	c.retryEdges.Set(edgeID, state)
+}
+
+// clearRetry drops the retry state for an edge (called on success or terminal failure).
+func (c *Runner) clearRetry(edgeID string) {
+	c.retryEdges.Remove(edgeID)
 }
 
 // getPortByName returns the port configuration by name
