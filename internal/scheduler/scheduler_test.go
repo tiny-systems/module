@@ -11,9 +11,12 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/resource"
+	"github.com/tiny-systems/module/pkg/state"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // fakeManager is a minimal resource.ManagerInterface that satisfies
@@ -133,11 +136,20 @@ func (c *fullCapabilityComponent) recordedOrder() []string {
 // stubbed for in-process tests. msgHandler returns nil for everything.
 func newTestSchedule(t *testing.T) *Schedule {
 	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha1.TinyNode{}).
+		Build()
 	s := New(func(_ context.Context, _ *runner.Msg) (any, error) { return nil, nil }).
 		SetLogger(logr.Discard()).
 		SetManager(fakeManager{}).
 		SetTracer(tracenoop.NewTracerProvider().Tracer("test")).
-		SetMeter(metricnoop.NewMeterProvider().Meter("test"))
+		SetMeter(metricnoop.NewMeterProvider().Meter("test")).
+		SetStateFactory(state.NewMetadataFactory(fakeClient))
 	return s
 }
 

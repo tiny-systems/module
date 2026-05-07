@@ -26,6 +26,7 @@ import (
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
+	"github.com/tiny-systems/module/pkg/state"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 	"go.opentelemetry.io/otel"
@@ -432,7 +433,8 @@ var runCmd = &cobra.Command{
 			SetLogger(l).
 			SetMeter(meter).
 			SetTracer(tracer).
-			SetManager(resourceManager)
+			SetManager(resourceManager).
+			SetStateFactory(state.NewMetadataFactory(resourceManager.GetK8sClient()))
 
 		// create gRPC server
 		var (

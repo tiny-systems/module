@@ -57,8 +57,8 @@ type Schedule struct {
 	msgHandler runner.Handler
 
 	// stateFactory builds State backends for components implementing Stateful.
-	// Defaults to MetadataFactory (state lives in TinyNode.Status.Metadata);
-	// override via SetStateFactory for redis/postgres/embedded backends later.
+	// Must be set via SetStateFactory before Stateful components run; nil
+	// factory means Stateful components silently get no state injection.
 	stateFactory state.Factory
 }
 
@@ -73,12 +73,12 @@ func New(outsideHandler runner.Handler) *Schedule {
 		componentsMap: cmap.New[module.Component](),
 		errGroup:      &errgroup.Group{},
 		msgHandler:    outsideHandler,
-		stateFactory:  state.NewMetadataFactory(),
 	}
 }
 
-// SetStateFactory swaps the State backend factory. Call before any
-// components are scheduled. Defaults to MetadataFactory.
+// SetStateFactory installs the State backend factory. Call before any
+// Stateful components are scheduled. Without a factory, Stateful
+// components don't get state injection (silent no-op).
 func (s *Schedule) SetStateFactory(f state.Factory) *Schedule {
 	s.stateFactory = f
 	return s

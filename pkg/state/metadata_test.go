@@ -8,7 +8,40 @@ import (
 
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/pkg/state"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+const (
+	testNS   = "default"
+	testName = "test-node"
+)
+
+// nodeKey returns the standard NamespacedName used by all tests.
+func nodeKey() types.NamespacedName {
+	return types.NamespacedName{Namespace: testNS, Name: testName}
+}
+
+// newFakeClient returns a controller-runtime fake client seeded with a
+// TinyNode whose status.metadata starts as the supplied map.
+func newFakeClient(t *testing.T, initial map[string]string) client.Client {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	node := &v1alpha1.TinyNode{}
+	node.Name = testName
+	node.Namespace = testNS
+	node.Status.Metadata = initial
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node).
+		WithStatusSubresource(&v1alpha1.TinyNode{}).
+		Build()
+}
 
 // recordedEmit captures emit calls so tests can verify the metadata backend
 // publishes reconcile-port updaters with the expected effect on a node.
@@ -33,6 +66,7 @@ func (r *recordedEmit) Emit() state.EmitFunc {
 	}
 }
 
+// ApplyAll runs the captured updaters against a node, returning the result.
 func (r *recordedEmit) ApplyAll(node *v1alpha1.TinyNode) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -51,7 +85,8 @@ func (r *recordedEmit) Count() int {
 }
 
 func TestMetadataState_GetAbsentReturnsFalse(t *testing.T) {
-	s := state.NewMetadataState(nil, nil)
+	c := newFakeClient(t, nil)
+	s := state.NewMetadataState(c, nodeKey(), nil)
 	v, ok, err := s.Get(context.Background(), "missing")
 	if err != nil {
 		t.Fatalf("Get on missing key returned error: %v", err)
@@ -64,9 +99,30 @@ func TestMetadataState_GetAbsentReturnsFalse(t *testing.T) {
 	}
 }
 
-func TestMetadataState_SetThenGet(t *testing.T) {
+func TestMetadataState_GetReadsFromCache(t *testing.T) {
+	c := newFakeClient(t, map[string]string{
+		"_state/seeded": base64.StdEncoding.EncodeToString([]byte("hello")),
+	})
+	s := state.NewMetadataState(c, nodeKey(), nil)
+
+	v, ok, err := s.Get(context.Background(), "seeded")
+	if err != nil {
+		t.Fatalf("Get returned error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("Get returned ok=false")
+	}
+	if string(v) != "hello" {
+		t.Errorf("Get returned %q; want %q", v, "hello")
+	}
+}
+
+func TestMetadataState_SetThenGetUsesPendingOverlay(t *testing.T) {
+	// Cache starts empty; Set should make Get return the value immediately
+	// without waiting for the cache to update.
+	c := newFakeClient(t, nil)
 	rec := &recordedEmit{}
-	s := state.NewMetadataState(nil, rec.Emit())
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
 
 	if err := s.Set(context.Background(), "counter", []byte("42")); err != nil {
 		t.Fatalf("Set failed: %v", err)
@@ -77,7 +133,7 @@ func TestMetadataState_SetThenGet(t *testing.T) {
 		t.Fatalf("Get failed: %v", err)
 	}
 	if !ok {
-		t.Fatalf("Get returned ok=false after Set")
+		t.Fatalf("Get returned ok=false after Set; pending overlay should have caught it")
 	}
 	if string(v) != "42" {
 		t.Errorf("Get returned %q; want %q", v, "42")
@@ -85,19 +141,19 @@ func TestMetadataState_SetThenGet(t *testing.T) {
 }
 
 func TestMetadataState_SetEmitsReconcileUpdater(t *testing.T) {
+	c := newFakeClient(t, nil)
 	rec := &recordedEmit{}
-	s := state.NewMetadataState(nil, rec.Emit())
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
 
 	if err := s.Set(context.Background(), "k", []byte("v")); err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
-
 	if rec.Count() != 1 {
 		t.Fatalf("expected 1 emitted updater; got %d", rec.Count())
 	}
 
-	// Apply the updater to a fresh node and verify metadata contains the
-	// prefixed key with a base64-encoded value.
+	// Apply the updater and verify it puts the right key+base64-value
+	// into status.metadata.
 	node := &v1alpha1.TinyNode{}
 	if err := rec.ApplyAll(node); err != nil {
 		t.Fatalf("ApplyAll failed: %v", err)
@@ -115,12 +171,14 @@ func TestMetadataState_SetEmitsReconcileUpdater(t *testing.T) {
 	}
 }
 
-func TestMetadataState_DeleteRemovesFromSnapshotAndEmits(t *testing.T) {
-	rec := &recordedEmit{}
-	initial := map[string]string{
+func TestMetadataState_DeleteTombstonesPending(t *testing.T) {
+	// Cache has the key; Delete should make Get return absent immediately
+	// even before the cache catches up.
+	c := newFakeClient(t, map[string]string{
 		"_state/k": base64.StdEncoding.EncodeToString([]byte("v")),
-	}
-	s := state.NewMetadataState(initial, rec.Emit())
+	})
+	rec := &recordedEmit{}
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
 
 	// Sanity: present before delete.
 	if _, ok, _ := s.Get(context.Background(), "k"); !ok {
@@ -131,15 +189,25 @@ func TestMetadataState_DeleteRemovesFromSnapshotAndEmits(t *testing.T) {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
+	// Pending tombstone should hide the cached value.
 	if _, ok, _ := s.Get(context.Background(), "k"); ok {
-		t.Errorf("key 'k' should be absent after delete")
+		t.Errorf("key 'k' should be absent after delete (tombstone in pending)")
+	}
+}
+
+func TestMetadataState_DeleteEmitsRemovalUpdater(t *testing.T) {
+	c := newFakeClient(t, nil)
+	rec := &recordedEmit{}
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
+
+	if err := s.Delete(context.Background(), "k"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
 	}
 
-	// Emitted updater should remove from a node's metadata too.
 	node := &v1alpha1.TinyNode{
 		Status: v1alpha1.TinyNodeStatus{
 			Metadata: map[string]string{
-				"_state/k": "old-value",
+				"_state/k":  "old-value",
 				"unrelated": "keep",
 			},
 		},
@@ -156,44 +224,16 @@ func TestMetadataState_DeleteRemovesFromSnapshotAndEmits(t *testing.T) {
 }
 
 func TestMetadataState_DeleteMissingIsNotAnError(t *testing.T) {
-	s := state.NewMetadataState(nil, nil)
+	c := newFakeClient(t, nil)
+	s := state.NewMetadataState(c, nodeKey(), nil)
 	if err := s.Delete(context.Background(), "ghost"); err != nil {
 		t.Errorf("Delete on missing key returned error: %v", err)
 	}
 }
 
-func TestMetadataState_UpdateSnapshotReplacesContents(t *testing.T) {
-	s := state.NewMetadataState(map[string]string{
-		"_state/old": base64.StdEncoding.EncodeToString([]byte("gone")),
-	}, nil)
-
-	s.UpdateSnapshot(map[string]string{
-		"_state/new": base64.StdEncoding.EncodeToString([]byte("fresh")),
-	})
-
-	if _, ok, _ := s.Get(context.Background(), "old"); ok {
-		t.Errorf("'old' key should be gone after snapshot replace")
-	}
-	v, ok, _ := s.Get(context.Background(), "new")
-	if !ok || string(v) != "fresh" {
-		t.Errorf("'new' key not present after snapshot replace; ok=%v, v=%q", ok, v)
-	}
-}
-
-func TestMetadataState_UpdateSnapshotNilClears(t *testing.T) {
-	s := state.NewMetadataState(map[string]string{
-		"_state/x": base64.StdEncoding.EncodeToString([]byte("y")),
-	}, nil)
-
-	s.UpdateSnapshot(nil)
-
-	if _, ok, _ := s.Get(context.Background(), "x"); ok {
-		t.Errorf("snapshot should be empty after UpdateSnapshot(nil)")
-	}
-}
-
 func TestMetadataState_NilEmitDoesNotPanic(t *testing.T) {
-	s := state.NewMetadataState(nil, nil)
+	c := newFakeClient(t, nil)
+	s := state.NewMetadataState(c, nodeKey(), nil)
 	if err := s.Set(context.Background(), "k", []byte("v")); err != nil {
 		t.Errorf("Set with nil emit returned error: %v", err)
 	}
@@ -202,23 +242,93 @@ func TestMetadataState_NilEmitDoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestMetadataFactory_ProducesStateSeededFromNode verifies the factory's
-// initial-snapshot wiring: the state for a node should see that node's
-// metadata immediately on first Get.
-func TestMetadataFactory_ProducesStateSeededFromNode(t *testing.T) {
-	node := &v1alpha1.TinyNode{
-		Status: v1alpha1.TinyNodeStatus{
-			Metadata: map[string]string{
-				"_state/seeded": base64.StdEncoding.EncodeToString([]byte("hello")),
-			},
-		},
+func TestMetadataState_NilReaderReturnsAbsent(t *testing.T) {
+	s := state.NewMetadataState(nil, nodeKey(), nil)
+	v, ok, err := s.Get(context.Background(), "k")
+	if err != nil {
+		t.Errorf("Get with nil reader returned error: %v", err)
 	}
-	f := state.NewMetadataFactory()
+	if ok {
+		t.Errorf("Get with nil reader returned ok=true; want false")
+	}
+	if v != nil {
+		t.Errorf("Get with nil reader returned non-nil value")
+	}
+}
+
+func TestMetadataState_ListIncludesCacheAndPending(t *testing.T) {
+	// Cache has two keys, we set a third and delete one.
+	c := newFakeClient(t, map[string]string{
+		"_state/a":     base64.StdEncoding.EncodeToString([]byte("av")),
+		"_state/b":     base64.StdEncoding.EncodeToString([]byte("bv")),
+		"unrelated/x":  "keep-out",
+		"_state/other": base64.StdEncoding.EncodeToString([]byte("ov")),
+	})
+	rec := &recordedEmit{}
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
+
+	// Add a new key under the same prefix and tombstone an existing one.
+	if err := s.Set(context.Background(), "c", []byte("cv")); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := s.Delete(context.Background(), "a"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	keys, err := s.List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	want := map[string]bool{"b": true, "c": true, "other": true}
+	if len(keys) != len(want) {
+		t.Errorf("List returned %d keys; want %d. got=%v", len(keys), len(want), keys)
+	}
+	for _, k := range keys {
+		if !want[k] {
+			t.Errorf("unexpected key in List: %q", k)
+		}
+	}
+}
+
+func TestMetadataState_ListWithPrefixFilters(t *testing.T) {
+	c := newFakeClient(t, map[string]string{
+		"_state/foo-a":    base64.StdEncoding.EncodeToString([]byte("1")),
+		"_state/foo-b":    base64.StdEncoding.EncodeToString([]byte("2")),
+		"_state/bar-a":    base64.StdEncoding.EncodeToString([]byte("3")),
+	})
+	s := state.NewMetadataState(c, nodeKey(), nil)
+
+	keys, err := s.List(context.Background(), "foo-")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Errorf("expected 2 foo-* keys; got %d (%v)", len(keys), keys)
+	}
+	for _, k := range keys {
+		if k != "foo-a" && k != "foo-b" {
+			t.Errorf("unexpected key %q in foo- prefix list", k)
+		}
+	}
+}
+
+// TestMetadataFactory_ProducesStateScopedToNode verifies the factory
+// constructs state with the right node identity.
+func TestMetadataFactory_ProducesStateScopedToNode(t *testing.T) {
+	c := newFakeClient(t, map[string]string{
+		"_state/seeded": base64.StdEncoding.EncodeToString([]byte("hello")),
+	})
+	node := &v1alpha1.TinyNode{}
+	node.Name = testName
+	node.Namespace = testNS
+
+	f := state.NewMetadataFactory(c)
 	s := f.For(node, nil)
 
 	v, ok, err := s.Get(context.Background(), "seeded")
 	if err != nil {
-		t.Fatalf("Get on factory-seeded state failed: %v", err)
+		t.Fatalf("Get on factory-scoped state failed: %v", err)
 	}
 	if !ok {
 		t.Fatalf("seeded key should be present")

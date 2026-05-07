@@ -234,8 +234,9 @@ type fakeRunnerState struct{}
 func (*fakeRunnerState) Get(_ context.Context, _ string) ([]byte, bool, error) {
 	return nil, false, nil
 }
-func (*fakeRunnerState) Set(_ context.Context, _ string, _ []byte) error { return nil }
-func (*fakeRunnerState) Delete(_ context.Context, _ string) error        { return nil }
+func (*fakeRunnerState) Set(_ context.Context, _ string, _ []byte) error    { return nil }
+func (*fakeRunnerState) Delete(_ context.Context, _ string) error           { return nil }
+func (*fakeRunnerState) List(_ context.Context, _ string) ([]string, error) { return nil, nil }
 
 // fakeRefresherState additionally implements snapshotRefresher so tests can
 // verify NotifyReconcile reaches the right method.
