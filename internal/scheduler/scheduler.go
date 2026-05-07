@@ -13,6 +13,7 @@ import (
 	"github.com/tiny-systems/module/module"
 	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/resource"
+	"github.com/tiny-systems/module/pkg/state"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -54,6 +55,11 @@ type Schedule struct {
 	errGroup *errgroup.Group
 	// pretty much self-explanatory
 	msgHandler runner.Handler
+
+	// stateFactory builds State backends for components implementing Stateful.
+	// Defaults to MetadataFactory (state lives in TinyNode.Status.Metadata);
+	// override via SetStateFactory for redis/postgres/embedded backends later.
+	stateFactory state.Factory
 }
 
 // MaxMessageDepth is the maximum number of node hops a message can traverse.
@@ -67,7 +73,15 @@ func New(outsideHandler runner.Handler) *Schedule {
 		componentsMap: cmap.New[module.Component](),
 		errGroup:      &errgroup.Group{},
 		msgHandler:    outsideHandler,
+		stateFactory:  state.NewMetadataFactory(),
 	}
+}
+
+// SetStateFactory swaps the State backend factory. Call before any
+// components are scheduled. Defaults to MetadataFactory.
+func (s *Schedule) SetStateFactory(f state.Factory) *Schedule {
+	s.stateFactory = f
+	return s
 }
 
 func (s *Schedule) SetLogger(l logr.Logger) *Schedule {
@@ -343,42 +357,66 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	// update system ports
 	cmpInstance := runnerInstance.GetComponent()
 
-	for _, p := range cmpInstance.Ports() {
-		if p.Source {
-			continue
-		}
-
-		var portResp any
-
-		// if node has http port then provide addressGetter
-		switch p.Name {
-		case v1alpha1.ReconcilePort:
-			// component can use copy of node for its reconciliation
-			// it can not update node as it may take, and we try to make Update process as fast as possible
-			portResp = cmpInstance.Handle(ctx, runnerInstance.DataHandler(s.msgHandler), p.Name, *node)
-
-		case v1alpha1.ClientPort:
-			// provide kubernetes resource manager client
-			portResp = cmpInstance.Handle(ctx, nil, p.Name, s.manager)
-
-		case v1alpha1.IdentityPort:
-			// provide node identity so components can namespace resources
-			portResp = cmpInstance.Handle(ctx, nil, p.Name, v1alpha1.NodeIdentity{
-				NodeName:    node.Name,
-				Namespace:   node.Namespace,
-				FlowName:    node.Labels[v1alpha1.FlowNameLabel],
-				ProjectName: node.Labels[v1alpha1.ProjectNameLabel],
-			})
-		}
-
-		respErr := utils.CheckForError(portResp)
-		if respErr == nil {
-			continue
-		}
-		err = respErr
-
-		return nil
+	identity := v1alpha1.NodeIdentity{
+		NodeName:    node.Name,
+		Namespace:   node.Namespace,
+		FlowName:    node.Labels[v1alpha1.FlowNameLabel],
+		ProjectName: node.Labels[v1alpha1.ProjectNameLabel],
 	}
+
+	// System ports are dispatched only via typed capability interfaces in
+	// framework-enforced order. Components that need lifecycle callbacks
+	// must implement the corresponding interfaces (IdentityAware,
+	// ClientAware, Stateful, ReconcileHandler, SettingsHandler). There is
+	// no fallback to Component.Handle for system ports.
+	//
+	// Order: OnIdentity → OnClient → OnState (first Update only) →
+	// OnReconcile. OnSettings dispatches separately via sendMsg below so
+	// the existing dedup/debounce paths run.
+	if h, ok := cmpInstance.(module.IdentityAware); ok {
+		h.OnIdentity(identity)
+	}
+	if h, ok := cmpInstance.(module.ClientAware); ok {
+		if k8sClient, ok2 := s.manager.(module.K8sClient); ok2 {
+			h.OnClient(k8sClient)
+		} else {
+			s.log.Info("scheduler update: ClientAware component, but manager doesn't satisfy module.K8sClient; OnClient skipped",
+				"node", node.Name,
+			)
+		}
+	}
+	if isNew {
+		// Long-lived Handler closure shared by State backend and any
+		// EmitterAware component that needs to publish from goroutines.
+		emit := module.Handler(func(emitCtx context.Context, port string, data any) any {
+			return runnerInstance.DataHandler(s.msgHandler)(emitCtx, port, data)
+		})
+
+		if stateful, ok := cmpInstance.(module.Stateful); ok && s.stateFactory != nil {
+			backend := s.stateFactory.For(node, state.EmitFunc(emit))
+			stateful.OnState(backend)
+			runnerInstance.SetState(backend)
+			s.log.Info("scheduler update: state backend injected",
+				"node", node.Name,
+			)
+		}
+		if emitter, ok := cmpInstance.(module.EmitterAware); ok {
+			emitter.OnEmitter(emit)
+			s.log.Info("scheduler update: emitter injected",
+				"node", node.Name,
+			)
+		}
+	}
+	if h, ok := cmpInstance.(module.ReconcileHandler); ok {
+		if rErr := h.OnReconcile(ctx, *node); rErr != nil {
+			s.log.Error(rErr, "scheduler update: OnReconcile failed",
+				"node", node.Name,
+			)
+			err = rErr
+			return nil
+		}
+	}
+	runnerInstance.NotifyReconcile(node.Status.Metadata)
 
 	// sendMsg signal to the settings ports with no data so node will apply own configs (own means "from" is empty for those configs)
 	s.log.Info("scheduler update: sending settings message",

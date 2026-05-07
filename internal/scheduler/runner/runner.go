@@ -97,6 +97,19 @@ type Runner struct {
 	// to prevent stale writes after runner shutdown.
 	runCtx    context.Context
 	runCancel context.CancelFunc
+
+	// state is the State backend injected via the Stateful capability interface.
+	// nil if the component does not implement Stateful.
+	state m.State
+}
+
+// snapshotRefresher is implemented by State backends that maintain an
+// in-memory snapshot of node metadata (currently MetadataState). The runner
+// type-asserts on this to refresh the snapshot after each reconcile.
+//
+// Backends without a snapshot (Redis, Postgres) don't implement it.
+type snapshotRefresher interface {
+	UpdateSnapshot(metadata map[string]string)
 }
 
 const (
@@ -159,6 +172,66 @@ func (c *Runner) SetManager(m resource.ManagerInterface) *Runner {
 
 func (c *Runner) GetComponent() m.Component {
 	return c.component
+}
+
+// SetState attaches a State backend to the runner. Called by the scheduler
+// after Stateful.OnState is invoked on the component, so the runner can
+// notify the backend about reconciles for snapshot refresh.
+func (c *Runner) SetState(s m.State) *Runner {
+	c.state = s
+	return c
+}
+
+// GetState returns the attached State backend, or nil.
+func (c *Runner) GetState() m.State {
+	return c.state
+}
+
+// NotifyReconcile refreshes the State backend's snapshot from the latest
+// node metadata. No-op if no state is attached or the backend doesn't
+// expose a snapshot.
+func (c *Runner) NotifyReconcile(metadata map[string]string) {
+	if c.state == nil {
+		return
+	}
+	if r, ok := c.state.(snapshotRefresher); ok {
+		r.UpdateSnapshot(metadata)
+	}
+}
+
+// dispatchCapability is authoritative for all five system ports. For
+// non-system ports it returns handled=false, telling the caller to route
+// the message through Component.Handle as usual.
+//
+// For system ports it always returns handled=true, even when the component
+// does not implement the corresponding capability interface — in that case
+// the call is a no-op. There is no legacy fallback: a component that needs
+// settings/control/reconcile/identity/client must implement the respective
+// capability interface (SettingsHandler, ControlHandler, ReconcileHandler,
+// IdentityAware, ClientAware).
+func (c *Runner) dispatchCapability(ctx context.Context, port string, data any) (any, bool) {
+	switch port {
+	case v1alpha1.SettingsPort:
+		if h, ok := c.component.(m.SettingsHandler); ok {
+			if err := h.OnSettings(ctx, data); err != nil {
+				return err, true
+			}
+		}
+		return nil, true
+	case v1alpha1.ControlPort:
+		if h, ok := c.component.(m.ControlHandler); ok {
+			if err := h.OnControl(ctx, data); err != nil {
+				return err, true
+			}
+		}
+		return nil, true
+	case v1alpha1.ReconcilePort, v1alpha1.ClientPort, v1alpha1.IdentityPort:
+		// These are dispatched by scheduler.Update directly via Phase 1.
+		// Block any signal-based or stray delivery from reaching legacy
+		// Handle as a safety net.
+		return nil, true
+	}
+	return nil, false
 }
 
 // getPorts get ports cache or an actual node ports
@@ -521,7 +594,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 			}
 		}()
 
-		resp = c.component.Handle(ctx, c.DataHandler(msgHandler), port, portData)
+		var handled bool
+		resp, handled = c.dispatchCapability(ctx, port, portData)
+		if !handled {
+			resp = c.component.Handle(ctx, c.DataHandler(msgHandler), port, portData)
+		}
 		return utils.CheckForError(resp)
 	})
 
