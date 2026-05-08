@@ -42,6 +42,18 @@ type TinySignalSpec struct {
 	// If set, the delivery span will use this as the parent trace ID,
 	// allowing callers to look up the trace by a known ID.
 	TraceID string `json:"traceID,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// EdgeID is the ID of the edge that produced this signal. Empty for
+	// externally-triggered signals (e.g. send_signal MCP, ticker fire).
+	// Used by the runtime to feed the durable-port deterministic-naming
+	// hash and to route response-back signals to the correct caller.
+	EdgeID string `json:"edgeID,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// From identifies the source port that produced this signal in the
+	// format "node:port". Empty for externally-triggered signals.
+	From string `json:"from,omitempty"`
 }
 
 // TinySignalStatus defines the observed state of TinySignal

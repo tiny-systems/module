@@ -13,6 +13,7 @@ import (
 	"github.com/tiny-systems/module/module"
 	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/resource"
+	"github.com/tiny-systems/module/pkg/signalname"
 	"github.com/tiny-systems/module/pkg/state"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel/metric"
@@ -214,6 +215,30 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 			"node", nodeName,
 			"port", port,
 		)
+	}
+
+	// Durable-port intake. If the target port is marked Durable AND this
+	// message did not arrive from the TinySignal reconciler (which would
+	// already be a delivery of a persisted signal), persist a TinySignal
+	// CRD and ack immediately. The reconciler will deliver it later.
+	if msg.From != runner.FromSignal {
+		if p, ok := instance.GetPort(port); ok && p.Durable && s.manager != nil {
+			name := signalname.For(nodeName, port, msg.Data, msg.EdgeID, "")
+			if err := s.manager.PersistDurableSignal(ctx, name, nodeName, instance.Node().Namespace, port, msg.Data, msg.EdgeID, msg.From); err != nil {
+				s.log.Error(err, "scheduler handle: persist durable signal failed",
+					"node", nodeName,
+					"port", port,
+					"signalName", name,
+				)
+				return nil, err
+			}
+			s.log.Info("scheduler handle: persisted durable signal, returning early",
+				"node", nodeName,
+				"port", port,
+				"signalName", name,
+			)
+			return nil, nil
+		}
 	}
 
 	s.log.Info("scheduler handle: routing to local instance",

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -49,26 +51,39 @@ type TinySignalReconciler struct {
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=operator.tinysystems.io,resources=tinysignals/finalizers,verbs=update
 
-// Reconcile handles TinySignal delivery.
-// TinySignals are one-off: delivered to the target port, then deleted.
+// deliveryTimeout bounds how long a single signal's delivery can run
+// before the reconcile worker gives up and requeues for retry. Long
+// enough for typical handlers (HTTP requests, K8s API calls, etc.);
+// short enough that a stuck handler doesn't permanently starve the
+// reconcile loop.
+const deliveryTimeout = 30 * time.Second
+
+// Reconcile handles TinySignal delivery with delete-after-success semantics.
+//
+// Order:
+//  1. Filter to this module by signal.Spec.Node (signals are leader-gated
+//     and module-scoped — see RequeueAllOnLeadershipChange).
+//  2. Deliver synchronously to the scheduler.
+//  3. On success — including durable child outputs that have been
+//     persisted as fresh TinySignals during Handle — delete this signal.
+//     Children are owed; our work is done.
+//  4. On permanent error — log and delete; the work has terminally
+//     failed, no point retrying forever.
+//  5. On transient error — leave the signal alone, requeue. The
+//     controller will retry.
+//
+// This is the inverse of the previous fire-and-forget order
+// (delete-before-deliver). The price is that a slow handler holds a
+// reconcile worker for up to deliveryTimeout; the gain is that
+// crash-mid-handle no longer loses the work — the signal stays,
+// the new leader picks it up.
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
-	// Only leader processes signals - requeue if not leader so we don't miss signals
+	// Only leader processes signals — requeue if not leader so we don't miss signals
 	if !r.IsLeader.Load() {
 		l.V(1).Info("non-leader skipping signal, will requeue", "name", req.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
-	// Check if this signal belongs to our module
-	m, _, err := module.ParseFullName(req.Name)
-	if err != nil {
-		l.Error(err, "tinysignal has invalid name", "name", req.Name)
-		return ctrl.Result{}, nil
-	}
-
-	if m != r.Module.GetNameSanitised() {
-		return ctrl.Result{}, nil
 	}
 
 	var signal operatorv1alpha1.TinySignal
@@ -79,64 +94,94 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// Skip if being deleted
+	// Skip if already being deleted
 	if !signal.ObjectMeta.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
-	// Deliver the signal
-	targetPort := utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port)
-	l.Info("delivering signal", "targetPort", targetPort)
+	// Module-scope filter: parse the target node, not the signal's own
+	// metadata.name. Names from pkg/signalname are deterministic-hash
+	// based and don't follow the module.component convention.
+	if signal.Spec.Node == "" {
+		l.Error(fmt.Errorf("empty Spec.Node"), "tinysignal has no target node", "name", req.Name)
+		return ctrl.Result{}, nil
+	}
+	m, _, err := module.ParseFullName(signal.Spec.Node)
+	if err != nil {
+		l.Error(err, "tinysignal has invalid Spec.Node", "name", req.Name, "node", signal.Spec.Node)
+		return ctrl.Result{}, nil
+	}
+	if m != r.Module.GetNameSanitised() {
+		return ctrl.Result{}, nil
+	}
 
-	// Wait for target instance to exist (with context timeout)
+	targetPort := utils.GetPortFullName(signal.Spec.Node, signal.Spec.Port)
+
+	// Wait for target instance to be live before delivery. Without this
+	// the scheduler's own backoff would spin for 30s on every reconcile
+	// of a signal whose target hasn't started yet.
 	if !r.Scheduler.HasInstance(signal.Spec.Node) {
 		l.Info("target instance not ready, requeuing", "node", signal.Spec.Node)
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	// Delete the signal first (fire-and-forget pattern)
-	// This prevents blocking if the handler takes too long
+	deliveryCtx, cancel := context.WithTimeout(context.Background(), deliveryTimeout)
+	defer cancel()
+	deliveryCtx = utils.WithLeader(deliveryCtx, true)
+
+	// Inject a remote span context if the signal carries a TraceID so
+	// the resulting trace stitches under the caller-supplied root.
+	if signal.Spec.TraceID != "" {
+		if traceIDBytes, err := hex.DecodeString(signal.Spec.TraceID); err == nil && len(traceIDBytes) == 16 {
+			var tid trace.TraceID
+			copy(tid[:], traceIDBytes)
+			spanID := trace.SpanID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+			sc := trace.NewSpanContext(trace.SpanContextConfig{
+				TraceID:    tid,
+				SpanID:     spanID,
+				TraceFlags: trace.FlagsSampled,
+				Remote:     true,
+			})
+			deliveryCtx = trace.ContextWithRemoteSpanContext(deliveryCtx, sc)
+		}
+	}
+
+	l.Info("delivering signal", "targetPort", targetPort)
+	_, deliverErr := r.Scheduler.Handle(deliveryCtx, &runner.Msg{
+		From:   runner.FromSignal,
+		To:     targetPort,
+		Data:   signal.Spec.Data,
+		EdgeID: signal.Spec.EdgeID,
+	})
+
+	if deliverErr != nil {
+		if perrors.IsPermanent(deliverErr) {
+			// Terminal failure: drop the signal so we don't loop forever.
+			// Note: this is a deliberate data-loss point — permanent
+			// errors should be rare, and infinite retry is worse.
+			l.Error(deliverErr, "permanent error during signal delivery, dropping signal",
+				"targetPort", targetPort, "name", req.Name)
+			if delErr := r.Delete(ctx, &signal); delErr != nil && !errors.IsNotFound(delErr) {
+				l.Error(delErr, "failed to delete permanent-error signal", "name", req.Name)
+				return ctrl.Result{}, delErr
+			}
+			return ctrl.Result{}, nil
+		}
+		// Transient: leave the signal alone for retry. Pod kill mid-handle
+		// follows this branch — context cancel is treated as transient.
+		l.Error(deliverErr, "transient error during signal delivery, leaving signal for retry",
+			"targetPort", targetPort, "name", req.Name)
+		return ctrl.Result{Requeue: true}, deliverErr
+	}
+
+	// Success: any durable child outputs were persisted as new TinySignals
+	// during Handle. Our work is done. Delete this signal as the checkpoint
+	// boundary advance.
 	if err := r.Delete(ctx, &signal); err != nil && !errors.IsNotFound(err) {
-		l.Error(err, "failed to delete signal")
+		l.Error(err, "failed to delete signal after successful delivery", "name", req.Name)
 		return ctrl.Result{}, err
 	}
-
-	// Deliver in goroutine with timeout so one slow component can't block others
-	go func() {
-		deliveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		deliveryCtx = utils.WithLeader(deliveryCtx, true)
-
-		// If a trace ID was provided, inject it as a remote span context
-		// so the execution trace uses the caller's known trace ID
-		if signal.Spec.TraceID != "" {
-			if traceIDBytes, err := hex.DecodeString(signal.Spec.TraceID); err == nil && len(traceIDBytes) == 16 {
-				var tid trace.TraceID
-				copy(tid[:], traceIDBytes)
-				// Use a fixed span ID — the tracer will create child spans under this
-				spanID := trace.SpanID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
-				sc := trace.NewSpanContext(trace.SpanContextConfig{
-					TraceID:    tid,
-					SpanID:     spanID,
-					TraceFlags: trace.FlagsSampled,
-					Remote:     true,
-				})
-				deliveryCtx = trace.ContextWithRemoteSpanContext(deliveryCtx, sc)
-			}
-		}
-
-		_, err := r.Scheduler.Handle(deliveryCtx, &runner.Msg{
-			From: runner.FromSignal,
-			To:   targetPort,
-			Data: signal.Spec.Data,
-		})
-		if err != nil {
-			l.Error(err, "signal delivery failed", "targetPort", targetPort)
-			return
-		}
-		l.Info("signal delivered", "targetPort", targetPort)
-	}()
-
+	l.Info("signal delivered and deleted", "targetPort", targetPort)
 	return ctrl.Result{}, nil
 }
 

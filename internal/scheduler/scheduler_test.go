@@ -39,6 +39,9 @@ func (fakeManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, 
 func (fakeManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error {
 	return nil
 }
+func (fakeManager) PersistDurableSignal(_ context.Context, _, _, _, _ string, _ []byte, _, _ string) error {
+	return nil
+}
 
 // GetK8sClient + GetNamespace satisfy module.K8sClient. Returning nil for
 // the client is fine because no test exercises actual K8s calls.

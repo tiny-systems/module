@@ -359,6 +359,18 @@ func (c *Runner) HasPort(port string) bool {
 	return false
 }
 
+// GetPort returns a copy of the named Port if the component declares it,
+// or (zero, false) otherwise. Used by the scheduler to inspect port
+// metadata (e.g. the Durable flag) before routing.
+func (c *Runner) GetPort(port string) (m.Port, bool) {
+	for _, p := range c.getPorts() {
+		if p.Name == port {
+			return p, true
+		}
+	}
+	return m.Port{}, false
+}
+
 // MsgHandler processes msg to the embedded component
 // applies port config for the given port if any
 func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (res any, err error) {
