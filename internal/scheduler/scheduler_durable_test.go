@@ -19,6 +19,7 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/state"
+	"github.com/tiny-systems/module/pkg/utils"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -278,6 +279,41 @@ func TestDurablePort_SignalDeliveryDoesNotRePersist(t *testing.T) {
 	}
 	if cmp.hits() != 1 {
 		t.Errorf("expected Component.Handle to be invoked once for signal-driven delivery; got %d", cmp.hits())
+	}
+}
+
+// TestDurablePort_DeliveryContextSkipsPersist verifies the "don't loop forever"
+// guard: when the reconciler replays a persisted signal back through
+// scheduler.Handle with utils.WithDurableDelivery(ctx), the durable-port
+// branch must skip and dispatch normally — otherwise we'd re-persist the
+// same signal infinitely.
+func TestDurablePort_DeliveryContextSkipsPersist(t *testing.T) {
+	mgr := &recordingManager{}
+	s := newDurableTestSchedule(t, mgr)
+
+	cmp := &durableSinkComponent{name: "dsink"}
+	if err := s.Install(cmp); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	installNode(t, s, "dsink-1", "dsink")
+
+	// Use a non-FromSignal From (mimics real durable-port persist) but
+	// mark the context as durable delivery (mimics reconciler replay).
+	ctx := utils.WithDurableDelivery(context.Background())
+	_, err := s.Handle(ctx, &runner.Msg{
+		From: "source-node:source-port",
+		To:   "dsink-1:in",
+		Data: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if calls := mgr.recordedCalls(); len(calls) != 0 {
+		t.Errorf("durable-delivery context should suppress persist; got %d calls", len(calls))
+	}
+	if cmp.hits() != 1 {
+		t.Errorf("expected Component.Handle to be invoked once; got %d", cmp.hits())
 	}
 }
 

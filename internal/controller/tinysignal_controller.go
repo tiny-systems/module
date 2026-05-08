@@ -128,6 +128,10 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	deliveryCtx, cancel := context.WithTimeout(context.Background(), deliveryTimeout)
 	defer cancel()
 	deliveryCtx = utils.WithLeader(deliveryCtx, true)
+	// Mark this delivery so scheduler.Handle skips the durable-port persist
+	// step (we ARE the reconciler delivering a persisted signal — re-persisting
+	// would be an infinite loop).
+	deliveryCtx = utils.WithDurableDelivery(deliveryCtx)
 
 	// Inject a remote span context if the signal carries a TraceID so
 	// the resulting trace stitches under the caller-supplied root.
@@ -146,9 +150,19 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	l.Info("delivering signal", "targetPort", targetPort)
+	// For durable-port-persisted signals, signal.Spec.From carries the
+	// original source port so MsgHandler runs edge config evaluation
+	// (target's "from this source" port-config maps source output → target
+	// input shape). For externally-injected signals (send_signal MCP),
+	// Spec.From is empty and we use FromSignal — MsgHandler treats the
+	// payload as already-typed in that case (existing legacy behavior).
+	deliveryFrom := runner.FromSignal
+	if signal.Spec.From != "" {
+		deliveryFrom = signal.Spec.From
+	}
+	l.Info("delivering signal", "targetPort", targetPort, "from", deliveryFrom)
 	_, deliverErr := r.Scheduler.Handle(deliveryCtx, &runner.Msg{
-		From:   runner.FromSignal,
+		From:   deliveryFrom,
 		To:     targetPort,
 		Data:   signal.Spec.Data,
 		EdgeID: signal.Spec.EdgeID,

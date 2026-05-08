@@ -218,10 +218,18 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 	}
 
 	// Durable-port intake. If the target port is marked Durable AND this
-	// message did not arrive from the TinySignal reconciler (which would
-	// already be a delivery of a persisted signal), persist a TinySignal
-	// CRD and ack immediately. The reconciler will deliver it later.
-	if msg.From != runner.FromSignal {
+	// is NOT a reconciler-driven delivery of an already-persisted signal,
+	// persist a TinySignal CRD with the source's raw payload and ack
+	// immediately. The reconciler later replays the signal back through
+	// scheduler.Handle with utils.WithDurableDelivery(ctx), which skips
+	// this branch and lets MsgHandler evaluate the edge config (mapping
+	// source's output shape into target's expected port shape).
+	//
+	// Externally-injected signals (send_signal MCP, ticker fire) arrive
+	// with msg.From == runner.FromSignal; we let those through without
+	// persisting (they're already targeting a port and the existing
+	// signal-path treats data as already-typed).
+	if !utils.IsDurableDelivery(ctx) && msg.From != runner.FromSignal {
 		if p, ok := instance.GetPort(port); ok && p.Durable && s.manager != nil {
 			name := signalname.For(nodeName, port, msg.Data, msg.EdgeID, "")
 			if err := s.manager.PersistDurableSignal(ctx, name, nodeName, instance.Node().Namespace, port, msg.Data, msg.EdgeID, msg.From); err != nil {
