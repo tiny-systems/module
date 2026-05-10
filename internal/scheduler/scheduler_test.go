@@ -70,13 +70,13 @@ func (c *fullCapabilityComponent) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{Name: "fullcap", Description: "test"}
 }
 
-func (c *fullCapabilityComponent) Handle(_ context.Context, _ module.Handler, _ string, _ any) any {
+func (c *fullCapabilityComponent) Handle(_ context.Context, _ module.Handler, _ string, _ any) module.Result {
 	// Should never be called for system ports because every capability is
 	// implemented. Tests assert this by checking handleCalls.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.order = append(c.order, "Handle")
-	return nil
+	return module.Result{}
 }
 
 func (c *fullCapabilityComponent) Ports() []module.Port {
@@ -256,11 +256,11 @@ func (c *noCapabilityComponent) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{Name: "nocap", Description: "test"}
 }
 
-func (c *noCapabilityComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+func (c *noCapabilityComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
 	c.mu.Lock()
 	c.handleCalls = append(c.handleCalls, port)
 	c.mu.Unlock()
-	return nil
+	return module.Result{}
 }
 
 func (c *noCapabilityComponent) Ports() []module.Port {

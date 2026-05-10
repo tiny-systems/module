@@ -46,10 +46,10 @@ func (b *Base) Client() K8sClient { return b.client }
 
 // Emit forwards to the injected long-lived Handler. Use it from goroutines
 // (tickers, cron loops, watchers) to publish to output or system ports.
-// No-op if OnEmitter has not yet fired.
-func (b *Base) Emit(ctx context.Context, port string, data any) any {
+// Returns a zero Result (success/no-op) if OnEmitter has not yet fired.
+func (b *Base) Emit(ctx context.Context, port string, data any) Result {
 	if b.emit == nil {
-		return nil
+		return Result{}
 	}
 	return b.emit(ctx, port, data)
 }

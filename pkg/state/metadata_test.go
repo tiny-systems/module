@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/state"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -51,18 +52,18 @@ type recordedEmit struct {
 }
 
 func (r *recordedEmit) Emit() state.EmitFunc {
-	return func(_ context.Context, port string, data any) any {
+	return func(_ context.Context, port string, data any) module.Result {
 		if port != v1alpha1.ReconcilePort {
-			return nil
+			return module.Result{}
 		}
 		updater, ok := data.(func(*v1alpha1.TinyNode) error)
 		if !ok {
-			return nil
+			return module.Result{}
 		}
 		r.mu.Lock()
 		r.updaters = append(r.updaters, updater)
 		r.mu.Unlock()
-		return nil
+		return module.Result{}
 	}
 }
 

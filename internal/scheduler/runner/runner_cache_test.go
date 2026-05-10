@@ -21,8 +21,8 @@ func (c *mockComponent) GetInfo() m.ComponentInfo {
 	return m.ComponentInfo{Name: "mock", Description: "Mock component for testing"}
 }
 
-func (c *mockComponent) Handle(ctx context.Context, output m.Handler, port string, message any) any {
-	return nil
+func (c *mockComponent) Handle(ctx context.Context, output m.Handler, port string, message any) m.Result {
+	return m.Result{}
 }
 
 func (c *mockComponent) Ports() []m.Port {

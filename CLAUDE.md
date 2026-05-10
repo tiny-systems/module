@@ -19,18 +19,33 @@
 
 TinySystems uses blocking I/O. HTTP Server blocks waiting for responses to flow back through the handler chain. If any component ignores the handler return, responses are lost and requests time out.
 
-```go
-// WRONG - breaks blocking I/O, causes timeouts
-_ = handler(ctx, "error", Error{...})
-return nil
+`module.Handler` and `Component.Handle` both return `module.Result`. Construct it via `module.Ok(value)` or `module.Fail(err)`. Chain handler calls back as the Handle return:
 
-// CORRECT - propagates response back through call chain
+```go
+// WRONG — breaks blocking I/O, causes timeouts
+_ = handler(ctx, "error", Error{...})
+return module.Result{}
+
+// CORRECT — propagates response back through call chain
 return handler(ctx, "error", Error{...})
 ```
 
-**Only exceptions:**
-- `_reconcile` port (internal system port, no response expected)
-- True fire-and-forget async operations
+When emitting fresh data, wrap with Ok / Fail:
+
+```go
+// Fresh success (no chained downstream): wrap the payload
+return module.Ok(Response{StatusCode: 200, Body: body})
+
+// Fresh failure
+return module.Fail(fmt.Errorf("invalid request: %w", err))
+
+// No-op success (system-port branches, ignored ports)
+return module.Result{}
+```
+
+**Only exceptions to "always return":**
+- `_reconcile` port (internal system port, no response expected) — use the `ReconcileHandler` capability interface, not the legacy port branch
+- True fire-and-forget async operations launched from background goroutines (use `Base.Emit` and let the zero-Result no-op stand)
 
 When writing components, always ask: "Does this handler call need to return a response to an upstream blocker?" If yes (which is most cases), return the handler result.
 

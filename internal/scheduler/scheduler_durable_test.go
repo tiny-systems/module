@@ -85,13 +85,13 @@ func (d *durableSinkComponent) Ports() []module.Port {
 		{Name: "in", Configuration: map[string]any{}, Durable: true},
 	}
 }
-func (d *durableSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+func (d *durableSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
 	if port == "in" {
 		d.mu.Lock()
 		d.handleHits++
 		d.mu.Unlock()
 	}
-	return nil
+	return module.Result{}
 }
 
 func (d *durableSinkComponent) hits() int {

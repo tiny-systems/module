@@ -36,7 +36,7 @@ const pendingTTL = 5 * time.Second
 // EmitFunc emits a message to a port on the owning runner. The metadata
 // backend uses this to publish reconcile-port updaters that patch
 // TinyNode.Status.Metadata. Matches module.Handler's signature.
-type EmitFunc func(ctx context.Context, port string, data any) any
+type EmitFunc func(ctx context.Context, port string, data any) module.Result
 
 // pendingEntry tracks a write that hasn't yet been observed via the watch.
 // value == nil means a tombstone (pending delete).

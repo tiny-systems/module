@@ -209,29 +209,29 @@ func (c *Runner) NotifyReconcile(metadata map[string]string) {
 // settings/control/reconcile/identity/client must implement the respective
 // capability interface (SettingsHandler, ControlHandler, ReconcileHandler,
 // IdentityAware, ClientAware).
-func (c *Runner) dispatchCapability(ctx context.Context, port string, data any) (any, bool) {
+func (c *Runner) dispatchCapability(ctx context.Context, port string, data any) (m.Result, bool) {
 	switch port {
 	case v1alpha1.SettingsPort:
 		if h, ok := c.component.(m.SettingsHandler); ok {
 			if err := h.OnSettings(ctx, data); err != nil {
-				return err, true
+				return m.Fail(err), true
 			}
 		}
-		return nil, true
+		return m.Result{}, true
 	case v1alpha1.ControlPort:
 		if h, ok := c.component.(m.ControlHandler); ok {
 			if err := h.OnControl(ctx, data); err != nil {
-				return err, true
+				return m.Fail(err), true
 			}
 		}
-		return nil, true
+		return m.Result{}, true
 	case v1alpha1.ReconcilePort, v1alpha1.ClientPort, v1alpha1.IdentityPort:
 		// These are dispatched by scheduler.Update directly via Phase 1.
 		// Block any signal-based or stray delivery from reaching legacy
 		// Handle as a safety net.
-		return nil, true
+		return m.Result{}, true
 	}
-	return nil, false
+	return m.Result{}, false
 }
 
 // getPorts get ports cache or an actual node ports
@@ -570,7 +570,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	inputData, _ := json.Marshal(portData)
 	c.addSpanPortData(inputSpan, string(inputData))
 
-	var resp any
+	var resp m.Result
 
 	// Add source node to context for ownership tracking
 	sourceNode, _ := utils.ParseFullPortName(msg.From)
@@ -611,7 +611,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		if !handled {
 			resp = c.component.Handle(ctx, c.DataHandler(msgHandler), port, portData)
 		}
-		return utils.CheckForError(resp)
+		return resp.Err()
 	})
 
 	handleDuration := time.Since(handleStart)
@@ -632,16 +632,16 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 			"from", msg.From,
 			"handleDuration", handleDuration.String(),
 			"ctxErrAfterHandle", ctx.Err(),
-			"hasResponse", resp != nil,
+			"hasResponse", resp.Value() != nil,
 		)
 	}
 
-	return resp, err
+	return resp.Value(), err
 }
 
-func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Context, outputPort string, outputData any) any {
+func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Context, outputPort string, outputData any) m.Result {
 
-	return func(outputCtx context.Context, outputPort string, outputData any) any {
+	return func(outputCtx context.Context, outputPort string, outputData any) m.Result {
 		// ControlPort messages trigger a status update to reflect new control state
 		// This ensures UI sees updated control values (e.g., Running status, Stop button)
 		if outputPort == v1alpha1.ControlPort {
@@ -676,7 +676,7 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 					)
 				}
 			})
-			return nil
+			return m.Result{}
 		}
 
 		if outputPort == v1alpha1.ReconcilePort {
@@ -728,12 +728,12 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 					"pendingUpdaters", len(c.pendingNodeUpdaters),
 				)
 			}
-			return nil
+			return m.Result{}
 		}
 
 		u, err := uuid.NewUUID()
 		if err != nil {
-			return err
+			return m.Fail(err)
 		}
 
 		// Create non-cancellable context that preserves trace hierarchy
@@ -756,9 +756,9 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 				"port", outputPort,
 				"node", c.name,
 			)
-			return err
+			return m.Fail(err)
 		}
-		return res
+		return m.Pass(res)
 	}
 
 }

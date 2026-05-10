@@ -421,7 +421,7 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 	if isNew {
 		// Long-lived Handler closure shared by State backend and any
 		// EmitterAware component that needs to publish from goroutines.
-		emit := module.Handler(func(emitCtx context.Context, port string, data any) any {
+		emit := module.Handler(func(emitCtx context.Context, port string, data any) module.Result {
 			return runnerInstance.DataHandler(s.msgHandler)(emitCtx, port, data)
 		})
 

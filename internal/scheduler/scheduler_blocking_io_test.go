@@ -97,11 +97,11 @@ func (p *passThroughComponent) Ports() []module.Port {
 		{Name: "out", Source: true, Configuration: map[string]any{}},
 	}
 }
-func (p *passThroughComponent) Handle(ctx context.Context, output module.Handler, port string, msg any) any {
+func (p *passThroughComponent) Handle(ctx context.Context, output module.Handler, port string, msg any) module.Result {
 	if port == "in" {
 		return output(ctx, "out", msg)
 	}
-	return nil
+	return module.Result{}
 }
 
 // blockingSinkComponent receives on `in` and:
@@ -123,9 +123,9 @@ func (b *blockingSinkComponent) Instance() module.Component { return b }
 func (b *blockingSinkComponent) Ports() []module.Port {
 	return []module.Port{{Name: "in", Configuration: map[string]any{}}}
 }
-func (b *blockingSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+func (b *blockingSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
 	if port != "in" {
-		return nil
+		return module.Result{}
 	}
 	b.calls.Add(1)
 	if b.entered != nil {
@@ -137,7 +137,7 @@ func (b *blockingSinkComponent) Handle(_ context.Context, _ module.Handler, port
 	if b.release != nil {
 		<-b.release
 	}
-	return b.returnValue
+	return module.Pass(b.returnValue)
 }
 
 // errorSinkComponent receives on `in` and returns the configured error.
@@ -153,11 +153,11 @@ func (e *errorSinkComponent) Instance() module.Component { return e }
 func (e *errorSinkComponent) Ports() []module.Port {
 	return []module.Port{{Name: "in", Configuration: map[string]any{}}}
 }
-func (e *errorSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+func (e *errorSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
 	if port != "in" {
-		return nil
+		return module.Result{}
 	}
-	return e.err
+	return module.Fail(e.err)
 }
 
 // transientErrorSinkComponent fails the first N calls then returns nil,
@@ -176,15 +176,15 @@ func (t *transientErrorSinkComponent) Instance() module.Component { return t }
 func (t *transientErrorSinkComponent) Ports() []module.Port {
 	return []module.Port{{Name: "in", Configuration: map[string]any{}}}
 }
-func (t *transientErrorSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+func (t *transientErrorSinkComponent) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
 	if port != "in" {
-		return nil
+		return module.Result{}
 	}
 	n := t.calls.Add(1)
 	if n <= t.failsBefore {
-		return t.retryErr
+		return module.Fail(t.retryErr)
 	}
-	return nil
+	return module.Result{}
 }
 
 // edge constructs a TinyNodeEdge with a deterministic ID.

@@ -21,9 +21,9 @@ type settingsCapableMock struct {
 	gotSettings     atomic.Value // any
 }
 
-func (c *settingsCapableMock) Handle(_ context.Context, _ m.Handler, _ string, _ any) any {
+func (c *settingsCapableMock) Handle(_ context.Context, _ m.Handler, _ string, _ any) m.Result {
 	c.handleCalls.Add(1)
-	return nil
+	return m.Result{}
 }
 
 func (c *settingsCapableMock) OnSettings(_ context.Context, settings any) error {
@@ -41,9 +41,9 @@ type controlCapableMock struct {
 	handleCalls    atomic.Int32
 }
 
-func (c *controlCapableMock) Handle(_ context.Context, _ m.Handler, _ string, _ any) any {
+func (c *controlCapableMock) Handle(_ context.Context, _ m.Handler, _ string, _ any) m.Result {
 	c.handleCalls.Add(1)
-	return nil
+	return m.Result{}
 }
 
 func (c *controlCapableMock) OnControl(_ context.Context, _ any) error {
@@ -60,9 +60,9 @@ type legacyMock struct {
 	handleCalls atomic.Int32
 }
 
-func (c *legacyMock) Handle(_ context.Context, _ m.Handler, _ string, _ any) any {
+func (c *legacyMock) Handle(_ context.Context, _ m.Handler, _ string, _ any) m.Result {
 	c.handleCalls.Add(1)
-	return nil
+	return m.Result{}
 }
 
 func (c *legacyMock) Instance() m.Component { return c }
@@ -82,8 +82,8 @@ func TestDispatchCapability_SettingsRoutesToOnSettings(t *testing.T) {
 	if !handled {
 		t.Fatalf("dispatchCapability returned handled=false for SettingsHandler component")
 	}
-	if resp != nil {
-		t.Errorf("dispatchCapability returned resp=%v on success; want nil", resp)
+	if resp.IsErr() || resp.Value() != nil {
+		t.Errorf("dispatchCapability returned non-empty resp on success: err=%v value=%v", resp.Err(), resp.Value())
 	}
 	if cmp.onSettingsCalls.Load() != 1 {
 		t.Errorf("OnSettings called %d times; want 1", cmp.onSettingsCalls.Load())
@@ -107,9 +107,9 @@ func TestDispatchCapability_SettingsErrorPropagated(t *testing.T) {
 	if !handled {
 		t.Fatalf("dispatchCapability returned handled=false; expected true even on error")
 	}
-	gotErr, ok := resp.(error)
-	if !ok {
-		t.Fatalf("resp is not an error; got %T (%v)", resp, resp)
+	gotErr := resp.Err()
+	if gotErr == nil {
+		t.Fatalf("resp.Err() is nil; want %v", wantErr)
 	}
 	if !errors.Is(gotErr, wantErr) {
 		t.Errorf("resp error = %v; want %v", gotErr, wantErr)
@@ -154,8 +154,8 @@ func TestDispatchCapability_SystemPortsAlwaysHandled(t *testing.T) {
 		if !handled {
 			t.Errorf("dispatchCapability(%q) returned handled=false; system ports must always be handled", port)
 		}
-		if resp != nil {
-			t.Errorf("dispatchCapability(%q) on legacy component returned resp=%v; want nil (no-op)", port, resp)
+		if resp.IsErr() || resp.Value() != nil {
+			t.Errorf("dispatchCapability(%q) on legacy component returned non-empty resp: err=%v value=%v", port, resp.Err(), resp.Value())
 		}
 	}
 
