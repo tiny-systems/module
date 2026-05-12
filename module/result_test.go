@@ -60,23 +60,6 @@ func TestResult_FailNilErrCollapsesToZero(t *testing.T) {
 	}
 }
 
-func TestResult_PassRoutesByValueType(t *testing.T) {
-	wantErr := errors.New("from pass")
-
-	r := module.Pass(wantErr)
-	if !r.IsErr() {
-		t.Errorf("Pass(error) reports IsErr=false; the migration helper must classify error-typed values as failures")
-	}
-
-	r = module.Pass("hello")
-	if r.IsErr() {
-		t.Errorf("Pass(string) reports IsErr=true; non-error values must classify as success")
-	}
-	if got := r.Value(); got != "hello" {
-		t.Errorf("Pass(\"hello\").Value() = %v; want \"hello\"", got)
-	}
-}
-
 func TestResult_ZeroIsSuccess(t *testing.T) {
 	var r module.Result
 	if r.IsErr() {

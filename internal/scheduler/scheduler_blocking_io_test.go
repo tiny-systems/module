@@ -137,7 +137,10 @@ func (b *blockingSinkComponent) Handle(_ context.Context, _ module.Handler, port
 	if b.release != nil {
 		<-b.release
 	}
-	return module.Pass(b.returnValue)
+	if err, ok := b.returnValue.(error); ok {
+		return module.Fail(err)
+	}
+	return module.Ok(b.returnValue)
 }
 
 // errorSinkComponent receives on `in` and returns the configured error.

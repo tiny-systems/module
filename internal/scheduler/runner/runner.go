@@ -758,7 +758,7 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			)
 			return m.Fail(err)
 		}
-		return m.Pass(res)
+		return m.Ok(res)
 	}
 
 }

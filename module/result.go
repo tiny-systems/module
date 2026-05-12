@@ -34,13 +34,6 @@ func Fail(err error) Result {
 	return Result{inner: err}
 }
 
-// Pass wraps whatever the value is, treating error-typed values as
-// failures. Bridge for sites that still receive untyped any from legacy
-// chains during migration. New code should use Ok / Fail directly.
-func Pass(v any) Result {
-	return Result{inner: v}
-}
-
 // Err returns the wrapped error, or nil if the result is a success.
 // This is what the runner calls to decide retry vs commit.
 func (r Result) Err() error {
