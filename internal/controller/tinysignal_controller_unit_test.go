@@ -2,10 +2,9 @@ package controller
 
 // Unit tests for the TinySignal reconciler's delete-after-success logic.
 //
-// These exercise the behavior contract introduced for durable-port
-// delivery: the reconciler must DELIVER first and DELETE only on success;
-// transient failure must leave the signal so the next pod / next reconcile
-// can retry; permanent failure must drop the signal so we don't loop forever.
+// The reconciler must DELIVER first and DELETE only on success; transient
+// failure must leave the signal so the next pod / next reconcile can retry;
+// permanent failure must drop the signal so we don't loop forever.
 
 import (
 	"context"
@@ -262,8 +261,7 @@ func TestReconcile_TargetInstanceNotReadyRequeues(t *testing.T) {
 
 // TestReconcile_ForwardsEdgeIDToScheduler — the signal carries Spec.EdgeID
 // (the parent edge that produced this work); the reconciler must pass it
-// to scheduler.Handle so subsequent durable-port persists hash with the
-// same edgeID and dedup correctly.
+// to scheduler.Handle.
 func TestReconcile_ForwardsEdgeIDToScheduler(t *testing.T) {
 	sched := &fakeScheduler{hasInstance: true}
 	r, _, sig := newReconcilerWithSignal(t, sched, true, "sig-edge", operatorv1alpha1.TinySignalSpec{

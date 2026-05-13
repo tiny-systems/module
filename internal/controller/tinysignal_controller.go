@@ -64,19 +64,11 @@ const deliveryTimeout = 30 * time.Second
 //  1. Filter to this module by signal.Spec.Node (signals are leader-gated
 //     and module-scoped — see RequeueAllOnLeadershipChange).
 //  2. Deliver synchronously to the scheduler.
-//  3. On success — including durable child outputs that have been
-//     persisted as fresh TinySignals during Handle — delete this signal.
-//     Children are owed; our work is done.
+//  3. On success — delete this signal.
 //  4. On permanent error — log and delete; the work has terminally
 //     failed, no point retrying forever.
 //  5. On transient error — leave the signal alone, requeue. The
 //     controller will retry.
-//
-// This is the inverse of the previous fire-and-forget order
-// (delete-before-deliver). The price is that a slow handler holds a
-// reconcile worker for up to deliveryTimeout; the gain is that
-// crash-mid-handle no longer loses the work — the signal stays,
-// the new leader picks it up.
 func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
@@ -173,9 +165,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{Requeue: true}, deliverErr
 	}
 
-	// Success: any durable child outputs were persisted as new TinySignals
-	// during Handle. Our work is done. Delete this signal as the checkpoint
-	// boundary advance.
+	// Success: delete this signal.
 	if err := r.Delete(ctx, &signal); err != nil && !errors.IsNotFound(err) {
 		l.Error(err, "failed to delete signal after successful delivery", "name", req.Name)
 		return ctrl.Result{}, err
