@@ -46,11 +46,6 @@ type ManagerInterface interface {
 	DeleteNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	GetNode(ctx context.Context, name, namespace string) (*v1alpha1.TinyNode, error)
 	CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte, traceID ...string) error
-	// PersistDurableSignal creates a TinySignal with a deterministic name
-	// for the durable-port intake path. AlreadyExists is treated as success
-	// (dedup of retried gRPC calls). The name should be computed via
-	// pkg/signalname.For so retries collide and distinct messages don't.
-	PersistDurableSignal(ctx context.Context, name, nodeName, nodeNamespace, port string, data []byte, edgeID, fromPort string) error
 }
 
 func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
@@ -1280,55 +1275,6 @@ func (m Manager) waitForNodeSyncWithGeneration(ctx context.Context, name, namesp
 	})
 }
 
-// PersistDurableSignal creates a TinySignal CRD with the given deterministic
-// name. AlreadyExists is the dedup signal — first writer wins. The intended
-// caller is the scheduler when a message arrives at a port marked Durable.
-//
-// The name is expected to come from pkg/signalname.For so that:
-//   - retried gRPC calls produce the same name (AlreadyExists, no duplicate)
-//   - distinct messages from any sender produce distinct names
-func (m Manager) PersistDurableSignal(ctx context.Context, name, nodeName, nodeNamespace, port string, data []byte, edgeID, fromPort string) error {
-	node, err := m.GetNode(ctx, nodeName, nodeNamespace)
-	if err != nil {
-		return fmt.Errorf("durable signal: get owner node: %w", err)
-	}
-
-	signal := &v1alpha1.TinySignal{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: nodeNamespace,
-			Labels: map[string]string{
-				v1alpha1.NodeNameLabel: nodeName,
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: node.APIVersion,
-					Kind:       node.Kind,
-					Name:       node.Name,
-					UID:        node.UID,
-					Controller: func() *bool { b := true; return &b }(),
-				},
-			},
-		},
-		Spec: v1alpha1.TinySignalSpec{
-			Node:   nodeName,
-			Port:   port,
-			Data:   data,
-			EdgeID: edgeID,
-			From:   fromPort,
-		},
-	}
-
-	if err := m.client.Create(ctx, signal); err != nil {
-		if errors.IsAlreadyExists(err) {
-			// Deterministic name collision = same logical work already
-			// owed; treat as success so retried gRPC calls dedup cleanly.
-			return nil
-		}
-		return fmt.Errorf("durable signal: create: %w", err)
-	}
-	return nil
-}
 
 // isNodeSynced checks if a node has been processed by the controller
 func isNodeSynced(node *v1alpha1.TinyNode) bool {

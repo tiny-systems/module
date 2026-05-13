@@ -100,8 +100,7 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Module-scope filter: parse the target node, not the signal's own
-	// metadata.name. Names from pkg/signalname are deterministic-hash
-	// based and don't follow the module.component convention.
+	// metadata.name.
 	if signal.Spec.Node == "" {
 		l.Error(fmt.Errorf("empty Spec.Node"), "tinysignal has no target node", "name", req.Name)
 		return ctrl.Result{}, nil
@@ -128,10 +127,6 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	deliveryCtx, cancel := context.WithTimeout(context.Background(), deliveryTimeout)
 	defer cancel()
 	deliveryCtx = utils.WithLeader(deliveryCtx, true)
-	// Mark this delivery so scheduler.Handle skips the durable-port persist
-	// step (we ARE the reconciler delivering a persisted signal — re-persisting
-	// would be an infinite loop).
-	deliveryCtx = utils.WithDurableDelivery(deliveryCtx)
 
 	// Inject a remote span context if the signal carries a TraceID so
 	// the resulting trace stitches under the caller-supplied root.
@@ -150,19 +145,9 @@ func (r *TinySignalReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	// For durable-port-persisted signals, signal.Spec.From carries the
-	// original source port so MsgHandler runs edge config evaluation
-	// (target's "from this source" port-config maps source output → target
-	// input shape). For externally-injected signals (send_signal MCP),
-	// Spec.From is empty and we use FromSignal — MsgHandler treats the
-	// payload as already-typed in that case (existing legacy behavior).
-	deliveryFrom := runner.FromSignal
-	if signal.Spec.From != "" {
-		deliveryFrom = signal.Spec.From
-	}
-	l.Info("delivering signal", "targetPort", targetPort, "from", deliveryFrom)
+	l.Info("delivering signal", "targetPort", targetPort)
 	_, deliverErr := r.Scheduler.Handle(deliveryCtx, &runner.Msg{
-		From:   deliveryFrom,
+		From:   runner.FromSignal,
 		To:     targetPort,
 		Data:   signal.Spec.Data,
 		EdgeID: signal.Spec.EdgeID,

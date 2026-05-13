@@ -47,13 +47,6 @@ spec:
                 description: |-
                   EdgeID is the ID of the edge that produced this signal. Empty for
                   externally-triggered signals (e.g. send_signal MCP, ticker fire).
-                  Used by the runtime to feed the durable-port deterministic-naming
-                  hash and to route response-back signals to the correct caller.
-                type: string
-              from:
-                description: |-
-                  From identifies the source port that produced this signal in the
-                  format "node:port". Empty for externally-triggered signals.
                 type: string
               node:
                 description: Node is the name of the TinyNode to signal
