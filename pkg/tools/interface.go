@@ -28,13 +28,27 @@ type ProjectElements struct {
 // FlowInfo contains basic flow information
 type FlowInfo struct {
 	ResourceName string `json:"resource_name"`
-	Title        string `json:"title"`
+	DisplayName  string `json:"display_name"`
 }
 
 // ProjectReader is an interface for reading entire project state
 type ProjectReader interface {
 	// ReadProjectElements reads all elements from the project with flow ownership info
 	ReadProjectElements(ctx context.Context, projectName string) (*ProjectElements, error)
+}
+
+// ProjectInfo is the basic info returned for each project by ProjectLister.
+type ProjectInfo struct {
+	ResourceName string `json:"resource_name"`
+	DisplayName  string `json:"display_name"`
+}
+
+// ProjectLister enumerates projects accessible in the current context. The
+// MCP server reads TinyProject CRDs from the cluster namespace; the
+// platform-hosted version reads from the workspace database. The "scope"
+// (which projects are visible) is implicit in the adapter.
+type ProjectLister interface {
+	ListProjects(ctx context.Context) ([]ProjectInfo, error)
 }
 
 // FlowModifier is an interface for applying flow changes (used by edit_flow's delete_node and delete_edge actions)
@@ -483,6 +497,7 @@ type ExecutionContext struct {
 
 	// Flow state
 	ProjectReader ProjectReader
+	ProjectLister ProjectLister
 	FlowSaver     FlowSaver
 	FlowModifier  FlowModifier
 
