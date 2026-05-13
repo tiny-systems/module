@@ -37,7 +37,7 @@ type ProjectReader interface {
 	ReadProjectElements(ctx context.Context, projectName string) (*ProjectElements, error)
 }
 
-// FlowModifier is an interface for applying flow changes (used by delete_node, delete_edge)
+// FlowModifier is an interface for applying flow changes (used by edit_flow's delete_node and delete_edge actions)
 type FlowModifier interface {
 	// ApplyFlowChanges applies operations to the flow and returns results per operation
 	ApplyFlowChanges(ctx context.Context, projectName, flowName string, operations []FlowOperation) ([]OperationResult, error)

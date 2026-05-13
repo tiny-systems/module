@@ -24,10 +24,10 @@ Always refer to the platform as "Tiny Systems" (two words) in prose. Never write
 
 ## How to Build a Flow
 
-**Use build_flow to create new flows in one call** — it creates nodes, edges, and configuration together. Much faster than individual add_node/add_edge/configure_edge calls.
+**Use build_flow to create new flows in one call** — it creates nodes, edges, and configuration together. Much faster than incremental edit_flow calls.
 
 1. **Discover** — call ` + "`list_modules`" + ` to see what's installed, then ` + "`get_component_info`" + ` for each component you plan to use. Parallelize multiple ` + "`get_component_info`" + ` calls. The component's ` + "`info`" + ` field carries behavior notes (blocking semantics, gotchas) — read it before wiring.
-2. **Build** — call ` + "`build_flow`" + ` with a complete spec (nodes + edges + configurations). If validation errors come back, fix them with the individual tools.
+2. **Build** — call ` + "`build_flow`" + ` with a complete spec (nodes + edges + configurations). If validation errors come back, fix them with ` + "`edit_flow`" + ` (action-parameterized: add_node, delete_node, add_edge, delete_edge, configure_edge, configure_node).
 3. **Trigger** — call ` + "`send_signal`" + ` to fire data into a trigger port. Use ` + "`get_trace_detail`" + ` with the returned trace_id to inspect the result.
 
 Example build_flow call:
@@ -86,13 +86,13 @@ When a field is marked ` + "`configurable: true`" + ` in a component's schema, y
 
 Two places to supply schemas:
 
-**On node settings** (via build_flow's ` + "`settings_schema`" + ` or ` + "`configure_node_settings`" + `'s ` + "`schema`" + ` parameter):
+**On node settings** (via build_flow's ` + "`settings_schema`" + ` or ` + "`edit_flow(action: configure_node)`" + `'s ` + "`schema`" + ` parameter):
 ` + "```" + `
 settings: {context: {token: ""}}
 settings_schema: {context: {type: "object", properties: {token: {type: "string"}}}}
 ` + "```" + `
 
-**On edge configuration** (via configure_edge's ` + "`schema`" + ` parameter):
+**On edge configuration** (via build_flow or ` + "`edit_flow(action: configure_edge)`" + `'s ` + "`schema`" + ` parameter):
 ` + "```" + `
 configuration: {context: "{{$}}"}
 schema: {context: {type: "object", properties: {token: {type: "string"}}}}
@@ -107,7 +107,7 @@ schema: {context: {type: "object", properties: {token: {type: "string"}}}}
 
 Components may have these special ports — do NOT wire edges to or from them unless specifically documented:
 
-- ` + "`_settings`" + ` — receives component settings (configured via ` + "`configure_node_settings`" + `, not edges)
+- ` + "`_settings`" + ` — receives component settings (configured via ` + "`edit_flow(action: configure_node)`" + ` or in build_flow's ` + "`settings`" + ` field, not edges)
 - ` + "`_control`" + ` — dashboard control (user interactions with start/stop buttons etc.)
 - ` + "`_reconcile`" + ` — periodic internal refresh
 - ` + "`_client`" + ` — receives the Kubernetes client wrapper (internal)
@@ -152,10 +152,10 @@ edge: encoded: "{{$.encoded}}"   ← typed as string → no scenario needed
 **Build workflow:**
 1. Create nodes
 2. Before configuring edges, check whether any expressions reference nested fields inside a generic-typed port value
-3. If yes — create a scenario and populate it with sample data (` + "`create_scenario`" + ` + ` + "`update_scenario`" + `)
+3. If yes — create a scenario and populate it with sample data (` + "`scenarios(action: create)`" + ` + ` + "`scenarios(action: update)`" + `)
 4. Configure edges — expressions now validate against the scenario's concrete types
 
-**From traces:** after a successful flow execution (` + "`send_signal`" + ` → no errors in ` + "`get_trace_detail`" + `), save real data: ` + "`create_scenario(name, trace_id)`" + `. Real data beats hand-crafted samples.
+**From traces:** after a successful flow execution (` + "`send_signal`" + ` → no errors in ` + "`get_trace_detail`" + `), save real data: ` + "`scenarios(action: create, name, trace_id)`" + `. Real data beats hand-crafted samples.
 
 ## Flow Lifecycle — Starting, Stopping, Monitoring
 
@@ -189,7 +189,7 @@ Components may have an ` + "`error`" + ` output port. Always wire error ports to
 6. Hold user credentials on an upstream config-holder node (ticker/cron/signal), not directly on the receiving node's settings.
 7. Use ` + "`context: \"{{$.context}}\"`" + ` on subsequent hops to forward context unchanged. ` + "`{{$}}`" + ` only on the first hop from a config-holder.
 8. **No dangling ports** — every input port that can receive data must be connected. Every output port (especially error ports) should be wired. Unconnected ports cause silent data loss.
-9. Call independent tools in parallel (e.g. multiple ` + "`configure_edge`" + ` or ` + "`get_component_info`" + ` calls).
+9. Call independent tools in parallel (e.g. multiple ` + "`get_component_info`" + ` calls, or multiple ` + "`edit_flow`" + ` operations).
 
 ## Response Style
 

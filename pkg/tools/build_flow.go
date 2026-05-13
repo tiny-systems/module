@@ -21,7 +21,7 @@ func (t *BuildFlowTool) Name() string {
 func (t *BuildFlowTool) Description() string {
 	return `Create a complete flow with nodes, edges, and configuration in ONE call.
 
-Use this instead of calling add_node/add_edge/configure_edge individually.
+Use this instead of incremental edit_flow calls when constructing a whole flow at once.
 
 Input:
 - nodes: array of nodes to create (alias, component, module, optional settings/settings_schema)
@@ -89,7 +89,7 @@ func (t *BuildFlowTool) Schema() map[string]interface{} {
 						},
 						"settings": map[string]interface{}{
 							"type":        "object",
-							"description": "Optional settings for _settings port (same as configure_node_settings)",
+							"description": "Optional settings for _settings port (same as edit_flow action=configure_node)",
 						},
 						"settings_schema": map[string]interface{}{
 							"type":        "object",

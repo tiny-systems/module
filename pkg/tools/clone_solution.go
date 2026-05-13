@@ -35,7 +35,7 @@ This tool:
 5. Applies edge configurations
 
 Returns created node/edge IDs and any errors. Partial results are returned on failures.
-Settings schemas are NOT preserved — use configure_node_settings to add schemas for configurable fields after cloning.`
+Settings schemas are NOT preserved — use edit_flow with action=configure_node to add schemas for configurable fields after cloning.`
 }
 
 func (t *CloneSolutionTool) Schema() map[string]interface{} {
