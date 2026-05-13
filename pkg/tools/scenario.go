@@ -108,7 +108,14 @@ func scenariosList(ctx context.Context, execCtx ExecutionContext) ToolResult {
 	if err != nil {
 		return ToolResult{Success: false, Error: fmt.Sprintf("failed to list scenarios: %v", err)}
 	}
-	return ToolResult{Success: true, Output: items}
+	out := map[string]interface{}{
+		"scenarios": items,
+		"total":     len(items),
+	}
+	if len(items) == 0 {
+		out["hint"] = "No scenarios yet. Use scenarios(action: create, name, trace_id) after a send_signal execution, or scenarios(action: create, name) for an empty one."
+	}
+	return ToolResult{Success: true, Output: out}
 }
 
 func scenariosCreate(ctx context.Context, execCtx ExecutionContext, input map[string]interface{}) ToolResult {

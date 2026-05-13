@@ -32,7 +32,9 @@ func (t *GetInstructionsTool) Schema() map[string]interface{} {
 func (t *GetInstructionsTool) Execute(_ context.Context, _ ExecutionContext, _ map[string]interface{}) ToolResult {
 	return ToolResult{
 		Success: true,
-		Output:  t.instructions,
+		Output: map[string]interface{}{
+			"instructions": t.instructions,
+		},
 	}
 }
 

@@ -67,13 +67,16 @@ func (t *GetModuleInfoTool) Execute(ctx context.Context, execCtx ExecutionContex
 	if details == nil {
 		return ToolResult{
 			Success: false,
-			Error:   "module '" + name + "' not found in public catalog",
+			Error:   "module '" + name + "' not found in public catalog. Use search_modules(query) to discover available modules.",
 		}
 	}
 
 	return ToolResult{
 		Success: true,
-		Output:  details,
+		Output: map[string]interface{}{
+			"module": details,
+			"hint":   "This module is not yet installed in your cluster. Install via Helm, then list_modules will show its components and you can wire them with build_flow / edit_flow.",
+		},
 	}
 }
 

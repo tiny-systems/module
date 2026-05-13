@@ -71,7 +71,7 @@ func (t *SendSignalTool) Execute(ctx context.Context, execCtx ExecutionContext, 
 	if nodeID == "" {
 		return ToolResult{
 			Success: false,
-			Error:   "node_id is required",
+			Error:   "node_id is required. Use read_project to list nodes in the current flow and find the trigger node.",
 		}
 	}
 

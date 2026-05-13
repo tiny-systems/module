@@ -65,14 +65,16 @@ func (t *GetSolutionTool) Execute(ctx context.Context, execCtx ExecutionContext,
 		}
 	}
 
-	// Return the full SolutionDetails struct directly. JSON tags on the
-	// struct handle serialization, so every field — uuid, title,
-	// description, tags, flows (with nested nodes/edges and their full
-	// configurations), and variables — reaches the caller without any
-	// manual reshaping that could drop fields.
+	// Wrap the full SolutionDetails — uuid, title, description, tags,
+	// flows (with nested nodes/edges and configs), variables — in a
+	// named field so the LLM can destructure consistently with other
+	// tools that return wrapped maps.
 	return ToolResult{
 		Success: true,
-		Output:  solution,
+		Output: map[string]interface{}{
+			"solution": solution,
+			"hint":     "Use clone_solution(solution_uuid) to copy this solution's flows and nodes into the current project.",
+		},
 	}
 }
 

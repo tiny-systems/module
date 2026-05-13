@@ -40,7 +40,7 @@ func (t *DeleteFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, 
 
 	flowName, _ := input["flow"].(string)
 	if flowName == "" {
-		return ToolResult{Success: false, Error: "flow is required"}
+		return ToolResult{Success: false, Error: "flow is required. Use read_project to list flows in the current project."}
 	}
 
 	if err := execCtx.FlowDeleter.DeleteFlow(ctx, execCtx.ProjectName, flowName); err != nil {

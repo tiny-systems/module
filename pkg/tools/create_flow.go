@@ -51,9 +51,10 @@ func (t *CreateFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, 
 	return ToolResult{
 		Success: true,
 		Output: map[string]interface{}{
-			"flow_name":     resourceName,
-			"display_name":  name,
-			"status":        "flow created",
+			"flow_name":    resourceName,
+			"display_name": name,
+			"status":       "flow created",
+			"hint":         "Use build_flow with a full nodes+edges spec to populate this flow in one call, or edit_flow(action: add_node) to add nodes incrementally.",
 		},
 	}
 }

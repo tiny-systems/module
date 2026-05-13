@@ -78,7 +78,11 @@ func (t *ListModulesTool) Execute(ctx context.Context, execCtx ExecutionContext,
 
 	return ToolResult{
 		Success: true,
-		Output:  result,
+		Output: map[string]interface{}{
+			"modules": result,
+			"total":   len(result),
+			"hint":    "Use get_component_info(component, module) for detailed port schemas and behavior notes before wiring a component into a flow.",
+		},
 	}
 }
 

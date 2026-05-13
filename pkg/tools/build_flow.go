@@ -462,6 +462,13 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 	}
 
+	// Hint about the next obvious step depending on whether the build was clean.
+	if len(errors) > 0 {
+		output["hint"] = "Some operations failed — use edit_flow to fix the specific issues listed in errors[]."
+	} else {
+		output["hint"] = "Flow built. Find the trigger node in nodes_created and call send_signal(node_id) to verify behavior, then get_trace_detail(trace_id) to inspect the result."
+	}
+
 	return ToolResult{
 		Success: true,
 		Output:  output,
