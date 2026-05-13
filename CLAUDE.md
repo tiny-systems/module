@@ -49,6 +49,44 @@ return module.Result{}
 
 When writing components, always ask: "Does this handler call need to return a response to an upstream blocker?" If yes (which is most cases), return the handler result.
 
+## Error Ports: the Recovery Boundary Pattern
+
+Error ports are how flow authors define **self-healing zones**. They are the entire fault-tolerance story in TinySystems — there is no separate retry layer or durability primitive. A component author's job is to expose the right toggle and route failures consistently so the pattern composes across flows.
+
+**The contract authors expect:**
+
+- Every component that can fail in ways an upstream caller might want to handle differently exposes a settings flag — by convention `EnableErrorPort bool` — and a corresponding source output port `ErrorPort = "error"` that appears in `Ports()` only when the flag is on.
+- When the flag is off and an error happens inside `Handle`, return `module.Fail(err)`. The error bubbles up via `Result.Err()` through every intermediate component (each of which is following the "always return handler result" rule above) until it hits an enabled error port or the top of the flow.
+- When the flag is on and an error happens, route via the handler instead:
+
+```go
+func (c *Component) handleError(ctx context.Context, handler module.Handler, reqCtx Context, err error) module.Result {
+    if !c.settings.EnableErrorPort {
+        return module.Fail(err)
+    }
+    return handler(ctx, ErrorPort, Error{
+        Context: reqCtx,
+        Error:   err.Error(),
+    })
+}
+```
+
+The two branches are not duplicates — they encode "let it bubble" vs "catch here and let the author wire recovery downstream from the error port".
+
+**The mental model is try/catch on the canvas.** A chain `A → B → C` where C fails:
+- C returns `module.Fail` → B's `handler(...)` returns Result with `Err() != nil` → B returns that Result up (standard pattern) → A's `handler(...)` returns Result with `Err() != nil` → A decides.
+- If A has `EnableErrorPort` on and routes via the pattern above, the error fires out A's error port to whatever recovery flow the author wired.
+- If A doesn't, the error keeps bubbling up A's own caller.
+
+Each enabled error port is a "catch" boundary. Everything between two error-port boundaries (or between an error port and the top of the flow) is a single transactional unit from the flow author's POV.
+
+**Practical rules for component authors:**
+
+- Expose `EnableErrorPort` on any component that does external side effects (HTTP calls, DB writes, paid APIs, sends, etc.). Authors need recovery options for these.
+- Don't expose it on pure transforms (json encode/decode, template render). Failure in a pure transform is a programming error, not a runtime condition worth catching mid-flow.
+- The Error payload carries Context (so the recovery flow can correlate back to the original work) and an Error string (the failure message). Don't pack large unrelated data into Error structs — recovery flows usually need lean correlation, not the whole request.
+- Always return the handler result from the error-routing call — same propagation rule as success.
+
 ## CRITICAL: System Port Delivery Order
 
 **System ports (`_settings`, `_control`, `_reconcile`, `_identity`) have NO guaranteed delivery order.**
