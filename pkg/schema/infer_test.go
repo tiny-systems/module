@@ -47,9 +47,15 @@ func TestInferFromInstance(t *testing.T) {
 			want:  map[string]interface{}{"type": "string"},
 		},
 		{
-			name:  "template string treated as string",
+			// Templates resolve at runtime to whatever shape the upstream
+			// emits (object/array/number/string). Locking the inferred
+			// type to string here would produce false-positive
+			// "expected string, but got object" validator errors on
+			// passthroughs like `context: "{{$}}"`. Open the field so
+			// the target's native schema decides what's acceptable.
+			name:  "template string leaves type open",
 			input: "{{$.context.token}}",
-			want:  map[string]interface{}{"type": "string"},
+			want:  map[string]interface{}{},
 		},
 		{
 			name:  "empty object",
@@ -124,7 +130,10 @@ func TestInferFromInstance(t *testing.T) {
 			},
 		},
 		{
-			name: "object with template values",
+			// Mixed objects: literal values get typed; templated values
+			// stay open so configurable targets aren't falsely
+			// constrained when the template resolves to a non-string.
+			name: "object with mixed literal and template values",
 			input: map[string]interface{}{
 				"url":    "{{$.context.url}}",
 				"method": "GET",
@@ -132,7 +141,7 @@ func TestInferFromInstance(t *testing.T) {
 			want: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"url":    map[string]interface{}{"type": "string"},
+					"url":    map[string]interface{}{},
 					"method": map[string]interface{}{"type": "string"},
 				},
 			},

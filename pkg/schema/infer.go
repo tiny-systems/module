@@ -25,10 +25,14 @@ var templatePattern = regexp.MustCompile(`\{\{.*?\}\}`)
 //   - integer-valued number → {type: "integer"}; non-integer → {type: "number"}.
 //     (JSON unmarshalling gives us float64 for all numbers, so the
 //     distinction is lost unless the caller passes a Go int directly.)
-//   - string → {type: "string"}. Templates ("{{...}}") get the same
-//     treatment — at write-time the value IS a string; downstream
-//     validators may need an explicit schema if the rendered value will
-//     be something else.
+//   - string → {type: "string"}, UNLESS the string contains a
+//     {{...}} template. Templates resolve at runtime to whatever shape
+//     the upstream emits (object, array, number, etc.), so locking the
+//     inferred type to string would produce false-positive "expected
+//     string, but got object" validator errors on perfectly valid
+//     passthroughs like `context: "{{$}}"`. For templated values, the
+//     inferrer leaves the field's type open and defers to the target
+//     port's native schema or an explicit caller-supplied schema.
 //   - map[string]any (or compatible) → {type: "object", properties: {...}}
 //     with each property inferred recursively.
 //   - []any (or compatible) → {type: "array", items: <inferred from first
@@ -51,6 +55,12 @@ func InferFromInstance(value any) map[string]interface{} {
 	case float64:
 		return numberOrInteger(v)
 	case string:
+		if IsTemplate(v) {
+			// Template will resolve to upstream-emitted shape at runtime —
+			// leave the field's type open so configurable target schemas
+			// continue to accept whatever the upstream actually emits.
+			return map[string]interface{}{}
+		}
 		return map[string]interface{}{"type": "string"}
 	case map[string]interface{}:
 		return inferObject(v)
