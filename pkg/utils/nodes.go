@@ -319,6 +319,14 @@ type Destination struct {
 	Name string
 	// if destination is a source port
 	Configuration []byte
+	// Schema is the optional edge-level schema override declared by the
+	// flow author (passed as configure_edge's `schema` parameter). When
+	// the chain simulator can't reconstruct concrete values for fields
+	// in the resolved data (because they flow through a configurable
+	// upstream field), this schema is consulted to substitute typed
+	// mock values — so downstream validation sees the shape the author
+	// asserted rather than nulls.
+	Schema []byte
 }
 
 func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[string][]v1alpha1.TinyNodePortConfig, map[string][]Destination, map[string]*ajson.Node, map[string]struct{}, error) {
@@ -399,7 +407,10 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 				destinationsMap[edge.To] = make([]Destination, 0)
 			}
 
-			var configuration []byte
+			var (
+				configuration []byte
+				schemaBytes   []byte
+			)
 			// current node is edge's target
 			targetID := GetPortFullName(node.Name, edge.Port)
 			portConfigs, _ := portConfigMap[edge.To]
@@ -409,6 +420,7 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 
 				if pc.From == targetID && pc.Port == sourcePort {
 					configuration = pc.Configuration
+					schemaBytes = pc.Schema
 					break
 				}
 			}
@@ -417,6 +429,7 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 				// in vueflow the source it is a destination
 				Name:          targetID,
 				Configuration: configuration,
+				Schema:        schemaBytes,
 			})
 		}
 

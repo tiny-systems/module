@@ -106,6 +106,18 @@ func SimulatePortDataFromMaps(
 					if err != nil {
 						return nil, true, err
 					}
+					// When the edge author provided an explicit schema for
+					// the configurable target field (configure_edge's
+					// `schema` param), use it to fill typed defaults for
+					// any field that the upstream sim couldn't resolve
+					// concretely. Without this, chains that pass user
+					// data through configurable fields (e.g. context
+					// through a router) produce nulls downstream and
+					// trip the strict validator on real-but-unprovable
+					// flows.
+					if len(dest.Schema) > 0 {
+						data = fillTypedDefaults(data, dest.Schema)
+					}
 					results = append(results, data)
 				}
 			}
@@ -213,6 +225,98 @@ func SimulatePortDataFromMaps(
 // This is a convenience wrapper around SimulatePortData.
 func SimulatePortDataSimple(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode, inspectPortFullName string) (interface{}, error) {
 	return SimulatePortData(ctx, nodesMap, inspectPortFullName, nil)
+}
+
+// fillTypedDefaults walks `data` against `schemaBytes` and substitutes
+// schema-derived fake values for any null fields, using the same
+// JSONSchemaBasedDataGenerator that powers port simulation elsewhere.
+// Used to honor user-declared edge schemas during chain simulation
+// when upstream values can't be resolved (chain passes through
+// configurable fields).
+//
+// The schema as stored on an edge is typically a per-field bag
+// ({context: {...}, foo: {...}}) — not a full JSON Schema document.
+// We unmarshal it as ajson and let the generator do per-field mocking
+// based on declared type / properties.
+func fillTypedDefaults(data interface{}, schemaBytes []byte) interface{} {
+	if len(schemaBytes) == 0 {
+		return data
+	}
+	root, err := ajson.Unmarshal(schemaBytes)
+	if err != nil {
+		return data
+	}
+	asMap, ok := data.(map[string]interface{})
+	if !ok {
+		// Non-object payloads: if entirely null and the schema is a
+		// single field declaration, generate from it.
+		if data != nil {
+			return data
+		}
+		mock, err := jsonschemagenerator.NewSchemaBasedDataGenerator().Generate(root, nil)
+		if err != nil {
+			return data
+		}
+		return mock
+	}
+
+	for _, k := range root.Keys() {
+		fieldSchema, err := root.GetKey(k)
+		if err != nil || fieldSchema == nil {
+			continue
+		}
+		current, present := asMap[k]
+		if !present || current == nil {
+			mock, mockErr := jsonschemagenerator.NewSchemaBasedDataGenerator().Generate(fieldSchema, nil)
+			if mockErr == nil {
+				asMap[k] = mock
+			}
+			continue
+		}
+		// The eval may have produced an object with null leaves (e.g.
+		// {context: {apiKey: null, ...}} when upstream couldn't resolve
+		// templated fields). Recurse so those leaves get filled from
+		// the declared property schema.
+		asMap[k] = mergeMocksIntoObject(current, fieldSchema)
+	}
+	return asMap
+}
+
+// mergeMocksIntoObject walks an evaluated object against a JSON Schema
+// node and substitutes generator mocks for any null leaves. Non-null
+// leaves are preserved verbatim — we only fill where the chain
+// simulator couldn't resolve a value.
+func mergeMocksIntoObject(value interface{}, schemaNode *ajson.Node) interface{} {
+	asMap, ok := value.(map[string]interface{})
+	if !ok {
+		if value == nil {
+			mock, err := jsonschemagenerator.NewSchemaBasedDataGenerator().Generate(schemaNode, nil)
+			if err == nil {
+				return mock
+			}
+		}
+		return value
+	}
+	props, err := schemaNode.GetKey("properties")
+	if err != nil || props == nil {
+		return asMap
+	}
+	for _, k := range props.Keys() {
+		propSchema, err := props.GetKey(k)
+		if err != nil || propSchema == nil {
+			continue
+		}
+		current, present := asMap[k]
+		if !present || current == nil {
+			mock, mockErr := jsonschemagenerator.NewSchemaBasedDataGenerator().Generate(propSchema, nil)
+			if mockErr == nil {
+				asMap[k] = mock
+			}
+			continue
+		}
+		asMap[k] = mergeMocksIntoObject(current, propSchema)
+	}
+	return asMap
 }
 
 // GetPortHandles returns all handles for a node, properly formatted for the frontend
