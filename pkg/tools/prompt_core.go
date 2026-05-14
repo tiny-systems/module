@@ -52,7 +52,7 @@ build_flow(
 Use ` + "`{{expression}}`" + ` for dynamic values in edge configurations:
 
 - **JSONPath:** ` + "`{{$.field}}`" + `, ` + "`{{$.nested.path}}`" + `, ` + "`{{$}}`" + ` (whole message)
-- **Comparisons:** ` + "`==`" + ` ` + "`!=`" + ` ` + "`<`" + ` ` + "`<=`" + ` ` + "`>`" + ` ` + "`>=`" + ` ` + "`=~`" + ` (regex). Logical: ` + "`&&`" + ` ` + "`||`" + ` ` + "`!`" + ` ` + "`not()`" + `. Ternary: ` + "`{{cond ? a : b}}`" + `.
+- **Comparisons:** ` + "`==`" + ` ` + "`!=`" + ` ` + "`<`" + ` ` + "`<=`" + ` ` + "`>`" + ` ` + "`>=`" + ` ` + "`=~`" + ` (regex). Logical: ` + "`&&`" + ` ` + "`||`" + `. For negation use ` + "`not(expr)`" + ` — unary ` + "`!`" + ` is NOT supported and errors with "wrong symbol '!'". Ternary: ` + "`{{cond ? a : b}}`" + `.
 - **String:** ` + "`upper`" + ` ` + "`lower`" + ` ` + "`trim`" + ` ` + "`reverse`" + ` ` + "`b64encode`" + ` ` + "`b64decode`" + ` (1-arg); ` + "`split`" + ` ` + "`join`" + ` ` + "`contains`" + ` ` + "`hasprefix`" + ` ` + "`hassuffix`" + ` ` + "`replace`" + ` ` + "`substr`" + ` ` + "`index`" + ` (multi-arg).
 - **Array:** ` + "`length`" + ` ` + "`first`" + ` ` + "`last`" + ` ` + "`avg`" + ` ` + "`sum`" + ` ` + "`size`" + `. Use ` + "`length`" + `, NOT ` + "`len`" + `.
 - **Math:** ` + "`abs`" + ` ` + "`ceil`" + ` ` + "`floor`" + ` ` + "`round`" + ` ` + "`sqrt`" + `. Arithmetic: ` + "`+`" + ` ` + "`-`" + ` ` + "`*`" + ` ` + "`/`" + ` ` + "`%`" + ` ` + "`**`" + `.
@@ -62,12 +62,33 @@ Use ` + "`{{expression}}`" + ` for dynamic values in edge configurations:
 
 ## Context Passthrough — Read this before wiring credentials
 
-User credentials and config flow through the graph via a ` + "`context`" + ` field on every message. The pattern is non-obvious and the most common source of "field not found" validator errors:
+User credentials and config flow through the graph via a ` + "`context`" + ` field on every message. **The number one source of broken flows is misreading what ` + "`$`" + ` is at each hop.**
 
-1. **Hold credentials on an upstream config-holder node** — ticker, cron, or signal. Their settings ARE the emitted message, and the schema propagates forward automatically.
-2. **First hop wires** ` + "`context: \"{{$}}\"`" + ` — injects the entire config-holder settings as the downstream ` + "`context`" + `.
-3. **All later hops use** ` + "`context: \"{{$.context}}\"`" + ` — forward unchanged. NEVER use ` + "`{{$}}`" + ` here or paths nest: ` + "`$.context.context.context.field`" + `.
-4. **Read config values** as ` + "`{{$.context.fieldName}}`" + ` at any depth — paths stay flat.
+**Components emit in two different shapes. You MUST know which:**
+
+` + "**Pattern A — context is the root**" + ` (` + "`$` IS the context):" + `
+- ticker / cron / signal
+- router (` + "`out_*` and `default` both emit `in.Context` as root)" + `
+
+` + "**Pattern B — context is a field**" + ` (` + "`$.context` is the context, `$` is a wrapper):" + `
+- array_split emits ` + "`{context, item}`" + `
+- http_request emits ` + "`{context, response}`" + `
+- http_server emits ` + "`{context, body, headers, method, ...}`" + `
+- js_eval emits ` + "`{context, outputData}`" + `
+- inject emits ` + "`{context, config, ...message-fields}`" + ` (config is the injected payload)
+- most kubernetes_module / database_module / encoding_module components
+
+**Concrete rules:**
+
+1. **Hold credentials on an upstream Pattern-A node** (ticker / cron / signal).
+2. **First hop from a Pattern-A source** uses ` + "`context: \"{{$}}\"`" + ` to inject the whole emission into the receiver's ` + "`context`" + `.
+3. **First hop from a Pattern-B source** uses ` + "`context: \"{{$.context}}\"`" + ` to forward the existing context unchanged.
+4. **Field reads:**
+   - After a Pattern-A source: ` + "`{{$.fieldName}}`" + `
+   - After a Pattern-B source: ` + "`{{$.context.fieldName}}`" + `
+5. **Never** use ` + "`{{$}}`" + ` to forward context after a Pattern-B source — paths will double-wrap (` + "`$.context.context.fieldName`" + `).
+
+**Common gotcha — after a router:** router is Pattern A. If you used ` + "`{{$.context.x}}`" + ` upstream of the router, you must switch to ` + "`{{$.x}}`" + ` on the edge leaving the router.
 
 Putting credentials directly on the receiving component (e.g. http_server settings) does NOT propagate their schema downstream. Validator fails with "field not found". Always hold credentials upstream.
 
@@ -96,13 +117,15 @@ Any input port can accept a signal. Common trigger ports: ` + "`signal`" + `, ` 
 
 1. Identify the entry node from ` + "`read_project`" + `
 2. ` + "`get_node_port_schema`" + ` to learn the expected data shape
-3. ` + "`send_signal(node_id, port, data)`" + ` returns a ` + "`trace_id`" + `
-4. ` + "`get_trace_detail(trace_id)`" + ` to inspect the execution
+3. ` + "`send_signal(node_id, port, data)`" + ` returns ` + "`trace_id`" + ` (signal arrival) AND ` + "`execution_traces`" + ` (the actual chain that fired)
+4. ` + "`get_trace_detail`" + ` on the trace with the most spans — that's the execution chain, not the signal trace
+5. The returned detail includes an ` + "`issues`" + ` array at the top: every error and expression failure pulled out of span events. Read this FIRST. If it's empty, the chain ran clean.
 
 ` + "```" + `
-send_signal(node_id: "tinysystems-http-module-v0.client-abc12", port: "request", data: {url: "https://example.com"})
-// → {trace_id: "abc123..."}
-get_trace_detail(trace_id: "abc123...")
+send_signal(node_id: ..., port: "_control", data: {"start": true, "context": {...}})
+// → {trace_id: "<signal>", execution_traces: [{id: "<chain>", spans: 8, errors: 0, ...}]}
+get_trace_detail(trace_id: "<chain>")
+// → {issues: [{kind: "expression_error", expression: "...", error: "..."}], spans: [...]}
 ` + "```" + `
 
 ## Scenarios — Compile-time edge validation
