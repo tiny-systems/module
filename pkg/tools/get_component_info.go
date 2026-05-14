@@ -113,6 +113,9 @@ func (t *GetComponentInfoTool) Execute(ctx context.Context, execCtx ExecutionCon
 				"name":        c.Name,
 				"description": c.Description,
 			}
+			if c.Info != "" {
+				compInfo["info"] = c.Info
+			}
 			if m.Version != "" {
 				compInfo["module_version"] = m.Version
 			}

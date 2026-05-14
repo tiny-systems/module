@@ -125,6 +125,11 @@ type PortDetail struct {
 type ComponentInfo struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
+	// Info carries the component's behavior notes (blocking semantics,
+	// gotchas, when to use it). Populated when the module operator
+	// publishes TinyModuleComponentStatus.Info; LLM callers should read
+	// this before wiring.
+	Info        string   `json:"info,omitempty"`
 	InputPorts  []string `json:"input_ports"`
 	OutputPorts []string `json:"output_ports"`
 	// Detailed port info with schemas — populated by GetModule, optional for ListModules

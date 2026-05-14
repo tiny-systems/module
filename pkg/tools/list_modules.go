@@ -61,6 +61,9 @@ func (t *ListModulesTool) Execute(ctx context.Context, execCtx ExecutionContext,
 				"name":        c.Name,
 				"description": c.Description,
 			}
+			if c.Info != "" {
+				compInfo["info"] = c.Info
+			}
 			if len(c.InputPorts) > 0 {
 				compInfo["input_ports"] = c.InputPorts
 			}
