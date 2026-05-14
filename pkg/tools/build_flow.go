@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/tiny-systems/module/pkg/schema"
 )
 
 // BuildFlowTool creates an entire flow (nodes + edges + configuration) in one call.
@@ -185,6 +187,12 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 
 		settings, _ := m["settings"].(map[string]interface{})
 		settingsSchema, _ := m["settings_schema"].(map[string]interface{})
+		// Auto-infer schema from settings when the caller didn't supply one
+		// and settings actually exist. Removes the "always pass a schema"
+		// burden from LLM callers; explicit schema (if non-nil) still wins.
+		if settingsSchema == nil && len(settings) > 0 {
+			settingsSchema = schema.InferFromInstance(settings)
+		}
 
 		nodes = append(nodes, nodeSpec{
 			Alias:          alias,
@@ -238,7 +246,13 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 
 		configuration, _ := m["configuration"].(map[string]interface{})
-		schema, _ := m["schema"].(map[string]interface{})
+		edgeSchema, _ := m["schema"].(map[string]interface{})
+		// Same fallback as node settings: when the caller supplies data
+		// but no schema, infer one from the data shape. Explicit schema
+		// (if non-nil) wins.
+		if edgeSchema == nil && len(configuration) > 0 {
+			edgeSchema = schema.InferFromInstance(configuration)
+		}
 
 		edges = append(edges, edgeSpec{
 			From:          from,
@@ -248,7 +262,7 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			ToAlias:       toAlias,
 			ToPort:        toPort,
 			Configuration: configuration,
-			Schema:        schema,
+			Schema:        edgeSchema,
 		})
 	}
 

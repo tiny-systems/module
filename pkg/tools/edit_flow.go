@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/tiny-systems/module/pkg/schema"
 )
 
 // EditFlowTool is the single entry point for incremental flow edits.
@@ -279,7 +281,7 @@ func editFlowConfigureEdge(ctx context.Context, execCtx ExecutionContext, input 
 		return ToolResult{Success: false, Error: "edge configurer not configured"}
 	}
 	edgeID, _ := input["edge_id"].(string)
-	schema, _ := input["schema"].(map[string]interface{})
+	edgeSchema, _ := input["schema"].(map[string]interface{})
 	traceID, _ := input["trace_id"].(string)
 	if edgeID == "" {
 		return ToolResult{Success: false, Error: "edge_id is required for configure_edge"}
@@ -296,7 +298,14 @@ func editFlowConfigureEdge(ctx context.Context, execCtx ExecutionContext, input 
 		}
 	}
 
-	result, err := execCtx.EdgeConfigurer.ConfigureEdge(ctx, execCtx.ProjectName, execCtx.FlowName, edgeID, config, schema, traceID)
+	// If no schema was supplied, infer one from the configuration shape so
+	// LLM callers don't have to ship data + schema as two synchronised
+	// arguments. Explicit schema always wins.
+	if edgeSchema == nil && len(config) > 0 {
+		edgeSchema = schema.InferFromInstance(config)
+	}
+
+	result, err := execCtx.EdgeConfigurer.ConfigureEdge(ctx, execCtx.ProjectName, execCtx.FlowName, edgeID, config, edgeSchema, traceID)
 	if err != nil {
 		return ToolResult{Success: false, Error: fmt.Sprintf("failed to configure edge: %s", err.Error())}
 	}
@@ -315,7 +324,7 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 		return ToolResult{Success: false, Error: "node settings configurer not configured"}
 	}
 	nodeID, _ := input["node_id"].(string)
-	schema, _ := input["schema"].(map[string]interface{})
+	settingsSchema, _ := input["schema"].(map[string]interface{})
 	if nodeID == "" {
 		return ToolResult{Success: false, Error: "node_id is required for configure_node"}
 	}
@@ -331,7 +340,13 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 		}
 	}
 
-	result, err := execCtx.NodeSettingsConfigurer.ConfigureNodeSettings(ctx, execCtx.ProjectName, execCtx.FlowName, nodeID, settings, schema)
+	// Same fallback as configure_edge: infer schema from data shape when
+	// the caller didn't supply one. Explicit schema wins.
+	if settingsSchema == nil && len(settings) > 0 {
+		settingsSchema = schema.InferFromInstance(settings)
+	}
+
+	result, err := execCtx.NodeSettingsConfigurer.ConfigureNodeSettings(ctx, execCtx.ProjectName, execCtx.FlowName, nodeID, settings, settingsSchema)
 	if err != nil {
 		return ToolResult{Success: false, Error: fmt.Sprintf("failed to configure node settings: %s", err.Error())}
 	}
