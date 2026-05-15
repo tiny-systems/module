@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,20 @@ import (
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/pkg/evaluator"
 )
+
+// ErrEdgeUnverifiable wraps validation failures that arise from gaps in the
+// simulator's view of upstream data — typically because an upstream
+// `configurable: any` port (json_decode output, js_eval output, http_request
+// response body, etc.) has no concrete shape and no scenario provides one.
+// Runtime data may still satisfy the edge; the UI should surface these as
+// warnings ("verify with a scenario") rather than hard errors.
+var ErrEdgeUnverifiable = errors.New("edge cannot be verified without a scenario")
+
+// IsUnverifiable reports whether an error is an ErrEdgeUnverifiable (or
+// wraps one). Platform code uses this to demote red markers to amber.
+func IsUnverifiable(err error) bool {
+	return errors.Is(err, ErrEdgeUnverifiable)
+}
 
 // ValidateEdge validates an edge's configuration against the target port's schema.
 // It simulates the source port data and evaluates the edge configuration,
@@ -198,7 +213,11 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 
 	// Check if any expression evaluation errors occurred
 	if len(evalErrors) > 0 {
-		return fmt.Errorf("expression error: %s", evalErrors[0])
+		msg := fmt.Sprintf("expression error: %s", evalErrors[0])
+		if isUnverifiableEvalError(evalErrors[0]) {
+			return fmt.Errorf("%w: %s", ErrEdgeUnverifiable, msg)
+		}
+		return errors.New(msg)
 	}
 
 	// Validate against schema
@@ -206,11 +225,63 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 	if err != nil {
 		// Extract cleaner error message from validation error
 		if validationErr, ok := err.(*jsonschema.ValidationError); ok {
-			return formatValidationError(validationErr)
+			formatted := formatValidationError(validationErr)
+			if isUnverifiableSchemaError(validationErr) {
+				return fmt.Errorf("%w: %s", ErrEdgeUnverifiable, formatted.Error())
+			}
+			return formatted
 		}
 		return err
 	}
 	return nil
+}
+
+// isUnverifiableEvalError reports whether an evaluator error string indicates
+// a "we couldn't reach a definite value at sim time" condition rather than a
+// genuine flow bug. These bubble up from ajson when a path like
+// $.decoded.imageTag is walked against a null intermediate (because the
+// upstream `configurable: any` port — json_decode, js_eval, etc. — has no
+// concrete shape in the simulator). Runtime data may still satisfy the
+// expression; only a scenario can prove it one way or the other.
+func isUnverifiableEvalError(msg string) bool {
+	lower := strings.ToLower(msg)
+	// ajson's tell for "an evaluator node never got resolved because its
+	// parent resolved to null". Always sim-only — runtime never hits this
+	// path because real data has actual fields.
+	if strings.Contains(lower, "not parsed yet") {
+		return true
+	}
+	// Common shapes for "walked into a null parent" errors from ajson.
+	if strings.Contains(lower, "is null") || strings.Contains(lower, "null value") {
+		return true
+	}
+	if strings.Contains(lower, "key not found") || strings.Contains(lower, "no such key") {
+		return true
+	}
+	return false
+}
+
+// isUnverifiableSchemaError reports whether a JSON Schema validation failure
+// stems from a simulator null at the leaf rather than a genuine shape
+// mismatch. The pattern is: target requires a concrete type (string, number,
+// boolean, object), but the simulator delivered null because an upstream
+// configurable port couldn't be resolved. Real data would satisfy the schema.
+func isUnverifiableSchemaError(err *jsonschema.ValidationError) bool {
+	leaf := err
+	for len(leaf.Causes) > 0 {
+		leaf = leaf.Causes[0]
+	}
+	msg := strings.ToLower(leaf.Message)
+	// jsonschema/v5 surfaces "expected string, but got null" /
+	// "expected object, but got null" / etc. Treat any "got null" leaf as
+	// sim-uncertainty.
+	if strings.Contains(msg, "got null") {
+		return true
+	}
+	if strings.Contains(msg, "expected") && strings.Contains(msg, "null") {
+		return true
+	}
+	return false
 }
 
 // formatValidationError extracts a clean error message from jsonschema.ValidationError

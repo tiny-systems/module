@@ -198,18 +198,21 @@ func SimulatePortDataFromMaps(
 			return nil, err
 		}
 
-		// If runtime data is available for this port, use it instead of mock data
+		// If runtime data is available for this port, layer it on top
+		// of the simulated data. Trace data (from a real run) is the
+		// source of truth and replaces wholesale; scenario data (user-
+		// authored sample shapes) merges field-by-field so author-
+		// supplied keys win without wiping chain-propagated keys.
+		// The caller distinguishes via isScenarioPort — for now we
+		// always merge object-shaped overlays and replace primitives.
 		if runtimeData != nil {
 			if entry, ok := runtimeData[portName]; ok {
-				// Port was visited in trace
 				if len(entry) > 0 {
-					// Has actual data - use it
 					var r interface{}
 					if err := json.Unmarshal(entry, &r); err == nil && r != nil {
-						result = r
+						result = mergeOverlay(result, r)
 					}
 				} else {
-					// Port was visited but had no data (empty events) - return null, not fake data
 					result = nil
 				}
 			}
@@ -280,6 +283,37 @@ func fillTypedDefaults(data interface{}, schemaBytes []byte) interface{} {
 		asMap[k] = mergeMocksIntoObject(current, fieldSchema)
 	}
 	return asMap
+}
+
+// mergeOverlay layers overlay onto base. When both are objects, the result
+// has every key from either side: overlay wins on key collisions (recursing
+// into nested objects), and base preserves keys the overlay omits. For any
+// non-object overlay, it replaces base wholesale — primitives and arrays
+// substitute, they don't merge. This is the scenario/runtime semantic we
+// want: a user-supplied scenario at port X declares "here's the shape of
+// the fields I care about" without erasing other chain-propagated fields
+// the sim could resolve on its own.
+func mergeOverlay(base, overlay interface{}) interface{} {
+	overlayMap, overlayOK := overlay.(map[string]interface{})
+	if !overlayOK {
+		return overlay
+	}
+	baseMap, baseOK := base.(map[string]interface{})
+	if !baseOK {
+		return overlayMap
+	}
+	out := make(map[string]interface{}, len(baseMap)+len(overlayMap))
+	for k, v := range baseMap {
+		out[k] = v
+	}
+	for k, ov := range overlayMap {
+		if bv, present := out[k]; present {
+			out[k] = mergeOverlay(bv, ov)
+			continue
+		}
+		out[k] = ov
+	}
+	return out
 }
 
 // mergeMocksIntoObject walks an evaluated object against a JSON Schema
