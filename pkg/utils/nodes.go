@@ -696,6 +696,19 @@ func GetFlowMaps(nodesMap map[string]v1alpha1.TinyNode) (map[string][]byte, map[
 		if err := replacePortDefs(targetPorts, nodeSettingsDefinitions); err != nil {
 			return nil, nil, nil, nil, nil, err
 		}
+		// Pass 1b: target ports also receive overlays from incoming-edge
+		// schemas. Without this, a component like `debug` whose
+		// Context type alias reflects to a deeply nested
+		// additionalProperties shape silently rejects every incoming
+		// edge — even though every edge supplied a concrete shape via
+		// `configure_edge`'s `schema` parameter. nodeTargetDefinitions
+		// already contains the merged set from all incoming edges
+		// (built by the enrichment loop above), so applying it here
+		// brings target-port validation in line with what source-port
+		// simulation already does.
+		if err := replacePortDefs(targetPorts, nodeTargetDefinitions); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
 		// Pass 2: source ports — replace with target definitions (now updated by pass 1)
 		if err := replacePortDefs(sourcePorts, nodeTargetDefinitions); err != nil {
 			return nil, nil, nil, nil, nil, err
