@@ -314,7 +314,9 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		if target == nil || len(e.Configuration) == 0 {
 			continue
 		}
-		targetSchema := portSchemaBytes(target, e.ToPort, false)
+		// e.ToPort is the receiving (input) port of the target
+		// component — look it up in InputPortDetails, not output.
+		targetSchema := portSchemaBytes(target, e.ToPort, true)
 		configurable := configurableFieldsIn(targetSchema)
 		missing := requireSchemaForData(e.Configuration, e.Schema, configurable)
 		if len(missing) > 0 {

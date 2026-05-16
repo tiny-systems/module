@@ -296,6 +296,26 @@ func editFlowConfigureEdge(ctx context.Context, execCtx ExecutionContext, input 
 		}
 	}
 
+	// Schema-strictness check: if the target's port has configurable
+	// fields and the caller filled them without a matching schema
+	// entry, reject up front. Mirrors the build_flow pre-flight. The
+	// lookup is best-effort — when project state or module catalog
+	// can't be reached, we skip the check rather than block edits.
+	if len(config) > 0 {
+		if targetNodeID, targetPort, _ := findEdgeTarget(ctx, execCtx, edgeID); targetNodeID != "" {
+			if comp, _ := findNodeComponent(ctx, execCtx, targetNodeID); comp != nil {
+				targetSchema := portSchemaBytes(comp, targetPort, true)
+				missing := requireSchemaForData(config, edgeSchema, configurableFieldsIn(targetSchema))
+				if len(missing) > 0 {
+					return ToolResult{
+						Success: false,
+						Error:   schemaRequiredError("edge", edgeID, missing).Error(),
+					}
+				}
+			}
+		}
+	}
+
 	result, err := execCtx.EdgeConfigurer.ConfigureEdge(ctx, execCtx.ProjectName, execCtx.FlowName, edgeID, config, edgeSchema, traceID)
 	if err != nil {
 		return ToolResult{Success: false, Error: fmt.Sprintf("failed to configure edge: %s", err.Error())}
@@ -328,6 +348,24 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 			}
 		} else {
 			return ToolResult{Success: false, Error: "settings is required for configure_node and must be a JSON object or JSON string"}
+		}
+	}
+
+	// Schema-strictness check: if the node's component has
+	// configurable fields in its _settings schema and the caller
+	// filled them without a matching schema entry, reject up front.
+	// Best-effort: when the cluster state can't be reached, skip the
+	// check rather than block edits.
+	if len(settings) > 0 {
+		if comp, _ := findNodeComponent(ctx, execCtx, nodeID); comp != nil {
+			schemaBytes := portSchemaBytes(comp, "_settings", true)
+			missing := requireSchemaForData(settings, settingsSchema, configurableFieldsIn(schemaBytes))
+			if len(missing) > 0 {
+				return ToolResult{
+					Success: false,
+					Error:   schemaRequiredError("node", nodeID, missing).Error(),
+				}
+			}
 		}
 	}
 
