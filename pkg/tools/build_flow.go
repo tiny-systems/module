@@ -455,6 +455,27 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 	}
 
+	// Auto-scaffold scenarios for configurable-any emitters (json_decode,
+	// js_eval, http response, template). Without this, downstream edges
+	// that reference $.decoded.imageTag etc. get amber warnings until the
+	// user authors a scenario manually. This drops a placeholder scenario
+	// in place so the validator has shape to chain-walk against.
+	emitterByAlias := map[string]string{}
+	for _, n := range nodes {
+		emitterByAlias[n.Alias] = n.Component
+	}
+	scaffoldEdges := make([]scaffoldEdge, 0, len(edges))
+	for _, e := range edges {
+		scaffoldEdges = append(scaffoldEdges, scaffoldEdge{
+			FromAlias:     e.FromAlias,
+			FromPort:      e.FromPort,
+			Configuration: e.Configuration,
+		})
+	}
+	if scaffoldWarnings := scaffoldScenarios(ctx, execCtx, aliasToNodeID, emitterByAlias, scaffoldEdges); len(scaffoldWarnings) > 0 {
+		warnings = append(warnings, scaffoldWarnings...)
+	}
+
 	// Build output
 	output := map[string]interface{}{
 		"nodes_created": nodesCreated,
