@@ -26,24 +26,27 @@ import (
 // and never block the build.
 
 // configurableAnyEmitters maps component name → output port name for
-// components whose output schema is configurable-any. The list is short
-// and well-known; adding a new emitter is a one-line change.
+// components whose output schema is genuinely configurable-any: the
+// emitted shape depends on user data or user-supplied code, so the
+// validator has no concrete schema to chain-walk against. http_request
+// and similar HTTP clients are NOT in this list — their response has
+// a concrete struct, so the chain-walker already finds the right shape.
 var configurableAnyEmitters = map[string][]string{
-	"json_decode":  {"message"},
-	"js_eval":      {"out"},
-	"client":       {"response"},
-	"http_request": {"response"},
-	"template":     {"out"},
+	"json_decode": {"message"},
+	"js_eval":     {"out"},
+	"template":    {"out"},
 }
 
 // expressionRe matches `{{...}}` expressions in edge configuration values.
 var expressionRe = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 
-// jsonPathRe matches a JSONPath rooted at `$`, capturing dotted segments
-// after the root (e.g. `$.decoded.imageTag` → `decoded.imageTag`).
-// Bracket access is intentionally skipped — placeholder data uses object
-// access exclusively, which covers ~all real expressions.
-var jsonPathRe = regexp.MustCompile(`\$(?:\.([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*))`)
+// jsonPathRe matches a JSONPath rooted at `$`, capturing dotted-or-
+// bracketed segments after the root (e.g. `$.decoded.imageTag` →
+// `decoded.imageTag`, `$.decoded.items[0].name` →
+// `decoded.items[0].name`). Bracket indices are captured so callers
+// can decide whether a path's intermediate node should be scaffolded
+// as an object or an array.
+var jsonPathRe = regexp.MustCompile(`\$(?:\.[a-zA-Z_][a-zA-Z0-9_]*(?:\[\d+\]|\[\*\])?)+`)
 
 // scaffoldScenarios runs at the end of build_flow with the created node
 // IDs and the original edge specs. Returns warnings (not errors) — the
@@ -166,11 +169,14 @@ func collectExpressions(v interface{}, seen map[string]struct{}) {
 		matches := expressionRe.FindAllStringSubmatch(x, -1)
 		for _, m := range matches {
 			expr := m[1]
-			for _, pm := range jsonPathRe.FindAllStringSubmatch(expr, -1) {
-				path := strings.TrimSpace(pm[1])
-				if path != "" {
-					seen[path] = struct{}{}
+			for _, full := range jsonPathRe.FindAllString(expr, -1) {
+				// Strip the leading `$.` so the path is a list of
+				// segments like "decoded.items[0].name".
+				path := strings.TrimPrefix(full, "$.")
+				if path == "" || path == full {
+					continue
 				}
+				seen[path] = struct{}{}
 			}
 		}
 	case map[string]interface{}:
@@ -184,26 +190,70 @@ func collectExpressions(v interface{}, seen map[string]struct{}) {
 	}
 }
 
+// segmentRe splits a path segment into its key and optional array
+// suffix: "items[0]" → key="items", isArray=true; "items" → isArray=false.
+var segmentRe = regexp.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)(\[\d+\]|\[\*\])?$`)
+
 // setPath walks dst by the dotted path, creating intermediate object
-// nodes as needed, and writes value at the leaf. If the leaf already
-// has a non-nil value it is left alone — first writer wins so an
-// earlier scaffolded path doesn't get clobbered by a later one.
+// (or array-of-one-object) nodes as needed, and writes value at the
+// leaf. If the leaf already has a non-nil value it is left alone —
+// first writer wins so an earlier scaffolded path doesn't get
+// clobbered by a later one.
+//
+// A segment ending in `[N]` or `[*]` means the value at that key is an
+// array; the remainder of the path applies to element 0 of that array.
+// So `decoded.items[0].name` produces `{decoded:{items:[{name:<v>}]}}`.
 func setPath(dst map[string]interface{}, path string, value interface{}) {
 	parts := strings.Split(path, ".")
-	cur := dst
-	for i, p := range parts {
-		if i == len(parts)-1 {
-			if existing, ok := cur[p]; !ok || existing == nil {
-				cur[p] = value
-			}
+	var cur interface{} = dst
+	for i, raw := range parts {
+		m := segmentRe.FindStringSubmatch(raw)
+		if m == nil {
 			return
 		}
-		next, ok := cur[p].(map[string]interface{})
+		key := m[1]
+		isArray := m[2] != ""
+		last := i == len(parts)-1
+
+		obj, ok := cur.(map[string]interface{})
 		if !ok {
-			next = map[string]interface{}{}
-			cur[p] = next
+			return
 		}
-		cur = next
+		if !isArray {
+			if last {
+				if existing, present := obj[key]; !present || existing == nil {
+					obj[key] = value
+				}
+				return
+			}
+			next, ok := obj[key].(map[string]interface{})
+			if !ok {
+				next = map[string]interface{}{}
+				obj[key] = next
+			}
+			cur = next
+			continue
+		}
+
+		// Array intermediate. Ensure obj[key] is an array with at least
+		// one element. The remainder of the path writes into element 0.
+		arr, ok := obj[key].([]interface{})
+		if !ok || len(arr) == 0 {
+			elem := map[string]interface{}{}
+			obj[key] = []interface{}{elem}
+			arr = obj[key].([]interface{})
+		}
+		if last {
+			// Path ends at the array itself — leave the single element
+			// in place; the placeholder string here would be confusing.
+			return
+		}
+		elem, ok := arr[0].(map[string]interface{})
+		if !ok {
+			elem = map[string]interface{}{}
+			arr[0] = elem
+		}
+		cur = elem
 	}
 }
 
@@ -213,5 +263,8 @@ func setPath(dst map[string]interface{}, path string, value interface{}) {
 func placeholderFor(path string) string {
 	parts := strings.Split(path, ".")
 	leaf := parts[len(parts)-1]
+	if m := segmentRe.FindStringSubmatch(leaf); m != nil {
+		leaf = m[1]
+	}
 	return fmt.Sprintf("<%s>", leaf)
 }

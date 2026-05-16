@@ -44,6 +44,16 @@ func TestExtractPathsFromConfig(t *testing.T) {
 			in:   map[string]interface{}{"v": "{{'just-a-string'}}"},
 			want: []string{},
 		},
+		{
+			name: "array access",
+			in:   map[string]interface{}{"name": "{{$.decoded.items[0].name}}"},
+			want: []string{"decoded.items[0].name"},
+		},
+		{
+			name: "wildcard array access",
+			in:   map[string]interface{}{"tags": "{{$.tags[*]}}"},
+			want: []string{"tags[*]"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,6 +83,32 @@ func TestSetPath(t *testing.T) {
 	}
 	if !reflect.DeepEqual(dst, want) {
 		t.Fatalf("setPath result mismatch:\n got %v\nwant %v", dst, want)
+	}
+}
+
+func TestSetPathArrayIntermediate(t *testing.T) {
+	dst := map[string]interface{}{}
+	setPath(dst, "decoded.items[0].name", "<name>")
+	setPath(dst, "decoded.items[0].sku", "<sku>")
+	setPath(dst, "decoded.status", "<status>")
+
+	decoded, ok := dst["decoded"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decoded not an object: %T", dst["decoded"])
+	}
+	items, ok := decoded["items"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("decoded.items not [single]: %v", decoded["items"])
+	}
+	elem, ok := items[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("decoded.items[0] not an object: %T", items[0])
+	}
+	if elem["name"] != "<name>" || elem["sku"] != "<sku>" {
+		t.Fatalf("array element merge wrong: %v", elem)
+	}
+	if decoded["status"] != "<status>" {
+		t.Fatalf("decoded.status wrong: %v", decoded["status"])
 	}
 }
 
