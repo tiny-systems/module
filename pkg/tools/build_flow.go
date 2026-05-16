@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/tiny-systems/module/pkg/schema"
 )
 
 // BuildFlowTool creates an entire flow (nodes + edges + configuration) in one call.
@@ -187,12 +185,6 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 
 		settings, _ := m["settings"].(map[string]interface{})
 		settingsSchema, _ := m["settings_schema"].(map[string]interface{})
-		// Auto-infer schema from settings when the caller didn't supply one
-		// and settings actually exist. Removes the "always pass a schema"
-		// burden from LLM callers; explicit schema (if non-nil) still wins.
-		if settingsSchema == nil && len(settings) > 0 {
-			settingsSchema = schema.InferFromInstance(settings)
-		}
 
 		nodes = append(nodes, nodeSpec{
 			Alias:          alias,
@@ -247,12 +239,6 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 
 		configuration, _ := m["configuration"].(map[string]interface{})
 		edgeSchema, _ := m["schema"].(map[string]interface{})
-		// Same fallback as node settings: when the caller supplies data
-		// but no schema, infer one from the data shape. Explicit schema
-		// (if non-nil) wins.
-		if edgeSchema == nil && len(configuration) > 0 {
-			edgeSchema = schema.InferFromInstance(configuration)
-		}
 
 		edges = append(edges, edgeSpec{
 			From:          from,
@@ -267,6 +253,11 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 	}
 
 	// Validate components upfront before any mutations
+	// componentByAlias is needed for the schema-strictness check on
+	// edges, which has to look at the target component's settings
+	// schema. Built during the existence pass so we don't re-fetch.
+	componentByAlias := map[string]*ComponentInfo{}
+
 	if execCtx.ModuleCatalog != nil {
 		moduleCache := make(map[string]*ModuleInfo)
 		for _, n := range nodes {
@@ -283,14 +274,53 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			info := moduleCache[n.Module]
 			found := false
 			var available []string
-			for _, c := range info.Components {
+			for i := range info.Components {
+				c := &info.Components[i]
 				available = append(available, c.Name)
 				if c.Name == n.Component {
 					found = true
+					componentByAlias[n.Alias] = c
 				}
 			}
 			if !found {
 				return ToolResult{Success: false, Error: fmt.Sprintf("component '%s' not found in module '%s'. Available: %v", n.Component, n.Module, available)}
+			}
+		}
+	}
+
+	// Schema-strictness check. The platform no longer infers schemas
+	// from value shape: when the caller fills a configurable-any
+	// settings field or edge configuration field, they must declare
+	// its schema in settings_schema / edge.schema. Reject up front
+	// so the model sees the gap at authoring time, not as a red edge
+	// after the fact.
+	for _, n := range nodes {
+		comp := componentByAlias[n.Alias]
+		if comp == nil || len(n.Settings) == 0 {
+			continue
+		}
+		settingsSchema := portSchemaBytes(comp, "_settings", true)
+		configurable := configurableFieldsIn(settingsSchema)
+		missing := requireSchemaForData(n.Settings, n.SettingsSchema, configurable)
+		if len(missing) > 0 {
+			return ToolResult{
+				Success: false,
+				Error:   schemaRequiredError("node", n.Alias, missing).Error(),
+			}
+		}
+	}
+	for i, e := range edges {
+		target := componentByAlias[e.ToAlias]
+		if target == nil || len(e.Configuration) == 0 {
+			continue
+		}
+		targetSchema := portSchemaBytes(target, e.ToPort, false)
+		configurable := configurableFieldsIn(targetSchema)
+		missing := requireSchemaForData(e.Configuration, e.Schema, configurable)
+		if len(missing) > 0 {
+			return ToolResult{
+				Success: false,
+				Error:   schemaRequiredError("edge", fmt.Sprintf("edges[%d] (%s → %s)", i, e.From, e.To), missing).Error(),
 			}
 		}
 	}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
-	"github.com/tiny-systems/module/pkg/schema"
 )
 
 // EditFlowTool is the single entry point for incremental flow edits.
@@ -298,13 +296,6 @@ func editFlowConfigureEdge(ctx context.Context, execCtx ExecutionContext, input 
 		}
 	}
 
-	// If no schema was supplied, infer one from the configuration shape so
-	// LLM callers don't have to ship data + schema as two synchronised
-	// arguments. Explicit schema always wins.
-	if edgeSchema == nil && len(config) > 0 {
-		edgeSchema = schema.InferFromInstance(config)
-	}
-
 	result, err := execCtx.EdgeConfigurer.ConfigureEdge(ctx, execCtx.ProjectName, execCtx.FlowName, edgeID, config, edgeSchema, traceID)
 	if err != nil {
 		return ToolResult{Success: false, Error: fmt.Sprintf("failed to configure edge: %s", err.Error())}
@@ -338,12 +329,6 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 		} else {
 			return ToolResult{Success: false, Error: "settings is required for configure_node and must be a JSON object or JSON string"}
 		}
-	}
-
-	// Same fallback as configure_edge: infer schema from data shape when
-	// the caller didn't supply one. Explicit schema wins.
-	if settingsSchema == nil && len(settings) > 0 {
-		settingsSchema = schema.InferFromInstance(settings)
 	}
 
 	result, err := execCtx.NodeSettingsConfigurer.ConfigureNodeSettings(ctx, execCtx.ProjectName, execCtx.FlowName, nodeID, settings, settingsSchema)

@@ -32,11 +32,13 @@ func (c *captureNodeSettingsConfigurer) ConfigureNodeSettings(_ context.Context,
 	return &ConfigureNodeSettingsResult{Valid: true}, nil
 }
 
-// TestEditFlow_ConfigureEdge_InfersSchemaWhenMissing proves the inference
-// fires for the configure_edge action when the caller omits 'schema'. This
-// is the load-bearing fix: LLMs send data and forget schema, and the SDK
-// is supposed to fill it in.
-func TestEditFlow_ConfigureEdge_InfersSchemaWhenMissing(t *testing.T) {
+// TestEditFlow_ConfigureEdge_NoInferenceWhenSchemaMissing pins the
+// post-v0.10.7 contract: the SDK no longer fabricates a schema from the
+// configuration data. If the caller omits 'schema', it stays nil and
+// downstream validation enforces correctness. Inference was removed
+// because it taught models to skip schema declarations, which then
+// produced silent gaps in edge validation.
+func TestEditFlow_ConfigureEdge_NoInferenceWhenSchemaMissing(t *testing.T) {
 	cap := &captureEdgeConfigurer{}
 	execCtx := ExecutionContext{
 		EdgeConfigurer: cap,
@@ -59,17 +61,8 @@ func TestEditFlow_ConfigureEdge_InfersSchemaWhenMissing(t *testing.T) {
 	if !res.Success {
 		t.Fatalf("expected success, got error: %v", res.Error)
 	}
-
-	wantSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"token":   map[string]interface{}{"type": "string"},
-			"port":    map[string]interface{}{"type": "integer"},
-			"enabled": map[string]interface{}{"type": "boolean"},
-		},
-	}
-	if !reflect.DeepEqual(cap.gotSchema, wantSchema) {
-		t.Errorf("inferred schema mismatch\n got: %#v\nwant: %#v", cap.gotSchema, wantSchema)
+	if cap.gotSchema != nil {
+		t.Errorf("expected schema to remain nil (no inference), got %#v", cap.gotSchema)
 	}
 }
 
@@ -105,9 +98,10 @@ func TestEditFlow_ConfigureEdge_RespectsExplicitSchema(t *testing.T) {
 	}
 }
 
-// TestEditFlow_ConfigureNode_InfersSchemaWhenMissing is the same proof
-// for the configure_node action path.
-func TestEditFlow_ConfigureNode_InfersSchemaWhenMissing(t *testing.T) {
+// TestEditFlow_ConfigureNode_NoInferenceWhenSchemaMissing is the same
+// guarantee for the configure_node path: omitting schema leaves it nil
+// rather than fabricating one from the data shape.
+func TestEditFlow_ConfigureNode_NoInferenceWhenSchemaMissing(t *testing.T) {
 	cap := &captureNodeSettingsConfigurer{}
 	execCtx := ExecutionContext{
 		NodeSettingsConfigurer: cap,
@@ -130,21 +124,8 @@ func TestEditFlow_ConfigureNode_InfersSchemaWhenMissing(t *testing.T) {
 	if !res.Success {
 		t.Fatalf("expected success, got error: %v", res.Error)
 	}
-
-	wantSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"delay": map[string]interface{}{"type": "integer"},
-			"context": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"token": map[string]interface{}{"type": "string"},
-				},
-			},
-		},
-	}
-	if !reflect.DeepEqual(cap.gotSchema, wantSchema) {
-		t.Errorf("inferred schema mismatch\n got: %#v\nwant: %#v", cap.gotSchema, wantSchema)
+	if cap.gotSchema != nil {
+		t.Errorf("expected schema to remain nil (no inference), got %#v", cap.gotSchema)
 	}
 }
 
