@@ -96,6 +96,22 @@ var buildCmd = &cobra.Command{
 				}
 				publishReq.Requirements.Rbac.ExtraRules = &extraRules
 			}
+			// Forward storage requirements so the platform's install
+			// flow exposes storage-size / storage-class fields and the
+			// helm command includes the PVC switches.
+			if reqs.Storage.Enabled || reqs.Storage.Size != "" || reqs.Storage.StorageClassName != "" {
+				enabled := reqs.Storage.Enabled
+				storage := &api.StorageRequirements{Enabled: &enabled}
+				if reqs.Storage.Size != "" {
+					size := reqs.Storage.Size
+					storage.Size = &size
+				}
+				if reqs.Storage.StorageClassName != "" {
+					sc := reqs.Storage.StorageClassName
+					storage.StorageClassName = &sc
+				}
+				publishReq.Requirements.Storage = storage
+			}
 		}
 
 		resp, err := platformClient.PublishModuleWithResponse(ctx, publishReq, func(ctx context.Context, req *http.Request) error {
