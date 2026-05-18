@@ -338,3 +338,99 @@ func TestMetadataFactory_ProducesStateScopedToNode(t *testing.T) {
 		t.Errorf("Get returned %q; want %q", v, "hello")
 	}
 }
+
+// --- Size-guard tests --------------------------------------------
+
+// TestMetadataState_SetUnderCapSucceeds is the happy path: a write
+// well under MaxStateBytes goes through without complaint.
+func TestMetadataState_SetUnderCapSucceeds(t *testing.T) {
+	c := newFakeClient(t, nil)
+	rec := &recordedEmit{}
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
+
+	if err := s.Set(context.Background(), "small", []byte("just-a-few-bytes")); err != nil {
+		t.Fatalf("Set under cap failed: %v", err)
+	}
+	if rec.Count() != 1 {
+		t.Errorf("expected 1 emit, got %d", rec.Count())
+	}
+}
+
+// TestMetadataState_SetOverCapRejectsAsTooLarge proves the guard
+// fires before any reconcile-port emit when the write would push
+// total _state/* size over MaxStateBytes.
+func TestMetadataState_SetOverCapRejectsAsTooLarge(t *testing.T) {
+	c := newFakeClient(t, nil)
+	rec := &recordedEmit{}
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
+
+	// Write a value larger than the cap. Base64 inflation alone makes
+	// MaxStateBytes worth of raw bytes blow through after encoding.
+	oversized := make([]byte, state.MaxStateBytes+1)
+	err := s.Set(context.Background(), "blob", oversized)
+	if err == nil {
+		t.Fatalf("expected ErrStateTooLarge, got nil")
+	}
+	if !errorsIs(err, state.ErrStateTooLarge) {
+		t.Errorf("expected error to wrap ErrStateTooLarge; got: %v", err)
+	}
+	if rec.Count() != 0 {
+		t.Errorf("rejected write should not emit; got %d emits", rec.Count())
+	}
+}
+
+// TestMetadataState_SetAccountsForExistingKeyOnReplace ensures the
+// guard treats a replacement as "swap value, not add" — replacing a
+// 100-byte value with a 200-byte value should only delta by 100, not
+// reject because of the full 200 added on top.
+func TestMetadataState_SetAccountsForExistingKeyOnReplace(t *testing.T) {
+	// Seed near the cap (most of MaxStateBytes already used).
+	bigPayload := make([]byte, state.MaxStateBytes*3/4)
+	c := newFakeClient(t, map[string]string{
+		"_state/existing": base64.StdEncoding.EncodeToString(bigPayload),
+	})
+	rec := &recordedEmit{}
+	s := state.NewMetadataState(c, nodeKey(), rec.Emit())
+
+	// Replacing the same key with a slightly smaller payload should
+	// always succeed even though the total without replacement
+	// accounting would seem over the cap.
+	smallerPayload := make([]byte, state.MaxStateBytes/4)
+	if err := s.Set(context.Background(), "existing", smallerPayload); err != nil {
+		t.Fatalf("replacement under net cap failed: %v", err)
+	}
+}
+
+// TestMetadataState_SetWithoutReaderSkipsGuard documents the
+// no-reader behaviour: when no controller-runtime cache is wired
+// (e.g. test fixtures, standalone evaluators), the guard no-ops.
+// Production runners always have a reader.
+func TestMetadataState_SetWithoutReaderSkipsGuard(t *testing.T) {
+	rec := &recordedEmit{}
+	s := state.NewMetadataState(nil, nodeKey(), rec.Emit())
+
+	huge := make([]byte, state.MaxStateBytes*2)
+	if err := s.Set(context.Background(), "k", huge); err != nil {
+		t.Fatalf("Set without reader should not fail: %v", err)
+	}
+	if rec.Count() != 1 {
+		t.Errorf("expected 1 emit, got %d", rec.Count())
+	}
+}
+
+// errorsIs is a local stand-in to avoid importing the errors pkg
+// solely for one test helper; keeps the import block tight.
+func errorsIs(err, target error) bool {
+	for err != nil {
+		if err == target {
+			return true
+		}
+		type unwrapper interface{ Unwrap() error }
+		u, ok := err.(unwrapper)
+		if !ok {
+			return false
+		}
+		err = u.Unwrap()
+	}
+	return false
+}
