@@ -414,6 +414,8 @@ github.com/tiny-systems/platform-api v0.5.0 h1:3pPr1MjMGYwbrXtUG9mZvA6aXTvyQdHrg
 github.com/tiny-systems/platform-api v0.5.0/go.mod h1:wZdMP6cPP/gcKaqPxyooJCra1bPgx9krY4OaVLe2mpM=
 github.com/tiny-systems/platform-api v0.5.1 h1:Uc5mmEFS55Cc1dgmga+q/oYiGvKQfmz97v45yl9/hJM=
 github.com/tiny-systems/platform-api v0.5.1/go.mod h1:NLrYIF/gqlNBXa7THkGyKBdKwbv5bgDrMnnwkRzgPa0=
+github.com/tiny-systems/platform-api v0.5.2 h1:hFf1Skcod5orz90k9nSc11rjLKdfD3YJbjOskedlHLc=
+github.com/tiny-systems/platform-api v0.5.2/go.mod h1:NLrYIF/gqlNBXa7THkGyKBdKwbv5bgDrMnnwkRzgPa0=
 github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4dU=
 github.com/ugorji/go/codec v1.2.11/go.mod h1:UNopzCgEMSXjBc6AOMqYvWC1ktqTAfzJZUZgYf6w6lg=
 github.com/vmware-labs/yaml-jsonpath v0.3.2 h1:/5QKeCBGdsInyDCyVNLbXyilb61MXGi9NP674f9Hobk=

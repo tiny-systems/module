@@ -112,6 +112,52 @@ var buildCmd = &cobra.Command{
 				}
 				publishReq.Requirements.Storage = storage
 			}
+			// Forward bundled-dependency declarations so the install
+			// UI offers per-bundle checkboxes + author defaults +
+			// user-overrideable fields. See module.Bundle for the
+			// declaration shape; we map straight across to the api
+			// codegen types here (pointer values because everything
+			// after Name/ChartRepo/ChartName is optional per the schema).
+			if len(reqs.Bundles) > 0 {
+				apiBundles := make([]api.BundledDependency, 0, len(reqs.Bundles))
+				for _, b := range reqs.Bundles {
+					ab := api.BundledDependency{
+						Name:      b.Name,
+						ChartRepo: b.ChartRepo,
+						ChartName: b.ChartName,
+					}
+					if b.Description != "" {
+						desc := b.Description
+						ab.Description = &desc
+					}
+					if b.ChartVersion != "" {
+						cv := b.ChartVersion
+						ab.ChartVersion = &cv
+					}
+					if b.DefaultEnabled {
+						de := b.DefaultEnabled
+						ab.DefaultEnabled = &de
+					}
+					if b.ConnectionHint != "" {
+						ch := b.ConnectionHint
+						ab.ConnectionHint = &ch
+					}
+					if len(b.Values) > 0 {
+						v := map[string]interface{}(b.Values)
+						ab.Values = &v
+					}
+					if len(b.ExposedSchema) > 0 {
+						es := map[string]interface{}(b.ExposedSchema)
+						ab.ExposedSchema = &es
+					}
+					if b.ValuesYAML != "" {
+						vy := b.ValuesYAML
+						ab.ValuesYAML = &vy
+					}
+					apiBundles = append(apiBundles, ab)
+				}
+				publishReq.Requirements.Bundles = &apiBundles
+			}
 		}
 
 		resp, err := platformClient.PublishModuleWithResponse(ctx, publishReq, func(ctx context.Context, req *http.Request) error {

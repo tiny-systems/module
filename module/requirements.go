@@ -4,6 +4,36 @@ package module
 type Requirements struct {
 	RBAC    RBACRequirements    `json:"rbac,omitempty"`
 	Storage StorageRequirements `json:"storage,omitempty"`
+	Bundles Bundles             `json:"bundles,omitempty"`
+}
+
+// Bundles is the list of third-party Helm releases a module offers to
+// provision alongside itself at install time. Authors declare these
+// via registry.SetRequirements; the platform's install UI renders a
+// checkbox per bundle and emits an additional helm install per
+// enabled entry.
+type Bundles []Bundle
+
+// Bundle describes one provisioned-on-install Helm release. Values
+// carry author defaults; ExposedSchema declares which keys appear as
+// editable fields on the install form (uses the same schema-driven
+// renderer the flow editor already uses for node configs).
+//
+// ValuesYAML is an escape hatch for charts whose values are awkward
+// to express as a Go map. When set it's merged BEFORE the Values
+// map at install time, so structured Values entries override raw
+// YAML keys.
+type Bundle struct {
+	Name           string         `json:"name"`
+	Description    string         `json:"description,omitempty"`
+	ChartRepo      string         `json:"chartRepo"`
+	ChartName      string         `json:"chartName"`
+	ChartVersion   string         `json:"chartVersion,omitempty"`
+	DefaultEnabled bool           `json:"defaultEnabled,omitempty"`
+	ConnectionHint string         `json:"connectionHint,omitempty"`
+	Values         map[string]any `json:"values,omitempty"`
+	ExposedSchema  map[string]any `json:"exposedSchema,omitempty"`
+	ValuesYAML     string         `json:"valuesYAML,omitempty"`
 }
 
 // StorageRequirements defines persistent storage needs for the module
