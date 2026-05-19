@@ -4,7 +4,9 @@
 # resource limit via SDK Bundle.Values.
 image:
   repository: ghcr.io/huggingface/text-embeddings-inference
-  tag: cpu-1.5
+  # cpu-1.9 is the current stable CPU tag. cpu-1.5 had a model-download
+  # URL bug ("relative URL without a base") that failed on first boot.
+  tag: cpu-1.9
   pullPolicy: IfNotPresent
 
 # MODEL_ID is the HuggingFace model TEI loads at startup. Defaults to

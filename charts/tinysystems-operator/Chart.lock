@@ -1,9 +1,9 @@
 dependencies:
 - name: tei
   repository: file://./charts/tei
-  version: 0.1.0
+  version: 0.1.1
 - name: postgresql
   repository: https://charts.bitnami.com/bitnami
   version: 15.5.20
-digest: sha256:b6dc060e57d5babfb445cd3ed0e132910994e1a0a9242b506ee30210cb4fce58
-generated: "2026-05-19T11:51:27.011913+01:00"
+digest: sha256:e2716e3030e7c7479cce7e86e619f8e8e36bf38e9503b1a3653d80e79dcb7ea5
+generated: "2026-05-19T13:50:09.375436+01:00"

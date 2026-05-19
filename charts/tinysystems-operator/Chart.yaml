@@ -2,7 +2,7 @@ apiVersion: v2
 name: tinysystems-operator
 description: TinySystems Operator Helm chart for Kubernetes
 type: application
-version: 0.2.2
+version: 0.2.3
 appVersion: "0.1.3"
 
 # Curated bundles: third-party releases module authors can request
@@ -23,7 +23,7 @@ dependencies:
   # enable flags and overrides (`--set tei.enabled=true`,
   # `--set tei.image.tag=...`).
   - name: tei
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://./charts/tei"
     condition: tei.enabled
   - name: postgresql
