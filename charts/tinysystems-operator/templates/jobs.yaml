@@ -14,12 +14,23 @@ spec:
       annotations: {}
     spec:
       restartPolicy: Never
+      # pre-install hook needs to read the install namespace to
+      # check for the tinysystems.io/managed=true label and refuse
+      # reserved namespaces. Uses a dedicated ServiceAccount with
+      # ClusterRole resourceNames pinned to the install's namespace
+      # — see preinstall-rbac.yaml.
+      serviceAccountName: {{ include "tinysystems-operator.fullname" . }}-pre-install
       containers:
         - name: pre-install-job
           image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
           args: {{- toYaml .Values.controllerManager.manager.installArgs | nindent 12 }}
           command:
             - /manager
+          env:
+            - name: RELEASE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
 ---
 apiVersion: batch/v1
 kind: Job
