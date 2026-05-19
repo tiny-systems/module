@@ -55,6 +55,10 @@ spec:
           {{- if .Values.controllerManager.manager.extraEnv }}
             {{- toYaml .Values.controllerManager.manager.extraEnv | nindent 10 }}
           {{- end }}
+          - name: RELEASE_NAME
+            value: {{ .Release.Name | quote }}
+          - name: RELEASE_NAMESPACE
+            value: {{ .Release.Namespace | quote }}
           - name: KUBERNETES_CLUSTER_DOMAIN
             value: {{ quote .Values.kubernetesClusterDomain }}
           - name: SELF_SERVICE_HOST
