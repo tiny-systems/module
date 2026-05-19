@@ -5,6 +5,22 @@ type Requirements struct {
 	RBAC    RBACRequirements    `json:"rbac,omitempty"`
 	Storage StorageRequirements `json:"storage,omitempty"`
 	Bundles Bundles             `json:"bundles,omitempty"`
+	Secrets SecretRequirements  `json:"secrets,omitempty"`
+}
+
+// SecretRequirements declares the k8s Secrets a module needs to read.
+// The platform install flow renders a Role with resourceNames pinned
+// to the names the user supplies at install time; the chart only
+// grants get/list/watch on those exact Secrets in the release
+// namespace. Module code resolves `{{secret:<name>/<key>}}`
+// placeholders in node `_settings` via pkg/secret.Resolve.
+type SecretRequirements struct {
+	// Names lists the Secret names this module may reference. The
+	// install UI prompts the user to supply the actual Secret names
+	// (which the user creates via kubectl); the chart Role's
+	// resourceNames is pinned to those values. Empty means the
+	// module does not consume any Secrets and no Role is created.
+	Names []string `json:"names,omitempty"`
 }
 
 // Bundles is the list of third-party Helm releases a module offers to

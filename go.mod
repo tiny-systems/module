@@ -79,7 +79,7 @@ require (
 	github.com/tiny-systems/ajson v0.1.6
 	github.com/tiny-systems/errorpanic v0.7.1
 	github.com/tiny-systems/otel-collector v0.5.1
-	github.com/tiny-systems/platform-api v0.5.2
+	github.com/tiny-systems/platform-api v0.5.6
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.46.1
 	go.opentelemetry.io/otel v1.39.0

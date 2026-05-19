@@ -112,6 +112,14 @@ var buildCmd = &cobra.Command{
 				}
 				publishReq.Requirements.Storage = storage
 			}
+			// Forward secret-access declaration so the install UI
+			// surfaces secret-name inputs and the platform renders
+			// resourceName-pinned RBAC on the operator chart. Empty
+			// list = module doesn't read any Secrets, no Role created.
+			if len(reqs.Secrets.Names) > 0 {
+				names := reqs.Secrets.Names
+				publishReq.Requirements.Secrets = &api.SecretRequirements{Names: &names}
+			}
 			// Forward bundled-dependency declarations so the install
 			// UI offers per-bundle checkboxes + author defaults +
 			// user-overrideable fields. See module.Bundle for the
