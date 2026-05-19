@@ -2,7 +2,7 @@ apiVersion: v2
 name: tinysystems-operator
 description: TinySystems Operator Helm chart for Kubernetes
 type: application
-version: 0.2.1
+version: 0.2.2
 appVersion: "0.1.3"
 
 # Curated bundles: third-party releases module authors can request
@@ -15,17 +15,20 @@ appVersion: "0.1.3"
 # `bundles.<alias>:` block to values.yaml. Module authors then
 # reference the bundle by its alias in SDK Bundle.Name.
 dependencies:
-  # TEI is vendored as a local subchart under charts/tei. HuggingFace
-  # does not publish text-embeddings-inference as a helm chart, and
-  # our needs are simple enough (Deployment + Service) that a minimal
-  # local chart beats wrapping a third-party one.
+  # Each bundle lives under its alias at the top of parent values
+  # (e.g. `tei.*`, `pgvector.*`). Helm only routes parent values into
+  # a subchart through the alias key — there is no way to namespace
+  # them under `bundles.*` in the parent without writing custom
+  # template glue. Keep the alias path as the public API for both
+  # enable flags and overrides (`--set tei.enabled=true`,
+  # `--set tei.image.tag=...`).
   - name: tei
     version: "0.1.0"
     repository: "file://./charts/tei"
-    condition: bundles.tei.enabled
+    condition: tei.enabled
   - name: postgresql
     version: "15.5.20"
     repository: "https://charts.bitnami.com/bitnami"
-    condition: bundles.pgvector.enabled
+    condition: pgvector.enabled
     alias: pgvector
 

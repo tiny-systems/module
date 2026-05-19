@@ -75,46 +75,49 @@ managerService:
     targetPort: grpc
   type: ClusterIP
 
-# Curated third-party bundles. Each block is the values subtree for
-# its subchart (see Chart.yaml dependencies). enabled=false by
-# default — install UI toggles flip per-bundle on the helm command.
-# Module authors override defaults via SDK Bundle.Values which
-# render as additional --set flags on the same module command.
-bundles:
-  # TEI — text-embeddings-inference. CPU image by default; modules
-  # requesting GPU inference should override image.tag via SDK
-  # Bundle.Values to a CUDA-tagged image (e.g. "1.5-cuda-12.2").
-  tei:
-    enabled: false
-    image:
-      tag: cpu-1.5
-    resources:
-      requests:
-        cpu: 500m
-        memory: 1Gi
-      limits:
-        cpu: "2"
-        memory: 4Gi
+# Curated third-party bundles. Each block lives at the top level
+# under its subchart alias (see Chart.yaml dependencies). enabled is
+# false by default — the platform install UI flips it per-bundle.
+# Override defaults via `--set tei.image.tag=...` etc.; that's the
+# same path Helm uses for subchart values.
 
-  # pgvector — Postgres with the pgvector extension. Bitnami's
-  # postgresql chart with image swapped to pgvector/pgvector and
-  # an init script enabling the extension. Default credentials
-  # are intentionally weak — production users must override
-  # auth.postgresPassword via SDK Bundle.Values.
-  pgvector:
-    enabled: false
-    image:
-      registry: docker.io
-      repository: pgvector/pgvector
-      tag: pg16
-    auth:
-      database: tinysystems
-      username: tinysystems
-      postgresPassword: change-me
-    primary:
-      initdb:
-        scripts:
-          enable-pgvector.sql: |
-            CREATE EXTENSION IF NOT EXISTS vector;
-      persistence:
-        size: 8Gi
+# TEI — text-embeddings-inference. CPU image by default; modules
+# requesting GPU inference should override image.tag to a CUDA-tagged
+# image (e.g. "1.5-cuda-12.2").
+tei:
+  enabled: false
+  image:
+    tag: cpu-1.5
+  # Modest defaults so the bundle fits on typical single-node dev
+  # clusters and small staging pools. Production embedding workloads
+  # should bump these via --set tei.resources.requests.memory=...
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+# pgvector — Postgres with the pgvector extension. Bitnami's
+# postgresql chart with image swapped to pgvector/pgvector and an
+# init script enabling the extension. Default credentials are
+# intentionally weak — production users must override
+# auth.postgresPassword.
+pgvector:
+  enabled: false
+  image:
+    registry: docker.io
+    repository: pgvector/pgvector
+    tag: pg16
+  auth:
+    database: tinysystems
+    username: tinysystems
+    postgresPassword: change-me
+  primary:
+    initdb:
+      scripts:
+        enable-pgvector.sql: |
+          CREATE EXTENSION IF NOT EXISTS vector;
+    persistence:
+      size: 8Gi
