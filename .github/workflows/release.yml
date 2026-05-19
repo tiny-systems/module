@@ -45,6 +45,9 @@ jobs:
         continue-on-error: true
         run: |
           helm repo add tinysystems https://tiny-systems.github.io/module
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.6.0
