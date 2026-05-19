@@ -51,6 +51,19 @@ rbac:
   #     resources: ["jobs"]
   #     verbs: ["*"]
   extraRules: []
+# Secret access for module components that resolve
+# '{{secret:<name>/<key>}}' placeholders in node settings. The
+# chart only creates a Role + RoleBinding when allowedNames is
+# non-empty; the Role uses resourceNames to pin RBAC to exactly
+# those Secrets — no namespace-wide secret read access.
+#
+# At install time the user sets this list to the actual Secret
+# names they kubectl-created. The module's declared
+# Requirements.Secrets.Names is the suggested allowlist (typically
+# rendered into the install UI); the rendered Role takes whatever
+# the user actually supplied at --set time.
+secrets:
+  allowedNames: []
 storage:
   # Enable persistent storage for the module (creates a PVC)
   enabled: false
