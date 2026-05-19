@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tei
+description: Minimal HuggingFace text-embeddings-inference Deployment + Service. Vendored as a local subchart of tinysystems-operator so modules requesting the "tei" bundle get an in-cluster embedding endpoint without depending on a third-party helm repo.
+type: application
+version: 0.1.0
+appVersion: "1.5"

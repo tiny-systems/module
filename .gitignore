@@ -28,3 +28,7 @@ Dockerfile.cross
 .claude/settings.local.json
 file.json
 screenshots
+
+# Helm: built subchart tarballs are reproducible from Chart.lock,
+# no need to commit them
+charts/*/charts/*.tgz

@@ -1,0 +1,39 @@
+# Defaults intentionally lean toward CPU + a small model so the chart
+# is safe to enable without GPU nodes. Modules requesting GPU inference
+# should override image.tag (e.g. "1.5-cuda-12.2") and add a GPU
+# resource limit via SDK Bundle.Values.
+image:
+  repository: ghcr.io/huggingface/text-embeddings-inference
+  tag: cpu-1.5
+  pullPolicy: IfNotPresent
+
+# MODEL_ID is the HuggingFace model TEI loads at startup. Defaults to
+# BAAI/bge-small-en-v1.5 — 384-dim, fast on CPU, decent quality for
+# general-purpose English embedding. Override via Bundle.Values for
+# multilingual or higher-dim models.
+modelId: BAAI/bge-small-en-v1.5
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+# Persistent cache for downloaded model weights. Without this every
+# pod restart re-downloads the model (slow + bandwidth waste).
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: ""
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

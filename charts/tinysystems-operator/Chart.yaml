@@ -1,22 +1,31 @@
 apiVersion: v2
 name: tinysystems-operator
 description: TinySystems Operator Helm chart for Kubernetes
-# A chart can be either an 'application' or a 'library' chart.
-#
-# Application charts are a collection of templates that can be packaged into versioned archives
-# to be deployed.
-#
-# Library charts provide useful utilities or functions for the chart developer. They're included as
-# a dependency of application charts to inject those utilities and functions into the rendering
-# pipeline. Library charts do not define any templates and therefore cannot be deployed.
 type: application
-# This is the chart version. This version number should be incremented each time you make changes
-# to the chart and its templates, including the app version.
-# Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.1.72
-# This is the version number of the application being deployed. This version number should be
-# incremented each time you make changes to the application. Versions are not expected to
-# follow Semantic Versioning. They should reflect the version the application is using.
-# It is recommended to use it with quotes.
+version: 0.2.0
 appVersion: "0.1.3"
+
+# Curated bundles: third-party releases module authors can request
+# via SDK module.Bundle. Each entry is a conditional subchart gated
+# by `bundles.<alias>.enabled`. Install UI ticks checkboxes which
+# add the matching --set flag on the module helm command — one
+# release, helm-tracked lifecycle, helm uninstall cleans bundles.
+#
+# Adding a new bundle: register the chart here + add the default
+# `bundles.<alias>:` block to values.yaml. Module authors then
+# reference the bundle by its alias in SDK Bundle.Name.
+dependencies:
+  # TEI is vendored as a local subchart under charts/tei. HuggingFace
+  # does not publish text-embeddings-inference as a helm chart, and
+  # our needs are simple enough (Deployment + Service) that a minimal
+  # local chart beats wrapping a third-party one.
+  - name: tei
+    version: "0.1.0"
+    repository: "file://./charts/tei"
+    condition: bundles.tei.enabled
+  - name: postgresql
+    version: "15.5.20"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: bundles.pgvector.enabled
+    alias: pgvector
 
