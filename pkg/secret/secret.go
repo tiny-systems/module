@@ -115,25 +115,48 @@ func walk(ctx context.Context, v reflect.Value, client module.K8sClient) error {
 		}
 		return nil
 	case reflect.Map:
-		// Map values aren't directly settable via reflection — set
-		// a new value into the map for any string entry that
-		// contains a placeholder.
+		// Map values aren't directly settable via reflection. For each
+		// entry we either substitute (string match) or recurse and
+		// write the mutated value back. This is the path that hits
+		// `Settings.Context any` after JSON unmarshalling: the outer
+		// value's Kind is Interface, walking it yields a Map whose
+		// values are themselves Interface-wrapped — we unwrap to find
+		// the underlying string and SetMapIndex with the resolved
+		// value.
 		iter := v.MapRange()
+		// Materialise keys first so we can mutate the map inside the
+		// loop without invalidating the iterator.
+		keys := make([]reflect.Value, 0, v.Len())
 		for iter.Next() {
-			mk := iter.Key()
-			mv := iter.Value()
-			if mv.Kind() != reflect.String {
+			keys = append(keys, iter.Key())
+		}
+		for _, mk := range keys {
+			mv := v.MapIndex(mk)
+			actual := mv
+			if actual.Kind() == reflect.Interface {
+				actual = actual.Elem()
+			}
+			if actual.Kind() == reflect.String {
+				match := placeholderRe.FindStringSubmatch(actual.String())
+				if match == nil {
+					continue
+				}
+				value, err := fetch(ctx, client, match[1], match[2])
+				if err != nil {
+					return err
+				}
+				v.SetMapIndex(mk, reflect.ValueOf(value))
 				continue
 			}
-			match := placeholderRe.FindStringSubmatch(mv.String())
-			if match == nil {
-				continue
+			if actual.Kind() == reflect.Map || actual.Kind() == reflect.Slice || actual.Kind() == reflect.Struct {
+				// Make a settable copy, walk into it, write back.
+				tmp := reflect.New(actual.Type()).Elem()
+				tmp.Set(actual)
+				if err := walk(ctx, tmp, client); err != nil {
+					return err
+				}
+				v.SetMapIndex(mk, tmp)
 			}
-			value, err := fetch(ctx, client, match[1], match[2])
-			if err != nil {
-				return err
-			}
-			v.SetMapIndex(mk, reflect.ValueOf(value))
 		}
 		return nil
 	}
