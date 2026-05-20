@@ -53,7 +53,7 @@ func TestResolveStringField(t *testing.T) {
 		APIKey string
 		Other  string
 	}
-	s := &Settings{APIKey: "{{secret:anthropic/key}}", Other: "untouched"}
+	s := &Settings{APIKey: "[[secret:anthropic/key]]", Other: "untouched"}
 	c := newFake(t, mkSecret("anthropic", map[string]string{"key": "sk-ant-xyz"}))
 	if err := Resolve(context.Background(), s, c); err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -74,7 +74,7 @@ func TestResolveNested(t *testing.T) {
 		Context Context
 		Label   string
 	}
-	s := &Settings{Context: Context{APIKey: "{{secret:openai/api_key}}"}, Label: "prod"}
+	s := &Settings{Context: Context{APIKey: "[[secret:openai/api_key]]"}, Label: "prod"}
 	c := newFake(t, mkSecret("openai", map[string]string{"api_key": "sk-xxx"}))
 	if err := Resolve(context.Background(), s, c); err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -86,7 +86,7 @@ func TestResolveNested(t *testing.T) {
 
 func TestResolveMissingSecret(t *testing.T) {
 	type Settings struct{ APIKey string }
-	s := &Settings{APIKey: "{{secret:missing/key}}"}
+	s := &Settings{APIKey: "[[secret:missing/key]]"}
 	c := newFake(t)
 	if err := Resolve(context.Background(), s, c); err == nil {
 		t.Fatal("expected error for missing Secret")
@@ -95,7 +95,7 @@ func TestResolveMissingSecret(t *testing.T) {
 
 func TestResolveMissingKey(t *testing.T) {
 	type Settings struct{ APIKey string }
-	s := &Settings{APIKey: "{{secret:anthropic/wrongkey}}"}
+	s := &Settings{APIKey: "[[secret:anthropic/wrongkey]]"}
 	c := newFake(t, mkSecret("anthropic", map[string]string{"key": "sk-ant-xyz"}))
 	err := Resolve(context.Background(), s, c)
 	if err == nil {
@@ -105,19 +105,19 @@ func TestResolveMissingKey(t *testing.T) {
 
 func TestResolveMalformedPlaceholderIgnored(t *testing.T) {
 	type Settings struct{ APIKey string }
-	s := &Settings{APIKey: "{{secret:bad}}"}
+	s := &Settings{APIKey: "[[secret:bad]]"}
 	c := newFake(t)
 	if err := Resolve(context.Background(), s, c); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if s.APIKey != "{{secret:bad}}" {
+	if s.APIKey != "[[secret:bad]]" {
 		t.Errorf("APIKey = %q, want unchanged", s.APIKey)
 	}
 }
 
 func TestResolveRequiresPointer(t *testing.T) {
 	type Settings struct{ APIKey string }
-	s := Settings{APIKey: "{{secret:anthropic/key}}"}
+	s := Settings{APIKey: "[[secret:anthropic/key]]"}
 	c := newFake(t)
 	if err := Resolve(context.Background(), s, c); err == nil {
 		t.Fatal("expected error for non-pointer settings")
@@ -126,7 +126,7 @@ func TestResolveRequiresPointer(t *testing.T) {
 
 func TestResolveNilClient(t *testing.T) {
 	type Settings struct{ APIKey string }
-	s := &Settings{APIKey: "{{secret:anthropic/key}}"}
+	s := &Settings{APIKey: "[[secret:anthropic/key]]"}
 	var c module.K8sClient
 	if err := Resolve(context.Background(), s, c); err == nil {
 		t.Fatal("expected error for nil client")
@@ -138,9 +138,9 @@ func TestResolveMap(t *testing.T) {
 		Env map[string]string
 	}
 	s := &Settings{Env: map[string]string{
-		"TOKEN":   "{{secret:slack/token}}",
+		"TOKEN":   "[[secret:slack/token]]",
 		"OTHER":   "plain",
-		"INVALID": "{{secret:foo}}",
+		"INVALID": "[[secret:foo]]",
 	}}
 	c := newFake(t, mkSecret("slack", map[string]string{"token": "xoxb-secret"}))
 	if err := Resolve(context.Background(), s, c); err != nil {
@@ -152,7 +152,7 @@ func TestResolveMap(t *testing.T) {
 	if s.Env["OTHER"] != "plain" {
 		t.Errorf("Env[OTHER] = %q, want plain", s.Env["OTHER"])
 	}
-	if s.Env["INVALID"] != "{{secret:foo}}" {
+	if s.Env["INVALID"] != "[[secret:foo]]" {
 		t.Errorf("Env[INVALID] = %q, want unchanged", s.Env["INVALID"])
 	}
 }

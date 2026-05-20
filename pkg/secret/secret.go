@@ -1,11 +1,17 @@
-// Package secret resolves `{{secret:<name>/<key>}}` placeholders in
+// Package secret resolves `[[secret:<name>/<key>]]` placeholders in
 // component settings against Kubernetes Secrets in the module pod's
 // own namespace. Components call Resolve on their settings struct
 // inside OnSettings, before reading any field that might contain a
 // secret reference.
 //
+// The placeholder uses `[[...]]` rather than `{{...}}` because the
+// platform's ajson expression evaluator runs over settings JSON
+// first and would try to parse `[[secret:foo/bar]]` as an ajson
+// expression — failing on the colon and replacing the field with
+// nil before this resolver got a chance to substitute.
+//
 // The resolver walks the supplied struct via reflection, looking for
-// string fields whose value matches `{{secret:<name>/<key>}}`. Each
+// string fields whose value matches `[[secret:<name>/<key>]]`. Each
 // match is fetched from the cluster via the supplied K8sClient and
 // substituted in place. Fields that don't match the pattern are
 // untouched.
@@ -38,16 +44,16 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// placeholderRe matches `{{secret:<name>/<key>}}` where <name> is the
+// placeholderRe matches `[[secret:<name>/<key>]]` where <name> is the
 // Secret resource name and <key> is a key inside the Secret's data
 // map. Both must match [A-Za-z0-9._-]+. The placeholder must be the
 // entire string content of the field — no substring substitution, no
 // partial matches. That keeps the resolver simple and avoids the
 // "value looks like a placeholder by coincidence" failure mode.
-var placeholderRe = regexp.MustCompile(`^\{\{secret:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)\}\}$`)
+var placeholderRe = regexp.MustCompile(`^\[\[secret:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)\]\]$`)
 
 // Resolve walks settings via reflection and replaces every
-// `{{secret:<name>/<key>}}` string field with the corresponding value
+// `[[secret:<name>/<key>]]` string field with the corresponding value
 // from a Kubernetes Secret in the K8sClient's namespace.
 //
 // settings must be a pointer to a struct (or pointer to anything that
@@ -59,7 +65,7 @@ var placeholderRe = regexp.MustCompile(`^\{\{secret:([A-Za-z0-9._-]+)/([A-Za-z0-
 //   - K8s API failures (Secret not found, RBAC denied) bubble up. The
 //     caller decides whether to fail loud (recommended) or fall back.
 //   - Malformed placeholders are ignored — a field containing literal
-//     `{{secret:bad}}` (missing slash) stays unchanged.
+//     `[[secret:bad]]` (missing slash) stays unchanged.
 //   - Missing keys inside a Secret produce an error. Better to fail
 //     at OnSettings than at request time.
 func Resolve(ctx context.Context, settings any, client module.K8sClient) error {

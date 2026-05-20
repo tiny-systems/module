@@ -12,10 +12,10 @@ func TestResolveMapStringAny(t *testing.T) {
 		Context any
 	}
 	s := &Settings{Context: map[string]any{
-		"apiKey":    "{{secret:demo-keys/anthropic}}",
+		"apiKey":    "[[secret:demo-keys/anthropic]]",
 		"plainText": "hello",
 		"nested": map[string]any{
-			"deep": "{{secret:demo-keys/anthropic}}",
+			"deep": "[[secret:demo-keys/anthropic]]",
 		},
 	}}
 	var c module.K8sClient = newFake(t, mkSecret("demo-keys", map[string]string{"anthropic": "sk-ant-real"}))
