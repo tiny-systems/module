@@ -32,104 +32,83 @@ func createTestRunner() *Runner {
 	return runner
 }
 
+// Edge delivery is single-shot since 2026-05-20. These tests verify
+// the no-retry behavior: success passes through, error returns
+// immediately on the first attempt.
+
 func TestRunner_sendToEdgeWithRetry_Success(t *testing.T) {
 	runner := createTestRunner()
 	ctx := context.Background()
 
-	tests := []struct {
-		name      string
-		handler   Handler
-		wantErr   bool
-		wantRetry bool
-	}{
-		{
-			name: "success on first attempt",
-			handler: func(ctx context.Context, msg *Msg) (any, error) {
-				return "success", nil
-			},
-			wantErr:   false,
-			wantRetry: false,
-		},
-		{
-			name:      "success after 2 failures",
-			handler:   mockHandler(2, errors.New("transient error"), "success"),
-			wantErr:   false,
-			wantRetry: true,
-		},
+	handler := func(ctx context.Context, msg *Msg) (any, error) {
+		return "success", nil
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			edge := v1alpha1.TinyNodeEdge{
-				ID:   "test-edge",
-				To:   "target-node:port",
-				Port: "output",
-			}
+	edge := v1alpha1.TinyNodeEdge{ID: "test-edge", To: "target-node:port", Port: "output"}
 
-			result, err := runner.sendToEdgeWithRetry(
-				ctx,
-				edge,
-				"source-node:output",
-				"target-node:port",
-				[]byte(`{"test":"data"}`),
-				nil,
-				tt.handler,
-			)
+	result, err := runner.sendToEdgeWithRetry(ctx, edge, "source-node:output", "target-node:port", []byte(`{"test":"data"}`), nil, handler)
+	if err != nil {
+		t.Fatalf("sendToEdgeWithRetry() unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("sendToEdgeWithRetry() expected non-nil result on success")
+	}
+}
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("sendToEdgeWithRetry() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+func TestRunner_sendToEdgeWithRetry_NoRetryOnTransient(t *testing.T) {
+	runner := createTestRunner()
+	ctx := context.Background()
 
-			if !tt.wantErr && result == nil {
-				t.Error("sendToEdgeWithRetry() expected non-nil result on success")
-			}
-		})
+	attempts := 0
+	handler := func(ctx context.Context, msg *Msg) (any, error) {
+		attempts++
+		return nil, errors.New("transient error")
+	}
+
+	edge := v1alpha1.TinyNodeEdge{ID: "test-edge", To: "target-node:port", Port: "output"}
+	start := time.Now()
+	_, err := runner.sendToEdgeWithRetry(ctx, edge, "source-node:output", "target-node:port", []byte(`{"test":"data"}`), nil, handler)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("sendToEdgeWithRetry() expected error")
+	}
+	if attempts != 1 {
+		t.Errorf("Expected exactly 1 attempt (no retries), got %d", attempts)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("sendToEdgeWithRetry() took %v, expected immediate single-shot return", elapsed)
 	}
 }
 
 func TestRunner_sendToEdgeWithRetry_PermanentError(t *testing.T) {
+	// PermanentError still surfaces through the layer untouched —
+	// callers can still inspect the error with perrors.IsPermanent
+	// even though the layer itself no longer retries on transient
+	// errors anyway.
 	runner := createTestRunner()
 	ctx := context.Background()
 
-	// Handler that returns permanent error
 	handler := func(ctx context.Context, msg *Msg) (any, error) {
 		return nil, perrors.NewPermanentError(errors.New("validation failed"))
 	}
 
-	edge := v1alpha1.TinyNodeEdge{
-		ID:   "test-edge",
-		To:   "target-node:port",
-		Port: "output",
-	}
-
+	edge := v1alpha1.TinyNodeEdge{ID: "test-edge", To: "target-node:port", Port: "output"}
 	start := time.Now()
-	result, err := runner.sendToEdgeWithRetry(
-		ctx,
-		edge,
-		"source-node:output",
-		"target-node:port",
-		[]byte(`{"test":"data"}`),
-		nil,
-		handler,
-	)
+	result, err := runner.sendToEdgeWithRetry(ctx, edge, "source-node:output", "target-node:port", []byte(`{"test":"data"}`), nil, handler)
 	elapsed := time.Since(start)
 
 	if err == nil {
 		t.Error("sendToEdgeWithRetry() expected error for permanent error")
 	}
-
 	if !perrors.IsPermanent(err) {
-		t.Error("sendToEdgeWithRetry() should return permanent error")
+		t.Error("sendToEdgeWithRetry() should propagate permanent-error wrap")
 	}
-
 	if result != nil {
-		t.Error("sendToEdgeWithRetry() expected nil result on permanent error")
+		t.Error("sendToEdgeWithRetry() expected nil result on error")
 	}
-
-	// Should return immediately without retries (< 500ms)
 	if elapsed > 500*time.Millisecond {
-		t.Errorf("sendToEdgeWithRetry() took %v, expected immediate return for permanent error", elapsed)
+		t.Errorf("sendToEdgeWithRetry() took %v, expected immediate return", elapsed)
 	}
 }
 
@@ -177,73 +156,6 @@ func TestRunner_sendToEdgeWithRetry_ContextCancellation(t *testing.T) {
 	// Should return shortly after cancellation
 	if elapsed > 2*time.Second {
 		t.Errorf("sendToEdgeWithRetry() took %v, expected faster return on context cancellation", elapsed)
-	}
-}
-
-func TestRunner_sendToEdgeWithRetry_ExponentialBackoff(t *testing.T) {
-	runner := createTestRunner()
-	ctx := context.Background()
-
-	callTimes := make([]time.Time, 0)
-	handler := func(ctx context.Context, msg *Msg) (any, error) {
-		callTimes = append(callTimes, time.Now())
-		if len(callTimes) < 4 {
-			return nil, errors.New("transient error")
-		}
-		return "success", nil
-	}
-
-	edge := v1alpha1.TinyNodeEdge{
-		ID:   "test-edge",
-		To:   "target-node:port",
-		Port: "output",
-	}
-
-	_, err := runner.sendToEdgeWithRetry(
-		ctx,
-		edge,
-		"source-node:output",
-		"target-node:port",
-		[]byte(`{"test":"data"}`),
-		nil,
-		handler,
-	)
-
-	if err != nil {
-		t.Fatalf("sendToEdgeWithRetry() unexpected error: %v", err)
-	}
-
-	if len(callTimes) != 4 {
-		t.Fatalf("Expected 4 attempts, got %d", len(callTimes))
-	}
-
-	// With fast path optimization:
-	// - Call 0: fast path (immediate)
-	// - Call 1: first retry in backoff loop (immediate - backoff.Retry tries once before waiting)
-	// - Call 2: after InitialInterval (~1s) backoff
-	// - Call 3: after next backoff interval
-	//
-	// So only intervals[1] and intervals[2] should show backoff delays
-	intervals := []time.Duration{
-		callTimes[1].Sub(callTimes[0]),
-		callTimes[2].Sub(callTimes[1]),
-		callTimes[3].Sub(callTimes[2]),
-	}
-
-	// First interval can be very small (fast path to first retry attempt)
-	// Second and third intervals should show backoff (at least 500ms, typically ~1s)
-	for i := 1; i < len(intervals); i++ {
-		if intervals[i] < 500*time.Millisecond {
-			t.Errorf("Retry %d: interval = %v, expected at least 500ms (exponential backoff)", i+1, intervals[i])
-		}
-	}
-
-	// Both backoff intervals should be reasonable (backoff library adds jitter,
-	// so we just verify they're in expected range, not strictly increasing)
-	for i := 1; i < len(intervals); i++ {
-		if intervals[i] > 5*time.Second {
-			t.Errorf("Retry %d: interval = %v, unexpectedly long", i+1, intervals[i])
-		}
 	}
 }
 
@@ -333,47 +245,3 @@ func TestRunner_sendToEdgeWithRetry_NilHandler(t *testing.T) {
 	)
 }
 
-func TestRunner_sendToEdgeWithRetry_TransientToSuccess(t *testing.T) {
-	runner := createTestRunner()
-	ctx := context.Background()
-
-	attempts := 0
-	handler := func(ctx context.Context, msg *Msg) (any, error) {
-		attempts++
-		if attempts == 1 {
-			return nil, errors.New("network timeout")
-		}
-		if attempts == 2 {
-			return nil, errors.New("connection refused")
-		}
-		return "finally worked", nil
-	}
-
-	edge := v1alpha1.TinyNodeEdge{
-		ID:   "test-edge",
-		To:   "target-node:port",
-		Port: "output",
-	}
-
-	result, err := runner.sendToEdgeWithRetry(
-		ctx,
-		edge,
-		"source-node:output",
-		"target-node:port",
-		[]byte(`{"test":"data"}`),
-		nil,
-		handler,
-	)
-
-	if err != nil {
-		t.Errorf("sendToEdgeWithRetry() unexpected error: %v", err)
-	}
-
-	if result != "finally worked" {
-		t.Errorf("sendToEdgeWithRetry() result = %v, want %v", result, "finally worked")
-	}
-
-	if attempts != 3 {
-		t.Errorf("Expected 3 attempts, got %d", attempts)
-	}
-}

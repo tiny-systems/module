@@ -351,21 +351,23 @@ func TestBlockingIO_PermanentErrorPropagatesAcrossChain(t *testing.T) {
 	}
 }
 
-// TestBlockingIO_TransientErrorIsRetried proves the OTHER half of the
-// error contract: a plain (non-Permanent) error triggers retry. We give
-// the sink a counter that returns errors for the first N calls then
-// succeeds, and verify the chain eventually completes (caller sees
-// success, sink was retried).
+// TestBlockingIO_TransientErrorNoLongerRetried proves the inverse of
+// the original contract: as of 2026-05-20 the runner no longer retries
+// transient errors at all. Edge delivery is single-shot — a non-
+// Permanent error returns to the caller on the first failed attempt.
+// Components that want resilience handle it internally; flows that
+// want retry semantics across edges wire an explicit retry component.
 //
-// This is the implicit contract that bites callers who don't know to
-// wrap with PermanentError — and is the load-bearing reason every
-// component author must understand the perrors package.
-func TestBlockingIO_TransientErrorIsRetried(t *testing.T) {
+// PermanentError still propagates (see
+// TestBlockingIO_PermanentErrorPropagatesAcrossChain) for callers
+// that want to inspect the error kind — but the framework treats both
+// kinds identically at delivery time.
+func TestBlockingIO_TransientErrorNoLongerRetried(t *testing.T) {
 	s := selfRoutingSchedule(t)
 
 	transient := &transientErrorSinkComponent{
 		name:        "transient",
-		failsBefore: 2,
+		failsBefore: 100, // arbitrary; we never reach the success branch now
 		retryErr:    errors.New("flaky"),
 	}
 	if err := s.Install(transient); err != nil {
@@ -378,29 +380,17 @@ func TestBlockingIO_TransientErrorIsRetried(t *testing.T) {
 	installNode(t, s, "sink-1", "transient")
 	installNode(t, s, "p-1", "pass", edge("out", "sink-1:in"))
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.Handle(context.Background(), &runner.Msg{
-			From: runner.FromSignal,
-			To:   "p-1:in",
-			Data: []byte(`{}`),
-		})
-		done <- err
-	}()
+	_, err := s.Handle(context.Background(), &runner.Msg{
+		From: runner.FromSignal,
+		To:   "p-1:in",
+		Data: []byte(`{}`),
+	})
 
-	// First call fails, backoff initial interval is 1s, second call may also
-	// fail; allow up to 10s for two transient retries plus the success.
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("expected eventual success after transient retries; got err=%v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("chain did not complete after transient retries; calls=%d", transient.calls.Load())
+	if err == nil {
+		t.Fatalf("expected single-shot failure; got success without retries")
 	}
-
-	if transient.calls.Load() < 3 {
-		t.Errorf("expected at least 3 calls (2 failures + 1 success); got %d", transient.calls.Load())
+	if got := transient.calls.Load(); got != 1 {
+		t.Errorf("expected exactly 1 attempt (no retry), got %d", got)
 	}
 }
 

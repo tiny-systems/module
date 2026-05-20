@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
 	"github.com/goccy/go-json"
 	"github.com/google/go-cmp/cmp"
@@ -21,7 +20,6 @@ import (
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	m "github.com/tiny-systems/module/module"
-	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
@@ -865,8 +863,26 @@ func (c *Runner) StopWithoutCleanup() {
 	close(c.closeCh)
 }
 
-// sendToEdgeWithRetry sends a message to an edge with retry logic.
-// It only retries on transient errors. Permanent errors and context cancellation stop immediately.
+// sendToEdge sends a message to an edge exactly once. No retries.
+//
+// Retries used to be in this layer (exponential backoff up to 60s,
+// originally infinite). Removed 2026-05-20: implicit framework retry
+// is the wrong shape for an agent runtime. Transient errors against
+// paid LLM APIs burn money; permanent errors (auth fail) waste it
+// even faster. And the cross-pod grpc error wrapping doesn't preserve
+// PermanentError sentinels, so the framework couldn't tell transient
+// from permanent reliably.
+//
+// New model: edge delivery is a single attempt. Components that need
+// transient resilience (Postgres reconnect, HTTP 5xx) handle it
+// internally via their own client libraries — those libraries already
+// know which errors are worth retrying. Flow authors that want
+// retry semantics across edges (e.g. for a flaky external API) wire
+// an explicit `retry` component with bounded attempts and a circuit
+// breaker. Same separation of concerns as Signal-vs-supervisor.
+//
+// Name kept (sendToEdgeWithRetry) to avoid touching every caller;
+// behavior is now "send once, return whatever the handler returned".
 func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort, edgeTo string, dataBytes []byte, responseConfig interface{}, handler Handler) (any, error) {
 	// Track cancel func so SetNode can cancel in-flight sends for removed edges.
 	ctx, cancel := context.WithCancel(ctx)
@@ -884,71 +900,15 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		Resp:   responseConfig,
 	}
 
-	// Fast path: try once without retry overhead
 	res, err := handler(ctx, msg)
-	if err == nil {
-		return res, nil
-	}
-
-	// Check if error is permanent - don't retry
-	if perrors.IsPermanent(err) {
-		c.log.Error(err, "send to edge: permanent error",
+	if err != nil {
+		c.log.Error(err, "send to edge: failed (single attempt, no retry)",
 			"to", edgeTo,
 			"edgeID", edge.ID,
 		)
 		return nil, err
 	}
-
-	// Context cancelled - don't retry
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-
-	// Transient error - enter retry loop
-	c.log.Error(err, "send to edge: transient error, starting retries",
-		"to", edgeTo,
-		"edgeID", edge.ID,
-	)
-
-	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = 1 * time.Second
-	b.MaxInterval = 30 * time.Second
-	// Cap total retry wall-clock at 60s. Infinite retry (MaxElapsedTime=0)
-	// burns API credits when an upstream returns a misleading-transient
-	// error (e.g. Anthropic 401 — auth fail isn't really transient but
-	// llm_complete doesn't tag it Permanent). 60s gives transient hiccups
-	// plenty of room (Postgres reconnect, K8s API server blip) while
-	// capping the blast radius on bad errors.
-	b.MaxElapsedTime = 60 * time.Second
-
-	// First transient error counts as the initial retry attempt so the UI sees
-	// a non-zero counter immediately, not only after the second failure.
-	c.incRetry(edge.ID, err)
-	defer c.clearRetry(edge.ID)
-
-	var result any
-	retryErr := backoff.Retry(func() error {
-		res, err := handler(ctx, msg)
-		if err != nil {
-			if perrors.IsPermanent(err) {
-				return backoff.Permanent(err)
-			}
-			c.incRetry(edge.ID, err)
-			return err
-		}
-		result = res
-		return nil
-	}, backoff.WithContext(b, ctx))
-
-	if retryErr != nil {
-		c.log.Error(retryErr, "send to edge: retry failed",
-			"to", edgeTo,
-			"edgeID", edge.ID,
-		)
-		return nil, retryErr
-	}
-
-	return result, nil
+	return res, nil
 }
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) (any, error) {
