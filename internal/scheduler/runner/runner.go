@@ -913,7 +913,13 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	b := backoff.NewExponentialBackOff()
 	b.InitialInterval = 1 * time.Second
 	b.MaxInterval = 30 * time.Second
-	b.MaxElapsedTime = 0
+	// Cap total retry wall-clock at 60s. Infinite retry (MaxElapsedTime=0)
+	// burns API credits when an upstream returns a misleading-transient
+	// error (e.g. Anthropic 401 — auth fail isn't really transient but
+	// llm_complete doesn't tag it Permanent). 60s gives transient hiccups
+	// plenty of room (Postgres reconnect, K8s API server blip) while
+	// capping the blast radius on bad errors.
+	b.MaxElapsedTime = 60 * time.Second
 
 	// First transient error counts as the initial retry attempt so the UI sees
 	// a non-zero counter immediately, not only after the second failure.
