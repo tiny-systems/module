@@ -92,6 +92,45 @@ User credentials and config flow through the graph via a ` + "`context`" + ` fie
 
 Putting credentials directly on the receiving component (e.g. http_server settings) does NOT propagate their schema downstream. Validator fails with "field not found". Always hold credentials upstream.
 
+## Secrets — ` + "`[[secret:<name>/<key>]]`" + ` Placeholders
+
+For real credentials (API keys, tokens, DSN passwords), use the secret resolver instead of carrying them through the context pipeline. The plain ` + "`context`" + ` propagation pattern above leaks secrets into every intermediate node's status metadata; the secret resolver keeps them in the consuming component pod's memory only.
+
+**Syntax:** ` + "`[[secret:<secret-name>/<data-key>]]`" + ` — note the double square brackets, NOT ` + "`{{ }}`" + `. The expression evaluator owns ` + "`{{ }}`" + ` syntax and would mangle ` + "`{{secret:...}}`" + ` to nil before resolution.
+
+**Architecture rule — put the placeholder on the leaf consumer, not the trigger.**
+Place ` + "`[[secret:...]]`" + ` on the Settings of the component that *actually calls the external API* (e.g. ` + "`llm_chat.Settings.APIKey`" + `, ` + "`http_request.Settings.Authorization`" + `). The consuming component resolves it in its OnSettings against a Kubernetes Secret in its own pod's namespace. Resolved value never enters edge data.
+
+**Anti-pattern** — placing ` + "`[[secret:...]]`" + ` on a trigger's ` + "`context.apiKey`" + ` and piping it through edges. The resolved value will land in every intermediate node's ` + "`status.metadata`" + ` (plain-readable in the TinyNode CR). The placeholder belongs on the leaf, not the root.
+
+**Components with built-in secret support (as of llm-module v0.9.0 / common-module v0.6.5 / SDK v0.10.18):**
+- ` + "`signal`" + ` — resolves ` + "`Settings.Context`" + ` AND the ` + "`_control`" + ` payload (so the Send button payload doesn't leak placeholders downstream)
+- ` + "`llm_complete`" + ` / ` + "`llm_chat`" + ` / ` + "`llm_tools`" + ` / ` + "`llm_router`" + ` — each has ` + "`Settings.APIKey`" + `. When set, it wins over ` + "`Request.APIKey`" + `, so flows omit the apiKey from edge configs.
+
+**Requirements for resolution to work:**
+1. Component must embed ` + "`module.Base`" + ` (gives ` + "`Client()`" + ` access) and call ` + "`secret.Resolve(ctx, &settings, c.Client())`" + ` in OnSettings.
+2. Helm release installed with ` + "`secrets.enabled=true`" + ` — adds the namespace-scoped Role granting get/list/watch on Secrets.
+3. The Kubernetes Secret must exist in the same namespace as the module pod (` + "`kubectl create secret generic <name> --from-literal=<key>=<value>`" + `).
+
+**Example — RAG flow with no secret leakage:**
+
+` + "```" + `
+build_flow(
+  nodes: [
+    {alias: "ask", component: "signal", module: "tinysystems/common-module-v0",
+     settings: {context: {question: "What's in memory?"}}},
+    {alias: "embed", component: "embed_text", module: "tinysystems/embedding-module-v0"},
+    {alias: "search", component: "vector_search", module: "tinysystems/database-module-v0",
+     settings: {table: "memories", dsn: "[[secret:demo-db/dsn]]"}},
+    {alias: "chat", component: "llm_chat", module: "tinysystems/llm-module-v0",
+     settings: {provider: "anthropic", apiKey: "[[secret:demo-keys/anthropic]]"}},
+  ],
+  // Signal context only carries the question — no credentials flow through edges.
+)
+` + "```" + `
+
+If a component you need doesn't yet support ` + "`[[secret:...]]`" + ` in its Settings, the temporary workaround is to carry the credential through context — but raise it as a gap, because the leak audit will show resolved values in every intermediate node's status.
+
 ## Schema Extension
 
 When a component field is marked ` + "`configurable: true`" + `, you MUST provide a schema describing its shape — otherwise the validator can't check downstream expressions.
