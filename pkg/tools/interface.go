@@ -161,6 +161,47 @@ type ModuleCatalog interface {
 	GetModule(ctx context.Context, moduleName string) (*ModuleInfo, error)
 }
 
+// InstallProgress is one progress event emitted by ModuleInstaller
+// during a streaming install. The platform-mode implementation maps
+// each gRPC InstallProgress event to one of these; the local helm
+// path can emit at the granularity it wants.
+type InstallProgress struct {
+	Stage   string `json:"stage,omitempty"`
+	Message string `json:"message"`
+	LogType string `json:"log_type,omitempty"` // "info" | "warning" | "error" | "success"
+}
+
+// InstallResult carries the terminal state of an install attempt.
+// Success=true means the module is deployed and reconciling; the
+// caller can immediately list_modules / get_component_info to see
+// it. Success=false means the install never completed; Error has
+// the failure message.
+type InstallResult struct {
+	Success         bool   `json:"success"`
+	ModuleVersionID string `json:"module_version_id,omitempty"`
+	ReleaseName     string `json:"release_name,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+// ModuleInstaller installs a module into the active cluster /
+// workspace. Hosted-platform mode (mcp-server with --platform-token)
+// implements this by streaming platform.mcp.v1.MCPService.InstallModule
+// and surfacing the progress events through onProgress. Kubeconfig
+// mode currently leaves this nil — users run `helm install` from
+// their own shell via the command surfaced by get_module_info.
+//
+// onProgress is invoked for every progress event before the call
+// returns. It may be nil if the caller doesn't want streaming.
+//
+// bundles semantics — same as the platform RPC:
+//
+//	nil           → use module-default bundle selection
+//	[]string{}    → install with no bundles
+//	["a", "b"]    → install with exactly those bundles
+type ModuleInstaller interface {
+	InstallModule(ctx context.Context, moduleName, version string, bundles []string, onProgress func(InstallProgress)) (*InstallResult, error)
+}
+
 // PublicModuleCatalog provides discovery of modules in the public Tiny
 // Systems catalog — the catalog counterpart to ModuleCatalog. Where
 // ModuleCatalog answers "what is installed in this cluster/workspace",
@@ -509,6 +550,7 @@ type ExecutionContext struct {
 	// Discovery
 	ModuleCatalog       ModuleCatalog       // installed modules (cluster-scoped)
 	PublicModuleCatalog PublicModuleCatalog // catalog of modules available to install
+	ModuleInstaller     ModuleInstaller     // platform-mode install path; nil in kubeconfig mode
 	PortInspector       PortInspector
 
 	// Flow mutation
