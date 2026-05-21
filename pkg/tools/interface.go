@@ -202,6 +202,31 @@ type ModuleInstaller interface {
 	InstallModule(ctx context.Context, moduleName, version string, bundles []string, onProgress func(InstallProgress)) (*InstallResult, error)
 }
 
+// ModuleUninstaller removes a module's helm release from the active
+// cluster / workspace. Platform-mode implementation calls the
+// matching MCPService.UninstallModule unary RPC. Kubeconfig mode
+// leaves this nil; users uninstall via `helm uninstall <release>`
+// from their own shell.
+//
+// The platform refuses when any node still references the module —
+// the InUse field on the result lists the offending node IDs and
+// Success is false. Callers should delete those flows / nodes
+// first, then retry.
+type ModuleUninstaller interface {
+	UninstallModule(ctx context.Context, moduleName string) (*UninstallResult, error)
+}
+
+// UninstallResult carries the terminal state of an uninstall call.
+// On Success=true the module's helm release is gone and the
+// deployment row is cleaned up. On Success=false either the module
+// wasn't installed (caller's error) or the in-use guard rejected
+// the call — InUse names the blocking nodes when that's the cause.
+type UninstallResult struct {
+	Success bool     `json:"success"`
+	Error   string   `json:"error,omitempty"`
+	InUse   []string `json:"in_use,omitempty"`
+}
+
 // PublicModuleCatalog provides discovery of modules in the public Tiny
 // Systems catalog — the catalog counterpart to ModuleCatalog. Where
 // ModuleCatalog answers "what is installed in this cluster/workspace",
@@ -551,6 +576,7 @@ type ExecutionContext struct {
 	ModuleCatalog       ModuleCatalog       // installed modules (cluster-scoped)
 	PublicModuleCatalog PublicModuleCatalog // catalog of modules available to install
 	ModuleInstaller     ModuleInstaller     // platform-mode install path; nil in kubeconfig mode
+	ModuleUninstaller   ModuleUninstaller   // platform-mode uninstall path; nil in kubeconfig mode
 	PortInspector       PortInspector
 
 	// Flow mutation
