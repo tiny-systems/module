@@ -7,6 +7,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
+	"github.com/nats-io/nats.go/jetstream"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
@@ -60,6 +61,11 @@ type Schedule struct {
 	// Must be set via SetStateFactory before Stateful components run; nil
 	// factory means Stateful components silently get no state injection.
 	stateFactory state.Factory
+
+	// js is the optional JetStream handle injected via SetJetStream. When
+	// non-nil, NATSAware components receive it via OnNATS during Update.
+	// Stays nil when the runtime started without TINY_NATS_URL.
+	js jetstream.JetStream
 }
 
 // MaxMessageDepth is the maximum number of node hops a message can traverse.
@@ -81,6 +87,14 @@ func New(outsideHandler runner.Handler) *Schedule {
 // components don't get state injection (silent no-op).
 func (s *Schedule) SetStateFactory(f state.Factory) *Schedule {
 	s.stateFactory = f
+	return s
+}
+
+// SetJetStream installs the optional JetStream handle. Call before any
+// NATSAware components are scheduled. Without a handle, NATSAware
+// components receive nil on OnNATS — they MUST handle that gracefully.
+func (s *Schedule) SetJetStream(js jetstream.JetStream) *Schedule {
+	s.js = js
 	return s
 }
 
@@ -381,6 +395,18 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 			h.OnClient(k8sClient)
 		} else {
 			s.log.Info("scheduler update: ClientAware component, but manager doesn't satisfy module.K8sClient; OnClient skipped",
+				"node", node.Name,
+			)
+		}
+	}
+	if h, ok := cmpInstance.(module.NATSAware); ok {
+		// s.js may be nil — components opt-in to NATSAware accept that
+		// and fall back to legacy behavior or surface a "feature
+		// unavailable" via their Handle path. Dispatching with nil keeps
+		// the capability shape predictable across with/without-broker.
+		h.OnNATS(s.js)
+		if s.js == nil {
+			s.log.Info("scheduler update: NATSAware component, but TINY_NATS_URL unset; OnNATS dispatched with nil",
 				"node", node.Name,
 			)
 		}

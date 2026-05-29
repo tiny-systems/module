@@ -434,7 +434,8 @@ var runCmd = &cobra.Command{
 			SetMeter(meter).
 			SetTracer(tracer).
 			SetManager(resourceManager).
-			SetStateFactory(state.NewMetadataFactory(resourceManager.GetK8sClient()))
+			SetStateFactory(state.NewMetadataFactory(resourceManager.GetK8sClient())).
+			SetJetStream(connectJetStream(ctx, l))
 
 		// create gRPC server
 		var (

@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/tiny-systems/module/api/v1alpha1"
 )
 
@@ -43,6 +44,23 @@ type ClientAware interface {
 	OnClient(client K8sClient)
 }
 
+// NATSAware components receive the JetStream handle if the runtime
+// was started with TINY_NATS_URL set. The framework calls OnNATS once
+// during the first Update, after OnClient and before OnState.
+//
+// js is nil when the runtime started without TINY_NATS_URL — components
+// MUST handle that case (typically by falling back to legacy behavior
+// or returning a "feature unavailable" error from Handle). The
+// capability is opt-in; components that don't implement NATSAware are
+// unaffected by the env var.
+//
+// Typical uses: a durable retry queue backed by a JetStream stream,
+// a State backend stored in a JetStream KV bucket, edge delivery via
+// JetStream subjects, cross-pod coordination primitives.
+type NATSAware interface {
+	OnNATS(js jetstream.JetStream)
+}
+
 // ControlHandler is the typed alternative to handling v1alpha1.ControlPort
 // in Component.Handle. Control messages drive dashboard widgets and
 // runtime control affordances (Start/Stop buttons etc.).
@@ -71,9 +89,10 @@ type EmitterAware interface {
 //
 //   1. OnIdentity   — node knows who it is
 //   2. OnClient     — K8s client wired up
-//   3. OnState      — state backend wired up (Stateful interface)
-//   4. OnReconcile  — restore from metadata, react to spec
-//   5. OnSettings   — apply user-provided settings (wins over reconcile)
+//   3. OnNATS       — JetStream handle wired up (NATSAware interface)
+//   4. OnState      — state backend wired up (Stateful interface)
+//   5. OnReconcile  — restore from metadata, react to spec
+//   6. OnSettings   — apply user-provided settings (wins over reconcile)
 //
 // On subsequent reconciles, OnReconcile fires again (settings only re-fires
 // when the configured value changes — existing dedup is preserved).
