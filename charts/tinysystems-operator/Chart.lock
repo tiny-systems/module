@@ -5,5 +5,8 @@ dependencies:
 - name: postgresql
   repository: https://charts.bitnami.com/bitnami
   version: 15.5.20
-digest: sha256:e2716e3030e7c7479cce7e86e619f8e8e36bf38e9503b1a3653d80e79dcb7ea5
-generated: "2026-05-19T13:50:09.375436+01:00"
+- name: nats
+  repository: https://nats-io.github.io/k8s/helm/charts/
+  version: 2.14.0
+digest: sha256:d074913592f5bc254374360e3361b6c16d87e7e57588f2d1cbe9afc1dc503883
+generated: "2026-05-29T18:26:30.084538+01:00"

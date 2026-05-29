@@ -63,6 +63,13 @@ spec:
             value: {{ quote .Values.kubernetesClusterDomain }}
           - name: SELF_SERVICE_HOST
             value: {{ include "tinysystems-operator.fullname" . }}-manager-service:8483
+          {{- if .Values.nats.enabled }}
+          # NATS bundle is on — point the SDK at the in-cluster JetStream
+          # broker. Service name is {release}-nats (from the nats subchart's
+          # fullname helper), reached via in-namespace DNS.
+          - name: TINY_NATS_URL
+            value: "nats://{{ .Release.Name }}-nats:4222"
+          {{- end }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}
         livenessProbe:
