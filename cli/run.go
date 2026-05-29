@@ -23,6 +23,7 @@ import (
 	sch "github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/server"
+	"github.com/tiny-systems/module/internal/transport"
 	m "github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
@@ -349,6 +350,16 @@ var runCmd = &cobra.Command{
 			pool   = client.NewPool().SetLogger(l)
 		)
 
+		// NATS transport selector. When TINY_NATS_URL is set we route
+		// cross-module messages through NATS subjects instead of the
+		// gRPC AddressPool. Same runner.Handler contract — scheduler
+		// doesn't notice. Unset = legacy gRPC path.
+		natsRt := connectNATS(ctx, l)
+		var natsTransport *transport.NATS
+		if natsRt != nil {
+			natsTransport = transport.NewNATS(natsRt.NC, moduleInfo.GetNameSanitised(), l)
+		}
+
 		//
 		resourceManager, err := resource.NewManagerFromConfig(config, namespace)
 		if err != nil {
@@ -394,8 +405,16 @@ var runCmd = &cobra.Command{
 				return res, err
 			}
 
-			// gRPC call (retry handled by runner.go sendToEdgeWithRetry)
-			resp, err := pool.Handler(ctx, msg)
+			// Cross-module call. NATS subject delivery when the
+			// transport is enabled; gRPC AddressPool otherwise. Same
+			// retry/single-shot semantics either way — driven by
+			// runner.go sendToEdgeWithRetry, not the transport.
+			var resp []byte
+			if natsTransport != nil {
+				resp, err = natsTransport.Handler(ctx, msg)
+			} else {
+				resp, err = pool.Handler(ctx, msg)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -434,49 +453,67 @@ var runCmd = &cobra.Command{
 			SetMeter(meter).
 			SetTracer(tracer).
 			SetManager(resourceManager).
-			SetStateFactory(state.NewMetadataFactory(resourceManager.GetK8sClient())).
-			SetJetStream(connectJetStream(ctx, l))
+			SetStateFactory(state.NewMetadataFactory(resourceManager.GetK8sClient()))
 
-		// create gRPC server
-		var (
-			serv = server.New().SetLogger(l)
-		)
+		// Reuse the same NATS connection for the JetStream-backed
+		// NATSAware capability. natsRt is non-nil iff TINY_NATS_URL
+		// was set AND nats.Connect succeeded.
+		if natsRt != nil {
+			scheduler.SetJetStream(natsRt.JS)
+		}
 
-		wg.Go(func() error {
-			l.Info("starting gRPC server")
+		// Receiver: NATS subscriber when the transport is enabled,
+		// gRPC server otherwise. The scheduler.Handle entry point is
+		// identical for both — same blocking I/O, same Result chain.
+		if natsTransport != nil {
+			wg.Go(func() error {
+				l.Info("starting NATS receiver",
+					"subject", transport.SubjectFor(moduleInfo.GetNameSanitised()),
+				)
+				defer l.Info("NATS receiver stopped")
+				return natsTransport.StartReceiver(ctx, scheduler.Handle)
+			})
+			// moduleInfo.Addr is consumed downstream for registration
+			// + observability. NATS has no TCP listen address, so we
+			// surface the subject — informational only, no one dials
+			// it as a TCP target.
+			moduleInfo.Addr = "nats://" + transport.SubjectFor(moduleInfo.GetNameSanitised())
+		} else {
+			serv := server.New().SetLogger(l)
+			wg.Go(func() error {
+				l.Info("starting gRPC server")
+				defer func() {
+					l.Info("gRPC server stopped")
+				}()
+				if err := serv.Start(ctx, scheduler.Handle, grpcAddr, func(addr net.Addr) {
+					// @todo check if inside of container
+					l.Info("gRPC listens to address", "addr", addr.String())
 
-			defer func() {
-				l.Info("gRPC server stopped")
-			}()
-			if err := serv.Start(ctx, scheduler.Handle, grpcAddr, func(addr net.Addr) {
-				// @todo check if inside of container
-				l.Info("gRPC listens to address", "addr", addr.String())
+					if selfHost := os.Getenv("SELF_SERVICE_HOST"); selfHost != "" {
+						l.Info("gRPC address", "addr", selfHost)
+						listenAddr <- selfHost
+						return
+					}
 
-				//
-				if selfHost := os.Getenv("SELF_SERVICE_HOST"); selfHost != "" {
-					l.Info("gRPC address", "addr", selfHost)
-					listenAddr <- selfHost
-					return
+					parts := strings.Split(addr.String(), ":")
+					if len(parts) > 0 {
+						localAddr := fmt.Sprintf("127.0.0.1:%s", parts[len(parts)-1])
+
+						l.Info("gRPC address", "localAddr", localAddr)
+						listenAddr <- localAddr
+						return
+					}
+					listenAddr <- addr.String()
+				}); err != nil {
+					l.Error(err, "problem starting gRPC server")
+					return err
 				}
+				return nil
+			})
 
-				parts := strings.Split(addr.String(), ":")
-				if len(parts) > 0 {
-					localAddr := fmt.Sprintf("127.0.0.1:%s", parts[len(parts)-1])
-
-					l.Info("gRPC address", "localAddr", localAddr)
-					listenAddr <- localAddr
-					return
-				}
-				listenAddr <- addr.String()
-			}); err != nil {
-				l.Error(err, "problem starting gRPC server")
-				return err
-			}
-			return nil
-		})
-
-		// add listening address to the module info
-		moduleInfo.Addr = <-listenAddr
+			// add listening address to the module info
+			moduleInfo.Addr = <-listenAddr
+		}
 
 		// Set remaining fields on node reconciler that weren't available earlier
 		nodeReconciler.Client = mgr.GetClient()
