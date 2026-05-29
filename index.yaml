@@ -424,6 +424,26 @@ entries:
   tinysystems-operator:
   - apiVersion: v2
     appVersion: 0.1.3
+    created: "2026-05-29T20:01:20.768163847Z"
+    dependencies:
+    - condition: tei.enabled
+      name: tei
+      repository: file://./charts/tei
+      version: 0.1.1
+    - alias: pgvector
+      condition: pgvector.enabled
+      name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      version: 15.5.20
+    description: TinySystems Operator Helm chart for Kubernetes
+    digest: 2b7f18524e9b347247e6295e4a0db7981c13a60710216fd7c561e65c6ce8f52c
+    name: tinysystems-operator
+    type: application
+    urls:
+    - https://github.com/tiny-systems/module/releases/download/tinysystems-operator-0.2.7/tinysystems-operator-0.2.7.tgz
+    version: 0.2.7
+  - apiVersion: v2
+    appVersion: 0.1.3
     created: "2026-05-19T20:16:16.296071653Z"
     dependencies:
     - condition: tei.enabled
@@ -1317,4 +1337,4 @@ entries:
     urls:
     - https://github.com/tiny-systems/module/releases/download/tinysystems-otel-collector-0.1.0/tinysystems-otel-collector-0.1.0.tgz
     version: 0.1.0
-generated: "2026-05-19T20:16:16.296531748Z"
+generated: "2026-05-29T20:01:20.768692033Z"
