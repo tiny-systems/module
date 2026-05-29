@@ -135,47 +135,15 @@ pgvector:
     persistence:
       size: 8Gi
 
-# NATS — JetStream broker for the SDK's durable primitives. Off by
-# default; flip on with --set nats.enabled=true. When the SDK gains
-# JetStream-backed State / edges this default will flip to true.
+# NATS endpoint — when set, the SDK uses NATS for cross-module
+# messaging (TINY_NATS_URL plumbed to the controller-manager pod).
+# Empty = legacy gRPC AddressPool transport.
 #
-# Default config is a single-replica, file-storage JetStream node
-# sized for a typical small-to-medium cluster. Bump to 3-node RAFT
-# by setting --set nats.config.cluster.enabled=true,nats.statefulSet.merge.spec.replicas=3.
-nats:
-  enabled: false
-  config:
-    cluster:
-      enabled: false
-    jetstream:
-      enabled: true
-      fileStore:
-        enabled: true
-        pvc:
-          enabled: true
-          size: 20Gi
-      memoryStore:
-        enabled: false
-  statefulSet:
-    merge:
-      spec:
-        replicas: 1
-  container:
-    merge:
-      resources:
-        requests:
-          cpu: 100m
-          memory: 256Mi
-        limits:
-          cpu: 500m
-          memory: 512Mi
-  service:
-    merge:
-      spec:
-        type: ClusterIP
-  reloader:
-    enabled: false
-  natsBox:
-    enabled: false
-  promExporter:
-    enabled: false
+# Each cluster runs ONE NATS instance (deployed separately, e.g. via
+# tinysystems-crd or an admin's choice). Every module's chart install
+# points its natsURL at the same endpoint. Subjects route messages —
+# no per-module broker.
+#
+# Example:
+#   --set natsURL=nats://nats.tinysystems-system.svc.cluster.local:4222
+natsURL: ""
