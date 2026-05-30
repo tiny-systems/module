@@ -223,7 +223,7 @@ func (t *NATS) handleIncoming(parentCtx context.Context, handler runner.Handler,
 		// Empty success — explicit header so the caller skips the
 		// unmarshal step. Without this NATS may deliver the empty
 		// reply as a one-byte null payload, which kills json.Unmarshal
-		// with "invalid character ' '".
+		// with an invalid-NUL-character error.
 		reply := &nats.Msg{
 			Header: nats.Header{headerEmpty: []string{"1"}},
 		}
