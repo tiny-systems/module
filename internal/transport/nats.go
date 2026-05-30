@@ -145,8 +145,14 @@ func (t *NATS) StartReceiver(ctx context.Context, handler runner.Handler) error 
 	subject := SubjectFor(t.moduleName)
 	queue := t.moduleName
 
+	// Each incoming message is dispatched in its own goroutine. The
+	// NATS Go client's callback runs in a single goroutine per
+	// subscription by default — sequential processing would deadlock
+	// the moment a handler issues a downstream nats.Request whose
+	// target is another node on the same module (the second message
+	// queues behind the first one's still-pending reply).
 	sub, err := t.nc.QueueSubscribe(subject, queue, func(m *nats.Msg) {
-		t.handleIncoming(ctx, handler, m)
+		go t.handleIncoming(ctx, handler, m)
 	})
 	if err != nil {
 		return fmt.Errorf("subscribe %s: %w", subject, err)
