@@ -47,6 +47,7 @@ const (
 	headerEdgeID       = "x-edge-id"
 	headerMessageDepth = "x-message-depth"
 	headerError        = "x-error"
+	headerEmpty        = "x-empty"
 	natsMsgIDHeader    = "Nats-Msg-Id"
 )
 
@@ -131,6 +132,14 @@ func (t *NATS) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error) {
 		return nil, errors.New(e)
 	}
 
+	// Normalize the "no data" reply to nil. Receivers that return a
+	// nil component result publish via the x-empty header (see
+	// handleIncoming below) — without this, downstream json.Unmarshal
+	// in the scheduler's outsideHandler fails on either empty bytes
+	// or the platform-protocol null-byte sentinel.
+	if reply.Header.Get(headerEmpty) == "1" || len(reply.Data) == 0 {
+		return nil, nil
+	}
 	return reply.Data, nil
 }
 
@@ -211,7 +220,19 @@ func (t *NATS) handleIncoming(parentCtx context.Context, handler runner.Handler,
 	var payload []byte
 	switch {
 	case utils.IsNil(res):
-		payload = nil
+		// Empty success — explicit header so the caller skips the
+		// unmarshal step. Without this NATS may deliver the empty
+		// reply as a one-byte null payload, which kills json.Unmarshal
+		// with "invalid character ' '".
+		reply := &nats.Msg{
+			Header: nats.Header{headerEmpty: []string{"1"}},
+		}
+		if respErr := m.RespondMsg(reply); respErr != nil {
+			t.log.Info("nats transport: respond empty failed",
+				"err", respErr.Error(),
+			)
+		}
+		return
 	case isBytes(res):
 		payload = res.([]byte)
 	default:
