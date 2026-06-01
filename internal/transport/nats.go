@@ -58,6 +58,16 @@ func SubjectFor(moduleName string) string {
 	return fmt.Sprintf("%s.%s.msg", subjectPrefix, moduleName)
 }
 
+// Transport is the cross-module wire contract that both the core
+// req/reply NATS transport (this file) and the JetStream-backed
+// transport (jetstream.go) satisfy. cli/run.go picks one at boot
+// based on TINY_NATS_TRANSPORT and binds it to the scheduler — the
+// rest of the SDK doesn't care which substrate carries the bytes.
+type Transport interface {
+	Handler(ctx context.Context, msg *runner.Msg) ([]byte, error)
+	StartReceiver(ctx context.Context, handler runner.Handler) error
+}
+
 // NATS holds the cross-module wire backed by NATS core request/reply.
 // Implements both sender (Handler) and receiver (StartReceiver) so a
 // single instance replaces both AddressPool and the gRPC server.

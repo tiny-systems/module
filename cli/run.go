@@ -352,12 +352,27 @@ var runCmd = &cobra.Command{
 
 		// NATS transport selector. When TINY_NATS_URL is set we route
 		// cross-module messages through NATS subjects instead of the
-		// gRPC AddressPool. Same runner.Handler contract — scheduler
-		// doesn't notice. Unset = legacy gRPC path.
+		// gRPC AddressPool. TINY_NATS_TRANSPORT picks between:
+		//   "core"      — core req/reply, ephemeral, fast (default)
+		//   "jetstream" — durable WorkQueue stream, AckWait pod-death
+		//                 recovery, single-shot on handler error
+		// Unset TINY_NATS_URL = legacy gRPC path, no change.
 		natsRt := connectNATS(ctx, l)
-		var natsTransport *transport.NATS
+		var natsTransport transport.Transport
 		if natsRt != nil {
-			natsTransport = transport.NewNATS(natsRt.NC, moduleInfo.GetNameSanitised(), l)
+			moduleName := moduleInfo.GetNameSanitised()
+			switch os.Getenv("TINY_NATS_TRANSPORT") {
+			case "jetstream":
+				if err := transport.EnsureEdgeStream(ctx, natsRt.JS); err != nil {
+					l.Error(err, "ensure edge stream")
+					os.Exit(1)
+				}
+				natsTransport = transport.NewJetStream(natsRt.JS, natsRt.NC, moduleName, l)
+				l.Info("transport: jetstream-backed durable wire")
+			default:
+				natsTransport = transport.NewNATS(natsRt.NC, moduleName, l)
+				l.Info("transport: core req/reply")
+			}
 		}
 
 		//
