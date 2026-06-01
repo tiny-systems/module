@@ -35,6 +35,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	module2 "github.com/tiny-systems/module/module"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -47,6 +48,7 @@ const (
 	headerEdgeID       = "x-edge-id"
 	headerMessageDepth = "x-message-depth"
 	headerError        = "x-error"
+	headerErrorCode    = "x-error-code"
 	headerEmpty        = "x-empty"
 	headerReplyInbox   = "x-reply-inbox"
 	natsMsgIDHeader    = "Nats-Msg-Id"
@@ -140,6 +142,9 @@ func (t *NATS) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error) {
 	// Handler-side error: surface back to caller as a Go error so the
 	// scheduler's Result chain treats it like a gRPC error today.
 	if e := reply.Header.Get(headerError); e != "" {
+		if code := reply.Header.Get(headerErrorCode); code != "" {
+			return nil, perrors.NonRetryable(code, errors.New(e))
+		}
 		return nil, errors.New(e)
 	}
 
@@ -217,8 +222,14 @@ func (t *NATS) handleIncoming(parentCtx context.Context, handler runner.Handler,
 	if err != nil {
 		// Reply with an error header. Caller's Handler() reads
 		// x-error and surfaces it as a Go error to the runner.
+		// If the component used module.NonRetryable / perrors.NonRetryable,
+		// stamp the code on x-error-code so the scheduler's edge-retry
+		// loop can short-circuit.
 		reply := &nats.Msg{
 			Header: nats.Header{headerError: []string{err.Error()}},
+		}
+		if code := perrors.ErrorCode(err); code != "" {
+			reply.Header.Set(headerErrorCode, code)
 		}
 		if respErr := m.RespondMsg(reply); respErr != nil {
 			t.log.Info("nats transport: respond on error failed",

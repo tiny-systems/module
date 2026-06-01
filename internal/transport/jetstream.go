@@ -34,6 +34,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	module2 "github.com/tiny-systems/module/module"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/utils"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -170,6 +171,9 @@ func (t *JetStream) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error
 	select {
 	case reply := <-replyCh:
 		if e := reply.Header.Get(headerError); e != "" {
+			if code := reply.Header.Get(headerErrorCode); code != "" {
+				return nil, perrors.NonRetryable(code, errors.New(e))
+			}
 			return nil, errors.New(e)
 		}
 		if reply.Header.Get(headerEmpty) == "1" || len(reply.Data) == 0 {
@@ -264,6 +268,9 @@ func (t *JetStream) handleIncoming(parentCtx context.Context, handler runner.Han
 			reply := &nats.Msg{
 				Subject: replySubject,
 				Header:  nats.Header{headerError: []string{handlerErr.Error()}},
+			}
+			if code := perrors.ErrorCode(handlerErr); code != "" {
+				reply.Header.Set(headerErrorCode, code)
 			}
 			if pubErr := t.nc.PublishMsg(reply); pubErr != nil {
 				t.log.Info("jetstream transport: publish error reply failed",

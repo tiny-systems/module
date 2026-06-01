@@ -13,6 +13,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 )
 
 // startJetStream boots an embedded nats-server with JetStream enabled.
@@ -227,6 +228,31 @@ func shortenAckWait(t *testing.T, url, moduleName string, wait time.Duration) er
 // redelivers, no second invocation.
 // (Same guarantee as the core transport — feedback_no_implicit_retries.md.)
 // ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// Error code survives the durable wire too.
+// ---------------------------------------------------------------------
+
+func TestJS_ErrorCodePropagation(t *testing.T) {
+	url, _ := startJetStream(t)
+	_, sender := newJetStreamTransport(t, url, "sender")
+	_, receiver := newJetStreamTransport(t, url, "target")
+
+	runJSReceiver(t, receiver, func(ctx context.Context, msg *runner.Msg) (any, error) {
+		return nil, perrors.NonRetryable("content_filter", errors.New("blocked"))
+	})
+
+	_, err := sender.Handler(context.Background(), &runner.Msg{
+		To:     "flow.target.node",
+		EdgeID: "js-coded",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if code := perrors.ErrorCode(err); code != "content_filter" {
+		t.Fatalf("ErrorCode = %q, want content_filter", code)
+	}
+}
 
 func TestJS_NoImplicitRetryOnHandlerError(t *testing.T) {
 	url, _ := startJetStream(t)

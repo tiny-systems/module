@@ -98,6 +98,53 @@ type TinyNodeEdge struct {
 
 	// +kubebuilder:validation:Required
 	FlowID string `json:"flowID"`
+
+	// Retry policy for this edge. Default (MaxAttempts == 0 or 1) =
+	// single-shot: the scheduler dispatches once, surface the error.
+	// Authors opt into retry per-edge for transient-failure-safe
+	// targets (webhooks, idempotent writes). The runtime never silently
+	// retries against paid LLM APIs by default — see
+	// feedback_no_implicit_retries.md.
+	// +kubebuilder:validation:Optional
+	RetryPolicy *EdgeRetryPolicy `json:"retryPolicy,omitempty"`
+}
+
+// EdgeRetryPolicy controls how the scheduler re-dispatches a single
+// edge on handler failure. Matches Temporal-style ActivityOptions in
+// spirit, scoped to one edge in a TinyFlow.
+//
+// On error, the scheduler:
+//  1. checks if the error's code is in NonRetryableErrorCodes — if so,
+//     surface immediately, no retry.
+//  2. otherwise increments the attempt counter and re-dispatches after
+//     the policy's backoff, up to MaxAttempts total tries.
+type EdgeRetryPolicy struct {
+	// Max total dispatch attempts (1 = no retry, the default).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	// +kubebuilder:default:=1
+	MaxAttempts int `json:"maxAttempts"`
+
+	// Initial backoff between attempts. Default 1s.
+	// +kubebuilder:validation:Optional
+	InitialDelayMs int `json:"initialDelayMs,omitempty"`
+
+	// Multiplier applied to the delay each attempt. Default 2.0
+	// (exponential backoff).
+	// +kubebuilder:validation:Optional
+	BackoffCoefficient string `json:"backoffCoefficient,omitempty"`
+
+	// Cap on a single attempt's delay. Default 30s.
+	// +kubebuilder:validation:Optional
+	MaxDelayMs int `json:"maxDelayMs,omitempty"`
+
+	// Error codes that skip retry. Components signal these via
+	// module.NonRetryable(code, err) — typically "quota_exceeded",
+	// "unauthorized", "content_filter", "validation". The transport
+	// stamps `x-error-code` on the reply; the scheduler reads it and
+	// short-circuits the retry loop when matched.
+	// +kubebuilder:validation:Optional
+	NonRetryableErrorCodes []string `json:"nonRetryableErrorCodes,omitempty"`
 }
 
 type TinyNodePortStatus struct {

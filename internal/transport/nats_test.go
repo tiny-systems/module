@@ -14,6 +14,7 @@ import (
 	natstest "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
 	"github.com/tiny-systems/module/internal/scheduler/runner"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 )
 
 // startNATS boots an embedded nats-server on a random port and returns
@@ -365,6 +366,32 @@ func TestQueueGroupLoadBalancing(t *testing.T) {
 // error. Single send, single failure, no second invocation.
 // (Memory feedback_no_implicit_retries.md — single-shot default.)
 // ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// Error code survives the wire — handler returns NonRetryable(code,
+// err), sender extracts the code via perrors.ErrorCode.
+// ---------------------------------------------------------------------
+
+func TestErrorCodePropagation(t *testing.T) {
+	url, _ := startNATS(t)
+	_, sender := newTransport(t, url, "sender")
+	_, receiver := newTransport(t, url, "target")
+
+	runReceiver(t, receiver, func(ctx context.Context, msg *runner.Msg) (any, error) {
+		return nil, perrors.NonRetryable("quota_exceeded", errors.New("tokens"))
+	})
+
+	_, err := sender.Handler(context.Background(), &runner.Msg{
+		To:     "flow.target.node",
+		EdgeID: "edge-coded",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if code := perrors.ErrorCode(err); code != "quota_exceeded" {
+		t.Fatalf("ErrorCode = %q, want quota_exceeded", code)
+	}
+}
 
 func TestNoImplicitRetryOnHandlerError(t *testing.T) {
 	url, _ := startNATS(t)
