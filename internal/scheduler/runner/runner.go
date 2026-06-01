@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/tiny-systems/errorpanic"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	m "github.com/tiny-systems/module/module"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
@@ -863,26 +865,22 @@ func (c *Runner) StopWithoutCleanup() {
 	close(c.closeCh)
 }
 
-// sendToEdge sends a message to an edge exactly once. No retries.
+// sendToEdgeWithRetry dispatches an edge per its RetryPolicy. Default
+// (policy == nil or MaxAttempts <= 1) = single shot, the historical
+// 2026-05-20 contract.
 //
-// Retries used to be in this layer (exponential backoff up to 60s,
-// originally infinite). Removed 2026-05-20: implicit framework retry
-// is the wrong shape for an agent runtime. Transient errors against
-// paid LLM APIs burn money; permanent errors (auth fail) waste it
-// even faster. And the cross-pod grpc error wrapping doesn't preserve
-// PermanentError sentinels, so the framework couldn't tell transient
-// from permanent reliably.
+// Retries used to be implicit at this layer with infinite backoff —
+// removed 2026-05-20 after a Claude-401 storm burned money. The new
+// model (2026-06-01) is explicit per-edge: flow authors opt in by
+// setting edge.RetryPolicy. NonRetryableErrorCodes short-circuit the
+// loop even when MaxAttempts > 1 — components signal these via
+// module/pkg/errors.NonRetryable(code, err).
 //
-// New model: edge delivery is a single attempt. Components that need
-// transient resilience (Postgres reconnect, HTTP 5xx) handle it
-// internally via their own client libraries — those libraries already
-// know which errors are worth retrying. Flow authors that want
-// retry semantics across edges (e.g. for a flaky external API) wire
-// an explicit `retry` component with bounded attempts and a circuit
-// breaker. Same separation of concerns as Signal-vs-supervisor.
+// Backoff is exponential (BackoffCoefficient, default 2.0) starting
+// from InitialDelayMs (default 1s), capped at MaxDelayMs (default 30s).
 //
-// Name kept (sendToEdgeWithRetry) to avoid touching every caller;
-// behavior is now "send once, return whatever the handler returned".
+// Name kept to avoid touching every caller; the function honors a
+// configurable policy now but the default is unchanged.
 func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNodeEdge, fromPort, edgeTo string, dataBytes []byte, responseConfig interface{}, handler Handler) (any, error) {
 	// Track cancel func so SetNode can cancel in-flight sends for removed edges.
 	ctx, cancel := context.WithCancel(ctx)
@@ -890,6 +888,12 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	if edge.ID != "" {
 		c.edgeCancels.Set(edge.ID, cancel)
 		defer c.edgeCancels.Remove(edge.ID)
+	}
+
+	policy := edge.RetryPolicy
+	maxAttempts := 1
+	if policy != nil && policy.MaxAttempts > 1 {
+		maxAttempts = policy.MaxAttempts
 	}
 
 	msg := &Msg{
@@ -900,15 +904,80 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		Resp:   responseConfig,
 	}
 
-	res, err := handler(ctx, msg)
-	if err != nil {
-		c.log.Error(err, "send to edge: failed (single attempt, no retry)",
-			"to", edgeTo,
-			"edgeID", edge.ID,
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		res, err := handler(ctx, msg)
+		if err == nil {
+			return res, nil
+		}
+		lastErr = err
+
+		// Short-circuit on a code that the policy lists as non-retryable.
+		if code := perrors.ErrorCode(err); code != "" && policy != nil {
+			for _, blocked := range policy.NonRetryableErrorCodes {
+				if blocked == code {
+					c.log.Info("send to edge: short-circuit on non-retryable code",
+						"to", edgeTo, "edgeID", edge.ID, "code", code,
+					)
+					return nil, err
+				}
+			}
+		}
+
+		if attempt == maxAttempts {
+			break
+		}
+		delay := backoffDelay(policy, attempt)
+		c.log.Info("send to edge: retrying after backoff",
+			"to", edgeTo, "edgeID", edge.ID,
+			"attempt", attempt, "of", maxAttempts,
+			"delay", delay,
+			"err", err.Error(),
 		)
-		return nil, err
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
 	}
-	return res, nil
+
+	c.log.Error(lastErr, "send to edge: failed after retries exhausted",
+		"to", edgeTo, "edgeID", edge.ID, "attempts", maxAttempts,
+	)
+	return nil, lastErr
+}
+
+// backoffDelay computes the wait between attempt N and attempt N+1.
+// Defaults pin to: 1s initial, 2.0 multiplier, 30s cap. The policy's
+// BackoffCoefficient is a string so the CRD stays YAML-clean; "" or
+// unparseable means use the default 2.0.
+func backoffDelay(policy *v1alpha1.EdgeRetryPolicy, attempt int) time.Duration {
+	initial := time.Second
+	maxDelay := 30 * time.Second
+	coefficient := 2.0
+
+	if policy != nil {
+		if policy.InitialDelayMs > 0 {
+			initial = time.Duration(policy.InitialDelayMs) * time.Millisecond
+		}
+		if policy.MaxDelayMs > 0 {
+			maxDelay = time.Duration(policy.MaxDelayMs) * time.Millisecond
+		}
+		if policy.BackoffCoefficient != "" {
+			if v, err := strconv.ParseFloat(policy.BackoffCoefficient, 64); err == nil && v >= 1.0 {
+				coefficient = v
+			}
+		}
+	}
+
+	d := float64(initial)
+	for i := 1; i < attempt; i++ {
+		d *= coefficient
+	}
+	if time.Duration(d) > maxDelay {
+		return maxDelay
+	}
+	return time.Duration(d)
 }
 
 func (c *Runner) outputHandler(ctx context.Context, port string, data interface{}, handler Handler) (any, error) {
