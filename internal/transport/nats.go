@@ -48,6 +48,7 @@ const (
 	headerMessageDepth = "x-message-depth"
 	headerError        = "x-error"
 	headerEmpty        = "x-empty"
+	headerReplyInbox   = "x-reply-inbox"
 	natsMsgIDHeader    = "Nats-Msg-Id"
 )
 
