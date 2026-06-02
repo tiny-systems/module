@@ -284,6 +284,16 @@ func BuildRequestElementsMapFromSlice(projectName, flowName string, elements []m
 	return result, nil
 }
 
+// debugMapKeys returns the keys of a map[string]interface{} for diagnostic
+// logging. Order is unspecified.
+func debugMapKeys(m map[string]interface{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 // parseEdgeRetryPolicyFromRequest lifts edge.data.retryPolicy from
 // the request-graph edge element into a typed v1alpha1.EdgeRetryPolicy.
 // Returns nil when the field is absent or carries only defaults — the
@@ -387,12 +397,21 @@ func UpdateEdgesFromRequest(edges []v1alpha1.TinyNodeEdge, flowID, nodeID string
 		}
 		duplicates[edgeID] = struct{}{}
 
+		policy := parseEdgeRetryPolicyFromRequest(v)
+		// Temporary debug log to verify the retry-policy round-trip.
+		// Remove once UI → CRD persistence is confirmed live.
+		if dataMap, _ := v["data"].(map[string]interface{}); dataMap != nil {
+			fmt.Printf("[retry-debug] edge=%s data.retryPolicy=%v parsed=%+v\n",
+				edgeID, dataMap["retryPolicy"], policy)
+		} else {
+			fmt.Printf("[retry-debug] edge=%s no data map; keys=%v\n", edgeID, debugMapKeys(v))
+		}
 		newEdges = append(newEdges, v1alpha1.TinyNodeEdge{
 			Port:        GetStr(v["sourceHandle"]),
 			To:          fmt.Sprintf("%s:%s", GetStr(v["target"]), GetStr(v["targetHandle"])),
 			ID:          edgeID,
 			FlowID:      flowID,
-			RetryPolicy: parseEdgeRetryPolicyFromRequest(v),
+			RetryPolicy: policy,
 		})
 	}
 
