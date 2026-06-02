@@ -51,15 +51,17 @@ const (
 	EdgeStreamSubjects = "tinymodule.*.msg"
 
 	// edgeAckWait is the broker-side deadline before a delivered
-	// message is considered abandoned and redelivered. Sized for the
-	// 5-minute requestTimeout used by the sender; long-running
-	// handlers keep AckWait alive via InProgress extensions below.
-	edgeAckWait = 5 * time.Minute
+	// message is considered abandoned and redelivered. Kept short so
+	// pod-death recovery happens in human time, not minutes. Live
+	// handlers keep AckWait extended via InProgress ticks below —
+	// long-running edges (1-hour LLM calls) stay in-flight on the
+	// right pod for as long as that pod's alive.
+	edgeAckWait = 30 * time.Second
 
-	// edgeInProgressInterval ticks well below AckWait so we never
-	// race the broker. Off by ~30 % gives plenty of slack on a
-	// loaded network.
-	edgeInProgressInterval = 90 * time.Second
+	// edgeInProgressInterval ticks well below AckWait so the broker
+	// always sees a live signal before the wait expires. Headroom
+	// matters under load — too tight and a GC pause looks like death.
+	edgeInProgressInterval = 10 * time.Second
 
 	// edgeMaxDeliver caps broker-driven redelivery on AckWait expiry.
 	// Three pod-death recoveries is generous — beyond that the
