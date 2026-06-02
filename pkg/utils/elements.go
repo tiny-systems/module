@@ -315,6 +315,9 @@ func parseEdgeRetryPolicyFromRequest(edge map[string]interface{}) *v1alpha1.Edge
 	if v, ok := raw["maxDelayMs"].(float64); ok {
 		out.MaxDelayMs = int(v)
 	}
+	if v, ok := raw["timeoutMs"].(float64); ok {
+		out.TimeoutMs = int(v)
+	}
 	if codes, ok := raw["nonRetryableErrorCodes"].([]interface{}); ok {
 		for _, c := range codes {
 			if s, ok := c.(string); ok && s != "" {
@@ -324,7 +327,8 @@ func parseEdgeRetryPolicyFromRequest(edge map[string]interface{}) *v1alpha1.Edge
 	}
 	if (out.MaxAttempts == 0 || out.MaxAttempts == 1) &&
 		out.InitialDelayMs == 0 && out.BackoffCoefficient == "" &&
-		out.MaxDelayMs == 0 && len(out.NonRetryableErrorCodes) == 0 {
+		out.MaxDelayMs == 0 && out.TimeoutMs == 0 &&
+		len(out.NonRetryableErrorCodes) == 0 {
 		return nil
 	}
 	return out

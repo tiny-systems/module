@@ -145,6 +145,16 @@ type EdgeRetryPolicy struct {
 	// short-circuits the retry loop when matched.
 	// +kubebuilder:validation:Optional
 	NonRetryableErrorCodes []string `json:"nonRetryableErrorCodes,omitempty"`
+
+	// Per-attempt handler timeout in milliseconds. Caps how long a
+	// single dispatch attempt can run before the scheduler cancels
+	// its context and (if MaxAttempts permits) retries the next one.
+	// 0 = use the transport's default (currently 5 minutes for the
+	// NATS transports). Bump this on edges that legitimately need
+	// long-running handlers — agent planning loops, batch LLM calls,
+	// or HTTP probes against slow upstreams.
+	// +kubebuilder:validation:Optional
+	TimeoutMs int `json:"timeoutMs,omitempty"`
 }
 
 type TinyNodePortStatus struct {

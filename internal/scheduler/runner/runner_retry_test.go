@@ -111,6 +111,26 @@ func maxAttemptsFromPolicy(p *v1alpha1.EdgeRetryPolicy) int {
 	return p.MaxAttempts
 }
 
+// timeoutFromPolicy mirrors the production check inside
+// sendToEdgeWithRetry so the unit test can assert the policy field
+// without spinning up a full Runner.
+func timeoutFromPolicy(p *v1alpha1.EdgeRetryPolicy) int {
+	if p == nil {
+		return 0
+	}
+	return p.TimeoutMs
+}
+
+func TestRetryPolicy_TimeoutMs(t *testing.T) {
+	if timeoutFromPolicy(nil) != 0 {
+		t.Error("nil policy → timeout=0")
+	}
+	p := &v1alpha1.EdgeRetryPolicy{TimeoutMs: 30000}
+	if timeoutFromPolicy(p) != 30000 {
+		t.Errorf("got %d, want 30000", timeoutFromPolicy(p))
+	}
+}
+
 func shouldShortCircuit(p *v1alpha1.EdgeRetryPolicy, err error) bool {
 	if p == nil || err == nil {
 		return false

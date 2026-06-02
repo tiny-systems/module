@@ -94,6 +94,16 @@ spec:
                           items:
                             type: string
                           type: array
+                        timeoutMs:
+                          description: |-
+                            Per-attempt handler timeout in milliseconds. Caps how long a
+                            single dispatch attempt can run before the scheduler cancels
+                            its context and (if MaxAttempts permits) retries the next one.
+                            0 = use the transport's default (currently 5 minutes for the
+                            NATS transports). Bump this on edges that legitimately need
+                            long-running handlers — agent planning loops, batch LLM calls,
+                            or HTTP probes against slow upstreams.
+                          type: integer
                       required:
                       - maxAttempts
                       type: object

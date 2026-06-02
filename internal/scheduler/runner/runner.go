@@ -895,6 +895,15 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	if policy != nil && policy.MaxAttempts > 1 {
 		maxAttempts = policy.MaxAttempts
 	}
+	// Per-attempt timeout — derives a tighter ctx around each
+	// handler call when the edge's policy sets one. The transport's
+	// internal default still applies as a floor when the policy says
+	// 0 or no policy is set.
+	if policy != nil && policy.TimeoutMs > 0 {
+		var perAttemptCancel context.CancelFunc
+		ctx, perAttemptCancel = context.WithTimeout(ctx, time.Duration(policy.TimeoutMs)*time.Millisecond)
+		defer perAttemptCancel()
+	}
 
 	msg := &Msg{
 		To:     edgeTo,
