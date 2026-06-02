@@ -284,6 +284,52 @@ func BuildRequestElementsMapFromSlice(projectName, flowName string, elements []m
 	return result, nil
 }
 
+// parseEdgeRetryPolicyFromRequest lifts edge.data.retryPolicy from
+// the request-graph edge element into a typed v1alpha1.EdgeRetryPolicy.
+// Returns nil when the field is absent or carries only defaults — the
+// SDK treats nil as single-shot (MaxAttempts=1), the safe default.
+//
+// Frontend convention: the editor only sends a non-empty retryPolicy
+// when MaxAttempts > 1 or NonRetryableErrorCodes is non-empty (the
+// EdgeRetryPolicyForm.normalize() shape), so we mirror that on the
+// strip side here.
+func parseEdgeRetryPolicyFromRequest(edge map[string]interface{}) *v1alpha1.EdgeRetryPolicy {
+	data, _ := edge["data"].(map[string]interface{})
+	if data == nil {
+		return nil
+	}
+	raw, ok := data["retryPolicy"].(map[string]interface{})
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := &v1alpha1.EdgeRetryPolicy{}
+	if v, ok := raw["maxAttempts"].(float64); ok {
+		out.MaxAttempts = int(v)
+	}
+	if v, ok := raw["initialDelayMs"].(float64); ok {
+		out.InitialDelayMs = int(v)
+	}
+	if v, ok := raw["backoffCoefficient"].(string); ok {
+		out.BackoffCoefficient = v
+	}
+	if v, ok := raw["maxDelayMs"].(float64); ok {
+		out.MaxDelayMs = int(v)
+	}
+	if codes, ok := raw["nonRetryableErrorCodes"].([]interface{}); ok {
+		for _, c := range codes {
+			if s, ok := c.(string); ok && s != "" {
+				out.NonRetryableErrorCodes = append(out.NonRetryableErrorCodes, s)
+			}
+		}
+	}
+	if (out.MaxAttempts == 0 || out.MaxAttempts == 1) &&
+		out.InitialDelayMs == 0 && out.BackoffCoefficient == "" &&
+		out.MaxDelayMs == 0 && len(out.NonRetryableErrorCodes) == 0 {
+		return nil
+	}
+	return out
+}
+
 // UpdateEdgesFromRequest updates a node's edges based on request data.
 // It preserves edges from other flows and adds/updates edges from the current flow.
 func UpdateEdgesFromRequest(edges []v1alpha1.TinyNodeEdge, flowID, nodeID string, requestMap RequestElementsMap) ([]v1alpha1.TinyNodeEdge, error) {
@@ -342,10 +388,11 @@ func UpdateEdgesFromRequest(edges []v1alpha1.TinyNodeEdge, flowID, nodeID string
 		duplicates[edgeID] = struct{}{}
 
 		newEdges = append(newEdges, v1alpha1.TinyNodeEdge{
-			Port:   GetStr(v["sourceHandle"]),
-			To:     fmt.Sprintf("%s:%s", GetStr(v["target"]), GetStr(v["targetHandle"])),
-			ID:     edgeID,
-			FlowID: flowID,
+			Port:        GetStr(v["sourceHandle"]),
+			To:          fmt.Sprintf("%s:%s", GetStr(v["target"]), GetStr(v["targetHandle"])),
+			ID:          edgeID,
+			FlowID:      flowID,
+			RetryPolicy: parseEdgeRetryPolicyFromRequest(v),
 		})
 	}
 
