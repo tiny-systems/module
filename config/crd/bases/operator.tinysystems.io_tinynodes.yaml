@@ -56,6 +56,46 @@ spec:
                         Current node's port name
                         Source port
                       type: string
+                    retryPolicy:
+                      description: |-
+                        Retry policy for this edge. Default (MaxAttempts == 0 or 1) =
+                        single-shot: the scheduler dispatches once, surface the error.
+                        Authors opt into retry per-edge for transient-failure-safe
+                        targets (webhooks, idempotent writes). The runtime never silently
+                        retries against paid LLM APIs by default — see
+                        feedback_no_implicit_retries.md.
+                      properties:
+                        backoffCoefficient:
+                          description: |-
+                            Multiplier applied to the delay each attempt. Default 2.0
+                            (exponential backoff).
+                          type: string
+                        initialDelayMs:
+                          description: Initial backoff between attempts. Default 1s.
+                          type: integer
+                        maxAttempts:
+                          default: 1
+                          description: Max total dispatch attempts (1 = no retry,
+                            the default).
+                          maximum: 10
+                          minimum: 1
+                          type: integer
+                        maxDelayMs:
+                          description: Cap on a single attempt's delay. Default 30s.
+                          type: integer
+                        nonRetryableErrorCodes:
+                          description: |-
+                            Error codes that skip retry. Components signal these via
+                            module.NonRetryable(code, err) — typically "quota_exceeded",
+                            "unauthorized", "content_filter", "validation". The transport
+                            stamps `x-error-code` on the reply; the scheduler reads it and
+                            short-circuits the retry loop when matched.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - maxAttempts
+                      type: object
                     to:
                       description: Other node's full port name
                       type: string
