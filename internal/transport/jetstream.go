@@ -46,9 +46,28 @@ const (
 	// the stream isn't an audit log, it's an in-flight buffer.
 	EdgeStreamName = "module-edges"
 
-	// EdgeStreamSubjects is the subject filter the stream binds to.
-	// Each module's consumer filters to its own `tinymodule.<name>.msg`.
+	// EdgeStreamSubjects is the subject filter the stream binds to
+	// for business hops. Each module's queue-group consumer filters
+	// to its own `tinymodule.<name>.msg`.
 	EdgeStreamSubjects = "tinymodule.*.msg"
+
+	// EdgeStreamSysSubjects is the second subject family on the
+	// same stream — fan-out subscriptions for system-port writes
+	// (_control, _settings, _reconcile, _identity). Senders publish
+	// to `tinymodule.<name>.sysmsg` when the target port starts with
+	// "_"; every pod of that module has its own durable consumer on
+	// this subject and the in-handler IsLeader check inside each
+	// component (e.g. signal.OnControl) gates the action so only the
+	// node's elected leader pod acts.
+	EdgeStreamSysSubjects = "tinymodule.*.sysmsg"
+
+	// sysConsumerInactiveThreshold reaps a per-pod system-port
+	// consumer that hasn't been polled in this long. Pods that die
+	// without graceful shutdown leave orphan consumers behind; the
+	// broker garbage-collects them after the threshold elapses.
+	// Five minutes is comfortably longer than a pod restart yet
+	// short enough to keep the consumer roster aligned with reality.
+	sysConsumerInactiveThreshold = 5 * time.Minute
 
 	// edgeAckWait is the broker-side deadline before a delivered
 	// message is considered abandoned and redelivered. Kept short so
@@ -77,7 +96,7 @@ const (
 func EnsureEdgeStream(ctx context.Context, js jetstream.JetStream) error {
 	_, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:       EdgeStreamName,
-		Subjects:   []string{EdgeStreamSubjects},
+		Subjects:   []string{EdgeStreamSubjects, EdgeStreamSysSubjects},
 		Storage:    jetstream.FileStorage,
 		Retention:  jetstream.WorkQueuePolicy,
 		MaxAge:     1 * time.Hour,
@@ -214,6 +233,49 @@ func (t *JetStream) StartReceiver(ctx context.Context, handler runner.Handler) e
 	t.log.Info("jetstream transport: receiver subscribed",
 		"subject", subject,
 		"consumer", t.moduleName,
+	)
+
+	<-ctx.Done()
+	cc.Stop()
+	return nil
+}
+
+// StartSystemPortReceiver wires the per-pod consumer used for fan-out
+// delivery of system-port writes. Consumer name is module-scoped and
+// pod-uniquified so every pod gets its own delivery cursor; the
+// component's in-handler IsLeader check inside OnControl / OnReconcile
+// gates the action. Pod death leaves an orphan consumer behind,
+// auto-reaped by InactiveThreshold after a few minutes.
+func (t *JetStream) StartSystemPortReceiver(ctx context.Context, podName string, handler runner.Handler) error {
+	if podName == "" {
+		return fmt.Errorf("podName is required for fan-out consumer naming")
+	}
+	subject := SubjectForSystem(t.moduleName)
+	consumerName := fmt.Sprintf("%s-sys-%s", t.moduleName, podName)
+	consumer, err := t.js.CreateOrUpdateConsumer(ctx, EdgeStreamName, jetstream.ConsumerConfig{
+		Durable:           consumerName,
+		FilterSubject:     subject,
+		DeliverPolicy:     jetstream.DeliverNewPolicy,
+		AckPolicy:         jetstream.AckExplicitPolicy,
+		AckWait:           edgeAckWait,
+		MaxDeliver:        edgeMaxDeliver,
+		ReplayPolicy:      jetstream.ReplayInstantPolicy,
+		InactiveThreshold: sysConsumerInactiveThreshold,
+	})
+	if err != nil {
+		return fmt.Errorf("jetstream sysport consumer for %s: %w", subject, err)
+	}
+
+	cc, err := consumer.Consume(func(m jetstream.Msg) {
+		go t.handleIncoming(ctx, handler, m)
+	})
+	if err != nil {
+		return fmt.Errorf("jetstream sysport consume on %s: %w", subject, err)
+	}
+
+	t.log.Info("jetstream transport: sysport receiver subscribed",
+		"subject", subject,
+		"consumer", consumerName,
 	)
 
 	<-ctx.Done()

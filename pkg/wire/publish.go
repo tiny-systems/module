@@ -41,10 +41,20 @@ const (
 
 const subjectPrefix = "tinymodule"
 
-// SubjectFor returns the NATS subject a given module subscribes to.
-// Senders publish here; the SDK pod for `moduleName` consumes.
+// SubjectFor returns the business-hop NATS subject for a given
+// module. Senders publish here for edge-driven hops; the module's
+// queue-group consumer load-balances among pods.
 func SubjectFor(moduleName string) string {
 	return fmt.Sprintf("%s.%s.msg", subjectPrefix, moduleName)
+}
+
+// SubjectForSystem returns the fan-out subject used for system-port
+// writes (_control / _settings / _reconcile / _identity). Each pod
+// of the module has its own durable consumer on this subject, so
+// every pod receives the message and the in-handler IsLeader check
+// gates the action. Used when the target port starts with "_".
+func SubjectForSystem(moduleName string) string {
+	return fmt.Sprintf("%s.%s.sysmsg", subjectPrefix, moduleName)
 }
 
 // Options controls a single Publish call.
@@ -87,8 +97,17 @@ func Publish(ctx context.Context, nc *nats.Conn, targetNode, port string, data [
 		return nil, fmt.Errorf("parse target node: %w", err)
 	}
 
+	// System-port writes fan out to every pod via the sysmsg subject;
+	// business-port hops go to the queue-group subject. The single
+	// "_" check captures _control, _settings, _reconcile, _identity
+	// and any future system port without enumerating them.
+	subject := SubjectFor(moduleName)
+	if strings.HasPrefix(port, "_") {
+		subject = SubjectForSystem(moduleName)
+	}
+
 	msg := &nats.Msg{
-		Subject: SubjectFor(moduleName),
+		Subject: subject,
 		Data:    data,
 		Header:  nats.Header{},
 	}

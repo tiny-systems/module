@@ -60,6 +60,16 @@ func SubjectFor(moduleName string) string {
 	return fmt.Sprintf("%s.%s.msg", subjectPrefix, moduleName)
 }
 
+// SubjectForSystem returns the fan-out subject used for system-port
+// writes (_control / _settings / _reconcile / _identity). Senders
+// dispatch here when the target port starts with "_"; every pod of
+// the module has its own consumer on this subject so all of them
+// receive the message, and each component's in-handler IsLeader
+// check decides whether to act.
+func SubjectForSystem(moduleName string) string {
+	return fmt.Sprintf("%s.%s.sysmsg", subjectPrefix, moduleName)
+}
+
 // Transport is the cross-module wire contract that both the core
 // req/reply NATS transport (this file) and the JetStream-backed
 // transport (jetstream.go) satisfy. cli/run.go picks one at boot
@@ -68,6 +78,13 @@ func SubjectFor(moduleName string) string {
 type Transport interface {
 	Handler(ctx context.Context, msg *runner.Msg) ([]byte, error)
 	StartReceiver(ctx context.Context, handler runner.Handler) error
+	// StartSystemPortReceiver wires the per-pod fan-out subscription
+	// used for system-port writes. Returns nil immediately if the
+	// transport's substrate doesn't support fan-out (core NATS today
+	// can fan out via plain Subscribe; JetStream uses a per-pod
+	// durable consumer). podName uniquifies the consumer or
+	// subscription so each pod gets its own delivery position.
+	StartSystemPortReceiver(ctx context.Context, podName string, handler runner.Handler) error
 }
 
 // NATS holds the cross-module wire backed by NATS core request/reply.
@@ -195,6 +212,37 @@ func (t *NATS) StartReceiver(ctx context.Context, handler runner.Handler) error 
 	// already have aborted any in-flight handler calls.
 	if drainErr := sub.Drain(); drainErr != nil {
 		t.log.Info("nats transport: drain on shutdown",
+			"err", drainErr.Error(),
+		)
+	}
+	return nil
+}
+
+// StartSystemPortReceiver subscribes WITHOUT a queue group so every
+// pod of the module receives every system-port message. The
+// component's in-handler IsLeader check decides whether to act. No
+// durability — losing a system-port write on pod death is acceptable
+// (these are human-clicked actions; the user will click again). The
+// podName parameter is accepted for interface parity and logged but
+// otherwise unused on core NATS — fan-out is achieved by omitting the
+// queue group, not by per-subscriber naming.
+func (t *NATS) StartSystemPortReceiver(ctx context.Context, podName string, handler runner.Handler) error {
+	subject := SubjectForSystem(t.moduleName)
+	sub, err := t.nc.Subscribe(subject, func(m *nats.Msg) {
+		go t.handleIncoming(ctx, handler, m)
+	})
+	if err != nil {
+		return fmt.Errorf("subscribe %s: %w", subject, err)
+	}
+
+	t.log.Info("nats transport: sysport receiver subscribed",
+		"subject", subject,
+		"pod", podName,
+	)
+
+	<-ctx.Done()
+	if drainErr := sub.Drain(); drainErr != nil {
+		t.log.Info("nats transport: sysport drain on shutdown",
 			"err", drainErr.Error(),
 		)
 	}

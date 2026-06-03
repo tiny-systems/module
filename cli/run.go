@@ -488,6 +488,36 @@ var runCmd = &cobra.Command{
 				defer l.Info("NATS receiver stopped")
 				return natsTransport.StartReceiver(ctx, scheduler.Handle)
 			})
+			// Per-pod fan-out subscription for system-port writes.
+			// podName must be unique per pod for the JetStream
+			// consumer cursor; core NATS ignores it. HOSTNAME is set
+			// by the kubelet to the pod name in K8s, by docker to a
+			// random hex in plain containers, and falls back to a
+			// hostname lookup so non-container hosts still get a
+			// stable id.
+			podName := os.Getenv("HOSTNAME")
+			if podName == "" {
+				h, herr := os.Hostname()
+				if herr == nil {
+					podName = h
+				}
+			}
+			// System-port messages need leader status on the ctx so
+			// each component's IsLeader check inside OnControl /
+			// OnReconcile can no-op on non-leader pods. Business
+			// hops don't read IsLeader, so the queue-group receiver
+			// above passes the bare scheduler.Handle.
+			sysHandler := func(handlerCtx context.Context, msg *runner.Msg) (any, error) {
+				return scheduler.Handle(utils.WithLeader(handlerCtx, isLeader.Load()), msg)
+			}
+			wg.Go(func() error {
+				l.Info("starting NATS sysport receiver",
+					"subject", transport.SubjectForSystem(moduleInfo.GetNameSanitised()),
+					"pod", podName,
+				)
+				defer l.Info("NATS sysport receiver stopped")
+				return natsTransport.StartSystemPortReceiver(ctx, podName, sysHandler)
+			})
 			// moduleInfo.Addr is consumed downstream for registration
 			// + observability. NATS has no TCP listen address, so we
 			// surface the subject — informational only, no one dials
