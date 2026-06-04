@@ -255,8 +255,36 @@ func filterNullValues(m map[string]interface{}) map[string]interface{} {
 	return result
 }
 
+// AgentToolTag is the tag the platform's MCP layer looks for to
+// surface a component as an MCP tool. Auto-added when a component
+// implements the module.AgentTool capability interface; module
+// authors don't need to set it manually.
+const AgentToolTag = "agent_tool"
+
 func getComponentApi(c module.Component) api.PublishComponent {
 	componentInfo := c.GetInfo()
+
+	// Opt-in MCP tool exposure: if the component implements
+	// AgentTool, mark it for the platform-side registry. The tag
+	// is the wire-level signal; the AgentToolInfo fields stay
+	// runtime-side (the platform reads the default input port's
+	// schema for tool input validation).
+	if agentTool, ok := c.(module.AgentTool); ok {
+		info := agentTool.AgentTool()
+		hasTag := false
+		for _, t := range componentInfo.Tags {
+			if t == AgentToolTag {
+				hasTag = true
+				break
+			}
+		}
+		if !hasTag {
+			componentInfo.Tags = append(componentInfo.Tags, AgentToolTag)
+		}
+		if info.Description != "" {
+			componentInfo.Info = info.Description
+		}
+	}
 
 	// Build ports with schemas
 	ports := make([]api.PublishComponentPort, 0)
