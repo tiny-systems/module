@@ -373,6 +373,10 @@ var runCmd = &cobra.Command{
 					l.Error(err, "ensure edge stream")
 					os.Exit(1)
 				}
+				if err := transport.EnsureSysmsgStream(ctx, natsRt.JS); err != nil {
+					l.Error(err, "ensure sysmsg stream")
+					os.Exit(1)
+				}
 				natsTransport = transport.NewJetStream(natsRt.JS, natsRt.NC, moduleName, l)
 				l.Info("transport: jetstream-backed durable wire")
 			default:
