@@ -132,6 +132,11 @@ type ComponentInfo struct {
 	Info        string   `json:"info,omitempty"`
 	InputPorts  []string `json:"input_ports"`
 	OutputPorts []string `json:"output_ports"`
+	// Tags propagate component-level tags set at module publish time.
+	// The SDK build helper auto-adds AgentToolTag for components that
+	// implement module.AgentTool; the MCP layer filters on this to
+	// dynamically expose components as LLM tools.
+	Tags []string `json:"tags,omitempty"`
 	// Detailed port info with schemas — populated by GetModule, optional for ListModules
 	InputPortDetails  []PortDetail `json:"input_port_details,omitempty"`
 	OutputPortDetails []PortDetail `json:"output_port_details,omitempty"`
