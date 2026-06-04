@@ -51,6 +51,7 @@ const (
 	headerErrorCode    = "x-error-code"
 	headerEmpty        = "x-empty"
 	headerReplyInbox   = "x-reply-inbox"
+	headerMode         = "x-mode"
 	natsMsgIDHeader    = "Nats-Msg-Id"
 )
 
@@ -266,6 +267,7 @@ func (t *NATS) handleIncoming(parentCtx context.Context, handler runner.Handler,
 		From:   m.Header.Get(headerFrom),
 		Data:   m.Data,
 		Depth:  depth,
+		Mode:   m.Header.Get(headerMode),
 	})
 	if err != nil {
 		// Reply with an error header. Caller's Handler() reads

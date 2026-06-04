@@ -15,6 +15,16 @@ type Msg struct {
 	// Used to detect cycles and prevent stack overflow in blocking I/O chains.
 	Depth int `json:"depth"`
 
+	// Mode picks the dispatch path. "" (default) routes to a node
+	// instance via the edge graph the way every business hop has
+	// since the SDK was built. "rpc" short-circuits the graph: the
+	// scheduler looks up the component by name, instantiates it
+	// fresh, delivers Data on the component's AgentTool InputPort,
+	// captures the first emit on OutputPort, and returns that as
+	// the reply. RPC mode is how MCP tool calls reach a component
+	// without flow assembly.
+	Mode string `json:"mode,omitempty"`
+
 	//
 	Resp interface{} `json:"-"`
 }

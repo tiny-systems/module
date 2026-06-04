@@ -132,6 +132,12 @@ func (s *Schedule) Handle(ctx context.Context, msg *runner.Msg) (any, error) {
 		return nil, &perrors.PermanentError{Err: fmt.Errorf("max message depth %d exceeded (possible cycle in flow graph)", MaxMessageDepth)}
 	}
 
+	// RPC mode: agent invoked a component as an MCP tool. Short-
+	// circuits the node-graph dispatch — see handleRPC for details.
+	if msg.Mode == "rpc" {
+		return s.handleRPC(ctx, msg)
+	}
+
 	nodeName, port := utils.ParseFullPortName(msg.To)
 
 	s.log.Info("scheduler handle: received message",

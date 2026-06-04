@@ -351,6 +351,7 @@ func (t *JetStream) handleIncoming(parentCtx context.Context, handler runner.Han
 		From:   headers.Get(headerFrom),
 		Data:   m.Data(),
 		Depth:  depth,
+		Mode:   headers.Get(headerMode),
 	})
 
 	close(stopIP)
