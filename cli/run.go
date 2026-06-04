@@ -363,6 +363,10 @@ var runCmd = &cobra.Command{
 			moduleName := moduleInfo.GetNameSanitised()
 			switch os.Getenv("TINY_NATS_TRANSPORT") {
 			case "jetstream":
+				if err := transport.EnsureSysmsgStream(ctx, natsRt.JS); err != nil {
+					l.Error(err, "ensure sysmsg stream")
+					os.Exit(1)
+				}
 				if err := transport.EnsureEdgeStream(ctx, natsRt.JS); err != nil {
 					l.Error(err, "ensure edge stream")
 					os.Exit(1)

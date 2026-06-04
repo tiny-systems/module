@@ -51,15 +51,28 @@ const (
 	// to its own `tinymodule.<name>.msg`.
 	EdgeStreamSubjects = "tinymodule.*.msg"
 
-	// EdgeStreamSysSubjects is the second subject family on the
-	// same stream — fan-out subscriptions for system-port writes
-	// (_control, _settings, _reconcile, _identity). Senders publish
-	// to `tinymodule.<name>.sysmsg` when the target port starts with
-	// "_"; every pod of that module has its own durable consumer on
-	// this subject and the in-handler IsLeader check inside each
-	// component (e.g. signal.OnControl) gates the action so only the
-	// node's elected leader pod acts.
-	EdgeStreamSysSubjects = "tinymodule.*.sysmsg"
+	// SysStreamName holds the fan-out system-port writes. Separate
+	// stream because system ports need per-pod consumers — every pod
+	// receives every message — which WorkQueue retention can't model
+	// (WorkQueue requires DeliverAll on all consumers and removes a
+	// message once any consumer acks, killing the fan-out). Limits
+	// retention keeps each message until MaxAge regardless of acks
+	// so every per-pod consumer can independently read and ack.
+	SysStreamName = "module-sysmsgs"
+
+	// SysStreamSubjects is the subject filter on the sysmsg stream.
+	// Senders dispatch to `tinymodule.<name>.sysmsg` whenever the
+	// target port starts with "_" (_control, _settings, _reconcile,
+	// _identity). Each module's pods bind one durable consumer per
+	// pod; the in-handler IsLeader check inside each component (e.g.
+	// signal.OnControl) gates the action so only the leader acts.
+	SysStreamSubjects = "tinymodule.*.sysmsg"
+
+	// sysStreamMaxAge bounds how long a sysmsg lives in the stream.
+	// Human-clicked control writes are ephemeral — if a message
+	// hasn't been delivered in an hour something else has already
+	// gone wrong. Matches edgeAckWait scale for sanity.
+	sysStreamMaxAge = 1 * time.Hour
 
 	// sysConsumerInactiveThreshold reaps a per-pod system-port
 	// consumer that hasn't been polled in this long. Pods that die
@@ -96,7 +109,7 @@ const (
 func EnsureEdgeStream(ctx context.Context, js jetstream.JetStream) error {
 	_, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:       EdgeStreamName,
-		Subjects:   []string{EdgeStreamSubjects, EdgeStreamSysSubjects},
+		Subjects:   []string{EdgeStreamSubjects},
 		Storage:    jetstream.FileStorage,
 		Retention:  jetstream.WorkQueuePolicy,
 		MaxAge:     1 * time.Hour,
@@ -104,6 +117,26 @@ func EnsureEdgeStream(ctx context.Context, js jetstream.JetStream) error {
 	})
 	if err != nil {
 		return fmt.Errorf("ensure edge stream: %w", err)
+	}
+	return nil
+}
+
+// EnsureSysmsgStream creates (or updates) the fan-out stream that
+// system-port writes land on. Limits retention is the key difference
+// from EdgeStreamName: messages stay until MaxAge regardless of acks
+// so every per-pod consumer can independently read them. Idempotent —
+// safe to call from each module pod at startup.
+func EnsureSysmsgStream(ctx context.Context, js jetstream.JetStream) error {
+	_, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+		Name:       SysStreamName,
+		Subjects:   []string{SysStreamSubjects},
+		Storage:    jetstream.FileStorage,
+		Retention:  jetstream.LimitsPolicy,
+		MaxAge:     sysStreamMaxAge,
+		Duplicates: 2 * time.Minute,
+	})
+	if err != nil {
+		return fmt.Errorf("ensure sysmsg stream: %w", err)
 	}
 	return nil
 }
@@ -252,7 +285,7 @@ func (t *JetStream) StartSystemPortReceiver(ctx context.Context, podName string,
 	}
 	subject := SubjectForSystem(t.moduleName)
 	consumerName := fmt.Sprintf("%s-sys-%s", t.moduleName, podName)
-	consumer, err := t.js.CreateOrUpdateConsumer(ctx, EdgeStreamName, jetstream.ConsumerConfig{
+	consumer, err := t.js.CreateOrUpdateConsumer(ctx, SysStreamName, jetstream.ConsumerConfig{
 		Durable:           consumerName,
 		FilterSubject:     subject,
 		DeliverPolicy:     jetstream.DeliverNewPolicy,
