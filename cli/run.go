@@ -363,10 +363,12 @@ var runCmd = &cobra.Command{
 			moduleName := moduleInfo.GetNameSanitised()
 			switch os.Getenv("TINY_NATS_TRANSPORT") {
 			case "jetstream":
-				if err := transport.EnsureSysmsgStream(ctx, natsRt.JS); err != nil {
-					l.Error(err, "ensure sysmsg stream")
-					os.Exit(1)
-				}
+				// Edge first so the v0.10.34 transition (sysmsg subject
+				// briefly lived on module-edges) can hand the subject
+				// off cleanly. CreateOrUpdateStream rewrites the
+				// subject filter to just .msg, freeing
+				// tinymodule.*.sysmsg for the dedicated stream the
+				// next call ensures.
 				if err := transport.EnsureEdgeStream(ctx, natsRt.JS); err != nil {
 					l.Error(err, "ensure edge stream")
 					os.Exit(1)
