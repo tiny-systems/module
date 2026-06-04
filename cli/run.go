@@ -222,13 +222,6 @@ var runCmd = &cobra.Command{
 		isLeader := &atomic.Bool{}
 		isLeader.Store(false)
 
-		// Create signal reconciler early so we can use it in leader callbacks
-		// The Client, Scheme, and Scheduler fields will be set later before SetupWithManager
-		signalReconciler := &controller.TinySignalReconciler{
-			Module:   moduleInfo,
-			IsLeader: isLeader,
-		}
-
 		// Create node reconciler early so we can use it in leader callbacks
 		// The Client, Scheme, and Scheduler fields will be set later before SetupWithManager
 		nodeReconciler := &controller.TinyNodeReconciler{
@@ -257,16 +250,12 @@ var runCmd = &cobra.Command{
 			OnStartedLeading: func(ctx context.Context) {
 				l.Info("became leader for status updates")
 				isLeader.Store(true)
-				// Trigger requeue of all TinySignals so they get processed by new leader
-				signalReconciler.RequeueAllOnLeadershipChange()
 				// Trigger requeue of all TinyNodes so they set up periodic reconciliation
 				nodeReconciler.RequeueAllOnLeadershipChange()
 			},
 			OnStoppedLeading: func() {
 				l.Info("stopped leading for status updates")
 				isLeader.Store(false)
-				// Cancel all running signal processes for clean handoff to new leader
-				signalReconciler.CancelAllRunningProcesses()
 			},
 			OnNewLeader: func(identity string) {
 				l.Info("new leader elected for status updates", "leader", identity)
@@ -593,15 +582,6 @@ var runCmd = &cobra.Command{
 			return
 		}
 
-		// Set remaining fields on signal reconciler that weren't available earlier
-		signalReconciler.Client = mgr.GetClient()
-		signalReconciler.Scheme = mgr.GetScheme()
-		signalReconciler.Scheduler = scheduler
-
-		if err = signalReconciler.SetupWithManager(mgr); err != nil {
-			l.Error(err, "unable to create tinysignal controller")
-			return
-		}
 
 		// @todo replace with custom health check
 		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

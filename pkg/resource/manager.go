@@ -45,7 +45,6 @@ type ManagerInterface interface {
 	UpdateNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	DeleteNode(ctx context.Context, node *v1alpha1.TinyNode) error
 	GetNode(ctx context.Context, name, namespace string) (*v1alpha1.TinyNode, error)
-	CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte, traceID ...string) error
 }
 
 func NewManagerFromClient(c client.WithWatch, ns string) (*Manager, error) {
@@ -557,66 +556,6 @@ func (m Manager) CreateProject(ctx context.Context, ns string, name string) (*v1
 	}
 
 	return &proj, nil
-}
-
-func (m Manager) CreateSignal(ctx context.Context, nodeName, nodeNamespace string, port string, data []byte, traceID ...string) error {
-
-	// Get the target node to set as owner
-	node, err := m.GetNode(ctx, nodeName, nodeNamespace)
-	if err != nil {
-		return fmt.Errorf("failed to get node for owner reference: %w", err)
-	}
-
-	signal := &v1alpha1.TinySignal{}
-	name := fmt.Sprintf("%s-%s", nodeName, strings.ReplaceAll(port, "_", ""))
-
-	err = m.client.Get(ctx, client.ObjectKey{Namespace: nodeNamespace, Name: name}, signal)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	newSignal := signal.DeepCopy()
-
-	newSignal.Namespace = nodeNamespace
-	newSignal.Name = name
-
-	newSignal.Labels = map[string]string{
-		v1alpha1.NodeNameLabel: nodeName,
-	}
-
-	// Set owner reference to the node
-	newSignal.OwnerReferences = []metav1.OwnerReference{
-		{
-			APIVersion: node.APIVersion,
-			Kind:       node.Kind,
-			Name:       node.Name,
-			UID:        node.UID,
-			Controller: func() *bool { b := true; return &b }(),
-		},
-	}
-
-	newSignal.Spec = v1alpha1.TinySignalSpec{
-		Node: nodeName,
-		Port: port,
-		Data: data,
-	}
-	if len(traceID) > 0 && traceID[0] != "" {
-		newSignal.Spec.TraceID = traceID[0]
-	}
-
-	if errors.IsNotFound(err) {
-		if err := m.client.Create(ctx, newSignal); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	err = m.client.Patch(ctx, newSignal, client.MergeFrom(signal))
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	return nil
 }
 
 func (m Manager) GetProjectList(ctx context.Context) ([]v1alpha1.TinyProject, error) {

@@ -61,7 +61,6 @@ rules:
   resources:
   - tinymodules/finalizers
   - tinynodes/finalizers
-  - tinysignals/finalizers
   verbs:
   - update
 - apiGroups:
@@ -69,20 +68,7 @@ rules:
   resources:
   - tinymodules/status
   - tinynodes/status
-  - tinysignals/status
   verbs:
   - get
   - patch
   - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinysignals
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch

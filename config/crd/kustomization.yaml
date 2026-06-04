@@ -4,7 +4,6 @@
 resources:
 - bases/operator.tinysystems.io_tinynodes.yaml
 - bases/operator.tinysystems.io_tinymodules.yaml
-- bases/operator.tinysystems.io_tinysignals.yaml
 - bases/operator.tinysystems.io_tinyprojects.yaml
 - bases/operator.tinysystems.io_tinyflows.yaml
 - bases/operator.tinysystems.io_tinywidgetpages.yaml
@@ -19,11 +18,9 @@ kind: Kustomization
 patches:
 #- patches/webhook_in_tinymodules.yaml
 #- patches/webhook_in_tinytrackers.yaml
-#- patches/webhook_in_tinysignals.yaml
 #+kubebuilder:scaffold:crdkustomizewebhookpatch
 #- patches/cainjection_in_tinymodules.yaml
 #- patches/cainjection_in_tinytrackers.yaml
-#- patches/cainjection_in_tinysignals.yaml
 #- path: patches/cainjection_in_tinyprojects.yaml
 #- path: patches/cainjection_in_tinyflows.yaml
 #- path: patches/cainjection_in_tinywidgetpages.yaml
