@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "tinysystems-operator.fullname" . }}-manager-role
+  name: {{ include "tinysystems-operator.clusterScopedName" . }}-manager-role
   labels:
   {{- include "tinysystems-operator.labels" . | nindent 4 }}
 rules:
@@ -115,7 +115,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "tinysystems-operator.fullname" . }}-manager-rolebinding
+  name: {{ include "tinysystems-operator.clusterScopedName" . }}-manager-rolebinding
   labels:
     app.kubernetes.io/component: rbac
     app.kubernetes.io/created-by: operator
@@ -124,7 +124,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: '{{ include "tinysystems-operator.fullname" . }}-manager-role'
+  name: '{{ include "tinysystems-operator.clusterScopedName" . }}-manager-role'
 subjects:
 - kind: ServiceAccount
   name: '{{ include "tinysystems-operator.fullname" . }}-controller-manager'

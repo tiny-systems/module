@@ -24,6 +24,24 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Cluster-scoped resource name.
+
+The platform reuses one helm release name (`<module-workspace-slug>/<module>`)
+across every tenant that installs the same module — the release name is
+derived from the MODULE's owning workspace, not the installing workspace.
+That makes per-release `fullname` identical across tenants, so any
+cluster-scoped resource named purely from fullname collides on the
+SECOND tenant with `meta.helm.sh/release-namespace` ownership errors.
+
+Cluster-scoped resources (ClusterRole, ClusterRoleBinding, webhook
+configs, PriorityClass, …) MUST go through this helper so the name
+embeds the install namespace. Namespaced resources stay on fullname.
+*/}}
+{{- define "tinysystems-operator.clusterScopedName" -}}
+{{- printf "%s-%s" (include "tinysystems-operator.fullname" .) .Release.Namespace | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "tinysystems-operator.chart" -}}

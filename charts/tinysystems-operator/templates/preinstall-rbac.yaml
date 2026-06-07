@@ -18,7 +18,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "tinysystems-operator.fullname" . }}-pre-install
+  name: {{ include "tinysystems-operator.clusterScopedName" . }}-pre-install
   labels:
   {{- include "tinysystems-operator.labels" . | nindent 4 }}
   annotations:
@@ -38,7 +38,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "tinysystems-operator.fullname" . }}-pre-install
+  name: {{ include "tinysystems-operator.clusterScopedName" . }}-pre-install
   labels:
   {{- include "tinysystems-operator.labels" . | nindent 4 }}
   annotations:
@@ -48,7 +48,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: '{{ include "tinysystems-operator.fullname" . }}-pre-install'
+  name: '{{ include "tinysystems-operator.clusterScopedName" . }}-pre-install'
 subjects:
 - kind: ServiceAccount
   name: '{{ include "tinysystems-operator.fullname" . }}-pre-install'
