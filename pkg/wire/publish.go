@@ -41,6 +41,16 @@ const (
 
 const subjectPrefix = "tinymodule"
 
+// FromSignal is the Options.From value that marks a message as an
+// external signal (dashboard Send, MCP send_signal, debug). The
+// runner unmarshals the raw payload into the port struct ONLY for
+// signal-originated messages — any other From (including empty)
+// makes it fall back to edge-config evaluation or the port's default
+// configuration, silently discarding the payload. Mirrors
+// runner.FromSignal, which lives in internal/ and can't be imported
+// by external publishers.
+const FromSignal = "signal"
+
 // SubjectFor returns the business-hop NATS subject for a given
 // module. Senders publish here for edge-driven hops; the module's
 // queue-group consumer load-balances among pods.
@@ -134,6 +144,13 @@ func Publish(ctx context.Context, nc *nats.Conn, targetNode, port string, data [
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 	msg.Header.Set(HeaderReplyInbox, inbox)
+	// The receive side (transport.handleIncoming) replies with
+	// m.RespondMsg, which publishes to the NATS-native Reply field —
+	// it never reads the x-reply-inbox header. Without msg.Reply set
+	// here every WaitForReply call timed out even on successful
+	// delivery. Keep the header for observability, but the native
+	// Reply field is what makes the round-trip work.
+	msg.Reply = inbox
 
 	if err := nc.PublishMsg(msg); err != nil {
 		return nil, fmt.Errorf("publish: %w", err)

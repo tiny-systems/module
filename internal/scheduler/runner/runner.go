@@ -27,6 +27,7 @@ import (
 	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
+	"github.com/tiny-systems/module/pkg/wire"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -72,7 +73,7 @@ type Runner struct {
 	reconcileDebouncer *ReconcileDebouncer
 
 	// pendingNodeUpdaters accumulates metadata update functions during debounce window
-	pendingNodeUpdaters    []func(*v1alpha1.TinyNode) error
+	pendingNodeUpdaters     []func(*v1alpha1.TinyNode) error
 	pendingNodeUpdatersLock *sync.Mutex
 
 	// activeEdges tracks busy edge timestamps for the single gauge callback
@@ -113,7 +114,9 @@ type snapshotRefresher interface {
 }
 
 const (
-	FromSignal = "signal"
+	// FromSignal aliases wire.FromSignal so external publishers and
+	// the runner's signal check can never drift apart.
+	FromSignal = wire.FromSignal
 )
 
 func NewRunner(component m.Component) *Runner {
@@ -1139,8 +1142,8 @@ func (c *Runner) clearGauge(edgeID string) {
 
 // retryState holds the live retry counter and latest transient error for one edge.
 type retryState struct {
-	count    int64
-	lastErr  string
+	count   int64
+	lastErr string
 }
 
 func (c *Runner) ensureRetryGauge() {
