@@ -195,9 +195,13 @@ send_signal(node_id, port: "_control", data: {"stop": true})                    
 send_signal(node_id, port: "_control", data: {"send": true, "context": {...}})           // signal: fire once
 ` + "```" + `
 
-Check status via ` + "`get_node_port_schema`" + ` on ` + "`_control`" + `: schema reflects ` + "`ControlRunning`" + ` (Stop button visible) or ` + "`ControlStopped`" + ` (Start button visible).
+Check status via ` + "`get_node_port_schema`" + ` on ` + "`_control`" + `: schema reflects ` + "`ControlRunning`" + ` (Stop button visible) or ` + "`ControlStopped`" + ` (Start button visible). For system ports the example carries the node's live state when ` + "`has_real_data`" + ` is true — e.g. a started http_server's actual status and listen address.
 
 For execution history: ` + "`get_traces`" + ` for recent runs, ` + "`get_trace_detail`" + ` for spans + errors per run.
+
+## Dashboard Widgets
+
+A node flagged with ` + "`set_dashboard(project, node, enabled: true)`" + ` renders its ` + "`_control`" + ` form as a widget on the project dashboard. Widgets are the user-facing surface of a flow: use them for values the user must provide (build with a placeholder first; don't block on a credential) and for running services the user should see (live status, exposed address). Prefer a widget over asking for values in chat.
 
 ## Error Handling
 
