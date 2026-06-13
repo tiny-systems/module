@@ -24,7 +24,7 @@ Write "Tiny Systems" (two words) in prose. The one-word form only appears in mac
 
 ## How to Build a Flow
 
-1. **Discover** — call ` + "`list_modules`" + ` to see what's installed, then ` + "`get_component_info`" + ` for each component you plan to use. **Parallelize** these calls. The ` + "`info`" + ` field carries behavior notes (blocking semantics, gotchas) — read it before wiring.
+1. **Discover** — call ` + "`list_modules`" + ` to see what's installed, then ` + "`get_component_info`" + ` for each component you plan to use. **Parallelize** these calls. The ` + "`info`" + ` field carries behavior notes (blocking semantics, gotchas) — read it before wiring. If no installed or catalog component fits the task, it is NOT a dead end: broaden your search and read component infos for a code/eval component (run logic inline) or a generic HTTP-request component (reach any web API). Compose those before concluding something can't be built.
 2. **Build** — call ` + "`build_flow`" + ` with the full spec (nodes + edges + configurations) in one call. On validation errors, fix specific issues with ` + "`edit_flow`" + ` (action ∈ add_node, delete_node, add_edge, delete_edge, configure_edge, configure_node).
 3. **Trigger** — call ` + "`send_signal`" + ` to fire data into a trigger port. Use ` + "`get_trace_detail(trace_id)`" + ` to inspect the result.
 
