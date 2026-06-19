@@ -12,8 +12,12 @@ func SanitizeResourceName(in string) string {
 		return ""
 	}
 	name := reg.ReplaceAllString(strings.ToLower(in), "-")
-	name = strings.Trim(name, "-")
-	return limitByRuneKeepSuffix(name, 48)
+	// Truncate before trimming. limitByRuneKeepSuffix keeps the tail,
+	// which can begin mid-separator and reintroduce a leading hyphen —
+	// an invalid RFC 1123 subdomain that the API server rejects. Trim
+	// after truncation so the result always starts and ends alphanumeric.
+	name = limitByRuneKeepSuffix(name, 48)
+	return strings.Trim(name, "-")
 }
 
 // SanitizeIdentity sanitizes a string for use as leader election identity.
