@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -329,6 +330,102 @@ func TestDurable_LedgerSkipsReplayedStep(t *testing.T) {
 	time.Sleep(500 * time.Millisecond) // room for any (wrong) downstream activity
 	if after := rec.snapshot(); len(after) != len(first) {
 		t.Fatalf("replay re-executed work: before %v, after %v", first, after)
+	}
+}
+
+// gatewayComponent is the front-door pattern (module.BeginRun): a CLASSIC
+// component that starts a durable run, fires the chain fire-and-forget, and
+// synchronously replies with the run id.
+type gatewayComponent struct{}
+
+func (g *gatewayComponent) GetInfo() module.ComponentInfo {
+	return module.ComponentInfo{Name: "gateway"}
+}
+func (g *gatewayComponent) Instance() module.Component { return &gatewayComponent{} }
+func (g *gatewayComponent) Ports() []module.Port {
+	return []module.Port{
+		{Name: "in", Configuration: map[string]any{}},
+		{Name: "out", Source: true, Configuration: map[string]any{}},
+	}
+}
+func (g *gatewayComponent) Handle(ctx context.Context, output module.Handler, port string, msg any) module.Result {
+	if port != "in" {
+		return module.Result{}
+	}
+	runCtx, runID := module.BeginRun(ctx)
+	if res := output(runCtx, "out", msg); res.Err() != nil { // durable chain
+		return res
+	}
+	// Synchronous reply — classic blocking path back to the caller
+	// (http_server response in the real flow shape).
+	return module.Ok(map[string]any{"runID": runID})
+}
+
+// TestDurable_GatewayBeginRun locks the front-door contract: a gateway on a
+// classic (unlabeled) node returns the run id synchronously — before the
+// durable chain completes — and the chain then finishes with the SAME run id
+// recorded in the step ledger.
+func TestDurable_GatewayBeginRun(t *testing.T) {
+	url := startDurableJS(t)
+	rec := newRunRecord()
+	pod := newDurablePod(t, url)
+	installChain(t, pod, "P", rec) // durable b + c reused as the chain tail
+	if err := pod.sched.Install(&gatewayComponent{}); err != nil {
+		t.Fatalf("Install gateway: %v", err)
+	}
+	// CLASSIC node (no durable label): the run starts via BeginRun, not the
+	// node label.
+	node := &v1alpha1.TinyNode{}
+	node.Name = "flow1." + durableModule + ".gw"
+	node.Namespace = "default"
+	node.Spec.Component = "gateway"
+	node.Spec.Edges = []v1alpha1.TinyNodeEdge{{
+		ID: "eg", Port: "out", To: "flow1." + durableModule + ".b:in",
+	}}
+	if err := pod.sched.Update(context.Background(), node); err != nil {
+		t.Fatalf("Update gw: %v", err)
+	}
+	pod.startReceiver(t)
+
+	res, err := pod.sched.Handle(context.Background(), &runner.Msg{
+		From: runner.FromSignal,
+		To:   "flow1." + durableModule + ".gw:in",
+		Data: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("gateway Handle: %v", err)
+	}
+
+	// Synchronous reply carries the run id, and it arrived BEFORE the chain
+	// finished (c sleeps 200ms on the durable side).
+	reply, ok := res.(map[string]any)
+	if !ok || reply["runID"] == "" {
+		t.Fatalf("gateway must reply synchronously with the runID, got %#v", res)
+	}
+	runID := reply["runID"].(string)
+	if got := rec.snapshot(); len(got) >= 2 {
+		t.Fatalf("gateway reply should not wait for the chain: hops at reply %v", got)
+	}
+
+	select {
+	case <-rec.done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("durable chain did not complete; hops: %v", rec.snapshot())
+	}
+
+	// The ledger recorded the chain under the SAME run id the caller got.
+	keys, err := pod.kv.Keys(context.Background())
+	if err != nil {
+		t.Fatalf("kv keys: %v", err)
+	}
+	found := 0
+	for _, k := range keys {
+		if strings.Contains(k, "exec/"+runID+"/step/") {
+			found++
+		}
+	}
+	if found == 0 {
+		t.Fatalf("no ledger records under the returned runID %s; keys: %v", runID, keys)
 	}
 }
 
