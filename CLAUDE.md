@@ -134,6 +134,38 @@ func (c *Component) handleReconcile(...) {
 
 **Also: when active state changes settings (e.g. running cron receives new settings), persist to metadata immediately** so subsequent reconciles don't clobber the update.
 
+## Durable Execution (v0.11.0)
+
+Opt-in per node via label `tinysystems.io/execution-mode: durable`. The
+blocking model stays the default and must remain byte-for-byte unchanged —
+`scheduler_blocking_io_test.go` locks that contract.
+
+How it works (contract, not implementation detail):
+
+- A business-port message arriving at a durable node MINTS a run (RunID);
+  one carrying a RunID continues it. Identity rides the context
+  (`runner.RunFrom`) from MsgHandler down to `sendToEdgeWithRetry`.
+- Durable emits publish fire-and-forget to the work-queue stream with
+  `Nats-Msg-Id = StepKey` (no reply inbox). The acked unit is ONE HOP —
+  handler returns after its emits are durably stored; the run continues on
+  whatever pod consumes the next hop.
+- StepKeys MUST be deterministic across redelivery (per-edge sequence
+  counters, fixed-length hash). Never derive them from time, randomness,
+  or map iteration order.
+- The step ledger (`Scoped(ScopeExecution, runID)`, key `step/<stepKey>`)
+  is written AFTER the handler returns: record-exists ⇒ all its emits are
+  stored ⇒ redelivery skips the component entirely. Failed steps are
+  terminal records — the durability layer never re-runs business errors.
+- The run reconciler (scheduler, leader-gated) re-drives frontier hops of
+  runs with no progress past `staleAfter`. staleAfter must exceed the
+  worst-case single-step duration or a slow step can double-execute.
+
+Component authors: emit-and-forward components need NO changes. Components
+whose logic depends on the downstream response value (http_server
+request/response) cannot run durable — they stay blocking front doors.
+Side-effectful components that must survive kill-DURING-call need a
+provider idempotency key; the ledger only covers kill-after-completion.
+
 ## SDK vs Module Responsibilities
 
 - SDK handles serialization/deserialization
