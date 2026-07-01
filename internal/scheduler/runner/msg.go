@@ -25,6 +25,17 @@ type Msg struct {
 	// without flow assembly.
 	Mode string `json:"mode,omitempty"`
 
+	// RunID marks this message as one hop of a durable run. Durable
+	// messages are published fire-and-forget to the JetStream work queue
+	// (any pod of the target module picks them up; they survive pod
+	// death) instead of blocking for the downstream response. Empty =
+	// classic blocking dispatch, byte-for-byte the historical path.
+	RunID string `json:"runID,omitempty"`
+	// StepKey is the idempotency key for this hop, deterministic across
+	// redelivery. Carried as Nats-Msg-Id so the broker dedupes a
+	// re-executed handler's re-emit within the duplicate window.
+	StepKey string `json:"stepKey,omitempty"`
+
 	//
 	Resp interface{} `json:"-"`
 }

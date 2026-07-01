@@ -39,7 +39,19 @@ const (
 
 	//ModuleNameMajorLabel module major version label
 	ModuleNameMajorLabel = "tinysystems.io/module-version-major"
-	DashboardLabel = "tinysystems.io/dashboard"
+	DashboardLabel       = "tinysystems.io/dashboard"
+
+	// ExecutionModeLabel opts a node into an execution mode. When set to
+	// ExecutionModeDurable, messages arriving at the node's business ports
+	// mint (or continue) a durable run: downstream emits are published
+	// fire-and-forget to the JetStream work queue with an idempotency key
+	// instead of blocking for the subtree's response, so the run survives
+	// pod death and migrates across replicas. The platform stamps this on
+	// every node of a flow whose execution mode is durable.
+	ExecutionModeLabel = "tinysystems.io/execution-mode"
+	// ExecutionModeDurable is the ExecutionModeLabel value that enables
+	// durable (async, ack-on-emit) execution.
+	ExecutionModeDurable = "durable"
 
 	NodeHandlesAnnotation = "tinysystems.io/node-handles"
 
@@ -49,7 +61,7 @@ const (
 	ComponentPosYAnnotation    = "tinysystems.io/component-pos-y"
 	ComponentPosSpinAnnotation = "tinysystems.io/component-pos-spin"
 
-	NodeLabelAnnotation = "tinysystems.io/node-label"
+	NodeLabelAnnotation   = "tinysystems.io/node-label"
 	NodeCommentAnnotation = "tinysystems.io/node-comment"
 
 	IngressHostNameSuffixAnnotation = "tinysystems.io/ingress-hostname-suffix"

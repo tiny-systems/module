@@ -15,12 +15,13 @@
 // incoming messages (mirroring K8s Service's round-robin gRPC today).
 //
 // Wire metadata travels in NATS headers:
-//   x-from           — source FullName
-//   x-to             — target FullName
-//   x-edge-id        — EdgeID, also stamped as Nats-Msg-Id for dedup
-//   x-message-depth  — Depth, for cycle detection (MaxMessageDepth)
-//   x-error          — on the reply only; non-empty = handler failure
-//   traceparent      — W3C trace context for OTel propagation
+//
+//	x-from           — source FullName
+//	x-to             — target FullName
+//	x-edge-id        — EdgeID, also stamped as Nats-Msg-Id for dedup
+//	x-message-depth  — Depth, for cycle detection (MaxMessageDepth)
+//	x-error          — on the reply only; non-empty = handler failure
+//	traceparent      — W3C trace context for OTel propagation
 package transport
 
 import (
@@ -52,6 +53,8 @@ const (
 	headerEmpty        = "x-empty"
 	headerReplyInbox   = "x-reply-inbox"
 	headerMode         = "x-mode"
+	headerRunID        = "x-run-id"
+	headerStepKey      = "x-step-key"
 	natsMsgIDHeader    = "Nats-Msg-Id"
 )
 

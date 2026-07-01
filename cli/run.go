@@ -410,6 +410,18 @@ var runCmd = &cobra.Command{
 			}
 
 			if targetModule == moduleInfo.GetNameSanitised() {
+				// Durable-run hops NEVER take the in-process shortcut, even
+				// to the local module: they must land on the work-queue
+				// stream so any pod of the module can pick them up and the
+				// hop survives this pod dying. Without a NATS transport the
+				// durable path degrades to the classic local dispatch.
+				if msg.RunID != "" && natsTransport != nil {
+					l.Info("message router: durable hop via stream",
+						"to", msg.To,
+						"runID", msg.RunID,
+					)
+					return natsTransport.Handler(ctx, msg)
+				}
 				// destination is the current module
 				l.Info("message router: routing to local scheduler",
 					"to", msg.To,

@@ -237,7 +237,7 @@ func (*fakeRunnerState) Get(_ context.Context, _ string) ([]byte, bool, error) {
 func (*fakeRunnerState) Set(_ context.Context, _ string, _ []byte) error    { return nil }
 func (*fakeRunnerState) Delete(_ context.Context, _ string) error           { return nil }
 func (*fakeRunnerState) List(_ context.Context, _ string) ([]string, error) { return nil, nil }
-func (s *fakeRunnerState) Scoped(_, _ string) m.State                        { return s }
+func (s *fakeRunnerState) Scoped(_, _ string) m.State                       { return s }
 
 // fakeRefresherState additionally implements snapshotRefresher so tests can
 // verify NotifyReconcile reaches the right method.

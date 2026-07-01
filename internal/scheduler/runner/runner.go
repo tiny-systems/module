@@ -48,6 +48,12 @@ type Runner struct {
 	flowName    string
 	projectName string
 
+	// execDurable caches the node's ExecutionModeLabel == durable check
+	// (set in SetNode under nodeLock). Durable nodes mint/continue a run
+	// identity in MsgHandler, which flips edge sends to fire-and-forget
+	// durable publishing.
+	execDurable bool
+
 	// underlying component
 	component m.Component
 	//
@@ -379,6 +385,24 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	_, port := utils.ParseFullPortName(msg.To)
 	if port == "" {
 		return nil, fmt.Errorf("input port is empty")
+	}
+
+	// Durable-run identity. A message carrying a RunID continues that run;
+	// a business-port message arriving at a durable node without one is the
+	// run's entry — mint. Either way the identity rides the context down to
+	// sendToEdgeWithRetry, which stamps outgoing edge messages so emits ride
+	// the durable (fire-and-forget, work-queue) path instead of blocking.
+	// System ports (_control, _settings, …) never mint runs.
+	if msg.RunID != "" {
+		ctx = WithRun(ctx, NewRunInfo(msg.RunID, msg.StepKey))
+	} else if c.isDurable() && !strings.HasPrefix(port, "_") {
+		run := MintRun()
+		ctx = WithRun(ctx, run)
+		c.log.Info("runner msg handler: minted durable run",
+			"runID", run.RunID,
+			"port", port,
+			"node", c.name,
+		)
 	}
 
 	c.log.Info("runner msg handler: entering",
@@ -772,6 +796,14 @@ func (c *Runner) Node() v1alpha1.TinyNode {
 	return c.node
 }
 
+// isDurable reports whether this node opted into durable execution
+// (ExecutionModeLabel), cached by SetNode.
+func (c *Runner) isDurable() bool {
+	c.nodeLock.Lock()
+	defer c.nodeLock.Unlock()
+	return c.execDurable
+}
+
 // SetNode updates specs and decides do we need to restart which handles by Run method
 func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 
@@ -779,6 +811,7 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 	oldEdges := c.node.Spec.Edges
 	c.flowName = node.Labels[v1alpha1.FlowNameLabel]
 	c.projectName = node.Labels[v1alpha1.ProjectNameLabel]
+	c.execDurable = node.Labels[v1alpha1.ExecutionModeLabel] == v1alpha1.ExecutionModeDurable
 	c.name = node.Name
 	c.node = node
 	c.nodeLock.Unlock()
@@ -914,6 +947,15 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		EdgeID: edge.ID,
 		Data:   dataBytes,
 		Resp:   responseConfig,
+	}
+
+	// Durable run: stamp the outgoing hop with the run identity and a
+	// deterministic idempotency key. Derived ONCE, outside the retry loop —
+	// a retry after a lost broker ack re-publishes the same StepKey and the
+	// duplicate window collapses it to one stored message.
+	if run, ok := RunFrom(ctx); ok {
+		msg.RunID = run.RunID
+		msg.StepKey = run.NextStepKey(edge.ID)
 	}
 
 	var lastErr error

@@ -167,11 +167,16 @@ func NewJetStream(js jetstream.JetStream, nc *nats.Conn, moduleName string, log 
 
 // Handler — sender side. Publishes the request to the durable
 // stream, blocks on the reply inbox until the receiver writes back
-// or the caller's ctx fires.
+// or the caller's ctx fires. Durable-run hops (msg.RunID set) skip
+// the reply wait entirely — see publishDurable.
 func (t *JetStream) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error) {
 	moduleName, _, err := module2.ParseFullName(msg.To)
 	if err != nil {
 		return nil, err
+	}
+
+	if msg.RunID != "" {
+		return t.publishDurable(ctx, moduleName, msg)
 	}
 
 	// Per-request reply inbox. The receiver writes the reply via core
@@ -237,6 +242,50 @@ func (t *JetStream) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error
 	case <-reqCtx.Done():
 		return nil, reqCtx.Err()
 	}
+}
+
+// publishDurable — the durable-run send path. Fire-and-forget: the hop is
+// persisted to the work-queue stream (synchronous broker ack preserves
+// durability) and the function returns immediately with no reply wait, so
+// the calling handler can finish and its own input can ack. Any pod in the
+// module's queue group picks the hop up; if that pod dies mid-handler the
+// broker redelivers after AckWait.
+//
+// Nats-Msg-Id = StepKey. The classic path deliberately avoids Msg-Id because
+// a deduped publish leaves its sender blocking forever on a reply inbox —
+// but here there is no reply wait, so dedup is pure win: a redelivered
+// handler's re-emit (same deterministic StepKey) collapses to one stored
+// message inside the duplicate window.
+func (t *JetStream) publishDurable(ctx context.Context, moduleName string, msg *runner.Msg) ([]byte, error) {
+	natsMsg := &nats.Msg{
+		Subject: SubjectFor(moduleName),
+		Data:    msg.Data,
+		Header:  nats.Header{},
+	}
+	natsMsg.Header.Set(headerFrom, msg.From)
+	natsMsg.Header.Set(headerTo, msg.To)
+	natsMsg.Header.Set(headerEdgeID, msg.EdgeID)
+	natsMsg.Header.Set(headerRunID, msg.RunID)
+	if msg.StepKey != "" {
+		natsMsg.Header.Set(headerStepKey, msg.StepKey)
+		natsMsg.Header.Set(natsMsgIDHeader, msg.StepKey)
+	}
+	if msg.Depth > 0 {
+		natsMsg.Header.Set(headerMessageDepth, strconv.Itoa(msg.Depth))
+	}
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(natsMsg.Header))
+
+	ack, err := t.js.PublishMsg(ctx, natsMsg)
+	if err != nil {
+		return nil, fmt.Errorf("jetstream durable publish to %s: %w", moduleName, err)
+	}
+	if ack != nil && ack.Duplicate {
+		t.log.Info("jetstream transport: durable publish deduped",
+			"to", msg.To,
+			"stepKey", msg.StepKey,
+		)
+	}
+	return nil, nil
 }
 
 // StartReceiver creates a durable consumer for this module and
@@ -346,12 +395,14 @@ func (t *JetStream) handleIncoming(parentCtx context.Context, handler runner.Han
 	}()
 
 	res, handlerErr := handler(ctx, &runner.Msg{
-		EdgeID: headers.Get(headerEdgeID),
-		To:     headers.Get(headerTo),
-		From:   headers.Get(headerFrom),
-		Data:   m.Data(),
-		Depth:  depth,
-		Mode:   headers.Get(headerMode),
+		EdgeID:  headers.Get(headerEdgeID),
+		To:      headers.Get(headerTo),
+		From:    headers.Get(headerFrom),
+		Data:    m.Data(),
+		Depth:   depth,
+		Mode:    headers.Get(headerMode),
+		RunID:   headers.Get(headerRunID),
+		StepKey: headers.Get(headerStepKey),
 	})
 
 	close(stopIP)
