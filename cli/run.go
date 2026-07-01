@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-logr/zerologr"
 	"github.com/goccy/go-json"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -348,6 +349,7 @@ var runCmd = &cobra.Command{
 		// Unset TINY_NATS_URL = legacy gRPC path, no change.
 		natsRt := connectNATS(ctx, l)
 		var natsTransport transport.Transport
+		var execKV jetstream.KeyValue // durable execution-scope store; nil unless jetstream transport is active
 		if natsRt != nil {
 			moduleName := moduleInfo.GetNameSanitised()
 			switch os.Getenv("TINY_NATS_TRANSPORT") {
@@ -366,6 +368,14 @@ var runCmd = &cobra.Command{
 					l.Error(err, "ensure sysmsg stream")
 					os.Exit(1)
 				}
+				// Durable execution-scoped State (module.ScopeExecution) lives in
+				// a JetStream KV bucket on the same broker.
+				kv, kvErr := state.EnsureExecKV(ctx, natsRt.JS)
+				if kvErr != nil {
+					l.Error(kvErr, "ensure exec kv")
+					os.Exit(1)
+				}
+				execKV = kv
 				natsTransport = transport.NewJetStream(natsRt.JS, natsRt.NC, moduleName, l)
 				l.Info("transport: jetstream-backed durable wire")
 			default:
@@ -467,7 +477,7 @@ var runCmd = &cobra.Command{
 			SetMeter(meter).
 			SetTracer(tracer).
 			SetManager(resourceManager).
-			SetStateFactory(state.NewMetadataFactory(resourceManager.GetK8sClient()))
+			SetStateFactory(state.NewScopedFactory(resourceManager.GetK8sClient(), execKV))
 
 		// Reuse the same NATS connection for the JetStream-backed
 		// NATSAware capability. natsRt is non-nil iff TINY_NATS_URL
@@ -581,7 +591,6 @@ var runCmd = &cobra.Command{
 			l.Error(err, "unable to create tinymodule controller")
 			return
 		}
-
 
 		// @todo replace with custom health check
 		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

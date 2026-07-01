@@ -19,6 +19,7 @@ func (f *fakeState) Get(_ context.Context, _ string) ([]byte, bool, error) {
 func (f *fakeState) Set(_ context.Context, _ string, _ []byte) error           { return nil }
 func (f *fakeState) Delete(_ context.Context, _ string) error                  { return nil }
 func (f *fakeState) List(_ context.Context, _ string) ([]string, error)        { return nil, nil }
+func (f *fakeState) Scoped(_, _ string) module.State                           { return f }
 
 // fakeK8sClient lets us call OnClient with a non-nil value.
 type fakeK8sClient struct{}

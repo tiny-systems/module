@@ -306,5 +306,11 @@ func (m *MetadataState) List(ctx context.Context, prefix string) ([]string, erro
 	return out, nil
 }
 
+// Scoped: the metadata backend is node-local and has no execution store, so it
+// ignores scoping and returns itself. Durable execution-scoped state requires a
+// broker-backed backend (see ScopedRouter); without one, callers transparently
+// degrade to node-local state here.
+func (m *MetadataState) Scoped(scope, id string) module.State { return m }
+
 // Static interface assertion — fails to compile if drift occurs.
 var _ module.State = (*MetadataState)(nil)

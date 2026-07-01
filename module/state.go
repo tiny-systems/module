@@ -41,7 +41,25 @@ type State interface {
 	// own internal prefix). Order is sorted ascending. Reflects pending
 	// writes and deletes from this replica.
 	List(ctx context.Context, prefix string) ([]string, error)
+
+	// Scoped returns a State whose keys live under (scope, id). Use
+	// ScopeExecution + a run id for durable, cross-pod run state backed by
+	// JetStream — the store a durable execution checkpoints into, which
+	// survives the pod that started the run. The default (unscoped) methods
+	// remain node-local. A backend without an execution store (no broker
+	// configured) degrades to node scope, so Scoped is always safe to call.
+	Scoped(scope, id string) State
 }
+
+const (
+	// ScopeExecution addresses durable, run-lifetime state shared across
+	// every pod that handles the run. Backed by JetStream KV.
+	ScopeExecution = "execution"
+
+	// ScopeNode addresses node-local state — the default, metadata-backed
+	// scope also reachable via the unscoped State methods.
+	ScopeNode = "node"
+)
 
 // Stateful is the capability interface for components that want a State
 // backend injected. The framework calls OnState once during runner setup,
