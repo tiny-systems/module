@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	"github.com/tiny-systems/module/internal/scheduler/runner"
 	"github.com/tiny-systems/module/internal/transport"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/state"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
@@ -65,12 +67,13 @@ func startDurableJS(t *testing.T) string {
 	return srv.ClientURL()
 }
 
-// durablePod bundles one "pod": its own NATS connection, transport, and
-// scheduler whose router mirrors cli/run.go — durable hops (RunID set) go
+// durablePod bundles one "pod": its own NATS connection, transport, exec KV,
+// and scheduler whose router mirrors cli/run.go — durable hops (RunID set) go
 // through the stream; everything else routes back into the local scheduler.
 type durablePod struct {
 	nc    *nats.Conn
 	tr    *transport.JetStream
+	kv    jetstream.KeyValue
 	sched *Schedule
 }
 
@@ -85,7 +88,11 @@ func newDurablePod(t *testing.T, url string) *durablePod {
 	if err != nil {
 		t.Fatalf("pod jetstream.New: %v", err)
 	}
-	p := &durablePod{nc: nc, tr: transport.NewJetStream(js, nc, durableModule, logr.Discard())}
+	kv, err := state.EnsureExecKV(context.Background(), js)
+	if err != nil {
+		t.Fatalf("EnsureExecKV: %v", err)
+	}
+	p := &durablePod{nc: nc, kv: kv, tr: transport.NewJetStream(js, nc, durableModule, logr.Discard())}
 	p.sched = New(func(ctx context.Context, msg *runner.Msg) (any, error) {
 		if msg.RunID != "" {
 			return p.tr.Handler(ctx, msg)
@@ -95,7 +102,8 @@ func newDurablePod(t *testing.T, url string) *durablePod {
 		SetLogger(logr.Discard()).
 		SetManager(fakeManager{}).
 		SetTracer(tracenoop.NewTracerProvider().Tracer("test")).
-		SetMeter(metricnoop.NewMeterProvider().Meter("test"))
+		SetMeter(metricnoop.NewMeterProvider().Meter("test")).
+		SetStateFactory(state.NewScopedFactory(nil, kv))
 	return p
 }
 
@@ -264,6 +272,64 @@ func TestDurable_RunMigratesAcrossPodsAndSurvivesSenderDeath(t *testing.T) {
 		}
 	}
 	t.Logf("entry returned in %s; chain completed on pod B: %v", entryLatency, hops)
+}
+
+// TestDurable_LedgerSkipsReplayedStep locks the 2b guard: a hop redelivered
+// AFTER the broker's duplicate window (simulated by handing the same message
+// to the scheduler twice) must not re-execute the component — its ledger
+// record short-circuits the replay, and no duplicate downstream hops appear.
+func TestDurable_LedgerSkipsReplayedStep(t *testing.T) {
+	url := startDurableJS(t)
+	rec := newRunRecord()
+	pod := newDurablePod(t, url)
+	installChain(t, pod, "P", rec)
+	pod.startReceiver(t)
+
+	hop := &runner.Msg{
+		To:      "flow1." + durableModule + ".b:in",
+		From:    "flow1." + durableModule + ".a:out",
+		EdgeID:  "ea",
+		Data:    []byte(`{}`),
+		RunID:   "run-ledger",
+		StepKey: "run-ledger.0000000000000001",
+	}
+
+	// First delivery: b executes, durably emits to c; c completes the run.
+	if _, err := pod.sched.Handle(context.Background(), hop); err != nil {
+		t.Fatalf("first delivery: %v", err)
+	}
+	select {
+	case <-rec.done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run did not complete; hops: %v", rec.snapshot())
+	}
+	first := rec.snapshot()
+	if len(first) != 2 { // P/step-b, P/final-c
+		t.Fatalf("want 2 hops after first delivery, got %v", first)
+	}
+
+	// The ledger recorded b's completion, including its emitted hop.
+	entry, err := pod.kv.Get(context.Background(), "exec/run-ledger/step/run-ledger.0000000000000001")
+	if err != nil {
+		t.Fatalf("ledger record missing: %v", err)
+	}
+	var stepRec runner.StepRecord
+	if err := json.Unmarshal(entry.Value(), &stepRec); err != nil {
+		t.Fatalf("ledger record unmarshal: %v", err)
+	}
+	if stepRec.Status != runner.StepStatusDone || len(stepRec.Emits) != 1 {
+		t.Fatalf("want done record with 1 emit, got %+v", stepRec)
+	}
+
+	// Replay: same hop again. The component must NOT run a second time.
+	res, err := pod.sched.Handle(context.Background(), hop)
+	if err != nil || res != nil {
+		t.Fatalf("replay should be a silent skip, got (%v, %v)", res, err)
+	}
+	time.Sleep(500 * time.Millisecond) // room for any (wrong) downstream activity
+	if after := rec.snapshot(); len(after) != len(first) {
+		t.Fatalf("replay re-executed work: before %v, after %v", first, after)
+	}
 }
 
 // TestDurable_PublishDedupsOnStepKey locks the idempotency guard: two durable

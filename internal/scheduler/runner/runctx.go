@@ -27,6 +27,9 @@ type RunInfo struct {
 
 	seqMu sync.Mutex
 	seq   map[string]int
+	// emits collects the durable hops published while handling this message,
+	// so the step's ledger record can carry them for re-drive.
+	emits []EmitRecord
 }
 
 // NewRunInfo wraps an existing run identity arriving on a message.
@@ -55,6 +58,20 @@ func (r *RunInfo) NextStepKey(edgeID string) string {
 	h := fnv.New64a()
 	_, _ = fmt.Fprintf(h, "%s|%s|%d", r.StepKey, edgeID, n)
 	return fmt.Sprintf("%s.%016x", r.RunID, h.Sum64())
+}
+
+// RecordEmit notes a durable hop published while handling this message.
+func (r *RunInfo) RecordEmit(e EmitRecord) {
+	r.seqMu.Lock()
+	r.emits = append(r.emits, e)
+	r.seqMu.Unlock()
+}
+
+// Emits returns the durable hops recorded so far.
+func (r *RunInfo) Emits() []EmitRecord {
+	r.seqMu.Lock()
+	defer r.seqMu.Unlock()
+	return append([]EmitRecord(nil), r.emits...)
 }
 
 type runCtxKey struct{}

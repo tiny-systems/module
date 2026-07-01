@@ -424,13 +424,19 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 			return runnerInstance.DataHandler(s.msgHandler)(emitCtx, port, data)
 		})
 
-		if stateful, ok := cmpInstance.(module.Stateful); ok && s.stateFactory != nil {
+		// Every runner gets a State backend: the durable-execution step
+		// ledger lives there, and that must work for ANY component in a
+		// durable flow, not just Stateful ones. The component-facing
+		// OnState capability stays opt-in.
+		if s.stateFactory != nil {
 			backend := s.stateFactory.For(node, state.EmitFunc(emit))
-			stateful.OnState(backend)
 			runnerInstance.SetState(backend)
-			s.log.Info("scheduler update: state backend injected",
-				"node", node.Name,
-			)
+			if stateful, ok := cmpInstance.(module.Stateful); ok {
+				stateful.OnState(backend)
+				s.log.Info("scheduler update: state backend injected",
+					"node", node.Name,
+				)
+			}
 		}
 		if emitter, ok := cmpInstance.(module.EmitterAware); ok {
 			emitter.OnEmitter(emit)

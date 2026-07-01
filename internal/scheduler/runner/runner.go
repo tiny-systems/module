@@ -394,6 +394,22 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	// the durable (fire-and-forget, work-queue) path instead of blocking.
 	// System ports (_control, _settings, …) never mint runs.
 	if msg.RunID != "" {
+		// Redelivery protection beyond the broker's duplicate window: a hop
+		// whose ledger record already exists ran to completion (or failed
+		// terminally) — skip the component so its side effects never
+		// re-execute. The record was written AFTER the step's emits were
+		// durably stored, so skipping loses nothing downstream.
+		if msg.StepKey != "" && c.state != nil {
+			exec := c.state.Scoped(m.ScopeExecution, msg.RunID)
+			if _, recorded, _ := exec.Get(ctx, StepLedgerKey(msg.StepKey)); recorded {
+				c.log.Info("runner msg handler: step already recorded, skipping durable replay",
+					"runID", msg.RunID,
+					"stepKey", msg.StepKey,
+					"node", c.name,
+				)
+				return nil, nil
+			}
+		}
 		ctx = WithRun(ctx, NewRunInfo(msg.RunID, msg.StepKey))
 	} else if c.isDurable() && !strings.HasPrefix(port, "_") {
 		run := MintRun()
@@ -662,7 +678,51 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		)
 	}
 
+	c.writeStepRecord(ctx, err)
+
 	return resp.Value(), err
+}
+
+// writeStepRecord persists a durable hop's completion to the step ledger —
+// AFTER the handler returned, so every emit it published is already durably
+// stored (record exists ⇒ downstream hops exist). Failures are recorded as
+// terminal: the durability layer never re-runs business errors; that belongs
+// to explicit retry components / edge RetryPolicy. Best-effort — a lost write
+// only means a redelivery would re-execute the step, the pre-2b behavior.
+func (c *Runner) writeStepRecord(ctx context.Context, handleErr error) {
+	run, ok := RunFrom(ctx)
+	if !ok || c.state == nil {
+		return
+	}
+
+	rec := StepRecord{
+		Node:        c.name,
+		Status:      StepStatusDone,
+		Emits:       run.Emits(),
+		CompletedAt: time.Now(),
+	}
+	if handleErr != nil {
+		rec.Status = StepStatusFailed
+		rec.Error = handleErr.Error()
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+
+	// The handler's ctx may already be cancelled (durable hops ack right
+	// after this) — detach, but bound the write.
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+
+	exec := c.state.Scoped(m.ScopeExecution, run.RunID)
+	if err := exec.Set(wctx, StepLedgerKey(run.StepKey), b); err != nil {
+		c.log.Error(err, "runner msg handler: step ledger write failed",
+			"runID", run.RunID,
+			"stepKey", run.StepKey,
+			"node", c.name,
+		)
+	}
 }
 
 func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Context, outputPort string, outputData any) m.Result {
@@ -953,7 +1013,8 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	// deterministic idempotency key. Derived ONCE, outside the retry loop —
 	// a retry after a lost broker ack re-publishes the same StepKey and the
 	// duplicate window collapses it to one stored message.
-	if run, ok := RunFrom(ctx); ok {
+	run, durable := RunFrom(ctx)
+	if durable {
 		msg.RunID = run.RunID
 		msg.StepKey = run.NextStepKey(edge.ID)
 	}
@@ -962,6 +1023,17 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		res, err := handler(ctx, msg)
 		if err == nil {
+			// Collect the durably-stored hop so this step's ledger record
+			// can carry it for reconciler re-drive.
+			if durable {
+				run.RecordEmit(EmitRecord{
+					To:      msg.To,
+					From:    msg.From,
+					EdgeID:  msg.EdgeID,
+					StepKey: msg.StepKey,
+					Data:    dataBytes,
+				})
+			}
 			return res, nil
 		}
 		lastErr = err
