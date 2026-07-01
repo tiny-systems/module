@@ -66,6 +66,15 @@ type Schedule struct {
 	// non-nil, NATSAware components receive it via OnNATS during Update.
 	// Stays nil when the runtime started without TINY_NATS_URL.
 	js jetstream.JetStream
+
+	// Run reconciler (Phase 2c) wiring — see reconciler.go. execKV is the
+	// step-ledger bucket; leaderCheck gates passes to the leader pod; the
+	// durations fall back to the defaults in reconciler.go when zero.
+	execKV         jetstream.KeyValue
+	leaderCheck    func() bool
+	reconcileEvery time.Duration
+	staleAfter     time.Duration
+	gcAfter        time.Duration
 }
 
 // MaxMessageDepth is the maximum number of node hops a message can traverse.

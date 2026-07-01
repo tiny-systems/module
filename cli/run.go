@@ -498,6 +498,22 @@ var runCmd = &cobra.Command{
 			scheduler.SetJetStream(natsRt.JS)
 		}
 
+		// Run reconciler (durable execution, Phase 2c): leader-gated
+		// level-triggered re-drive of stalled durable runs off the step
+		// ledger. Only meaningful when the jetstream transport (and thus
+		// the exec KV) is active.
+		if execKV != nil {
+			scheduler.
+				SetExecKV(execKV).
+				SetLeaderCheck(func() bool { return isLeader.Load() })
+			wg.Go(func() error {
+				l.Info("starting durable-run reconciler")
+				defer l.Info("durable-run reconciler stopped")
+				scheduler.StartRunReconciler(ctx)
+				return nil
+			})
+		}
+
 		// Receiver: NATS subscriber when the transport is enabled,
 		// gRPC server otherwise. The scheduler.Handle entry point is
 		// identical for both — same blocking I/O, same Result chain.
