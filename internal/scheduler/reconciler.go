@@ -21,6 +21,8 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,17 @@ const (
 	// defaultGCAfter — completed runs older than this get their ledger
 	// records deleted, bounding KV growth.
 	defaultGCAfter = 24 * time.Hour
+
+	// maxRedrives caps how many times a frontier hop is re-driven before the
+	// run is marked failed. Without a cap, a hop whose target can never
+	// complete it — the canonical case is a durable run routed into a module
+	// on a pre-v0.11 SDK, which processes the hop but writes no step record —
+	// would be re-driven every pass forever, repeating side effects.
+	maxRedrives = 3
+
+	// redrivePrefix namespaces re-drive counters inside a run's exec scope,
+	// beside the step/ ledger records: exec/<runID>/redrive/<stepKey>.
+	redrivePrefix = "redrive/"
 )
 
 // SetExecKV wires the execution-scope KV bucket (the step ledger) so the run
@@ -131,6 +144,16 @@ func (s *Schedule) reconcileRuns(ctx context.Context) ([]runner.EmitRecord, erro
 		}
 
 		for _, hop := range frontier {
+			attempts := s.redriveAttempts(ctx, runID, hop.StepKey)
+			if attempts >= maxRedrives {
+				// The hop keeps not completing — most likely its target can't
+				// participate (pre-v0.11 SDK writes no step records). Mark the
+				// step failed so the run leaves the frontier: run_status shows
+				// failed instead of the run silently re-executing forever.
+				s.failStep(ctx, runID, hop, attempts)
+				continue
+			}
+
 			msg := &runner.Msg{
 				To:      hop.To,
 				From:    hop.From,
@@ -144,12 +167,67 @@ func (s *Schedule) reconcileRuns(ctx context.Context) ([]runner.EmitRecord, erro
 					"runID", runID, "stepKey", hop.StepKey)
 				continue
 			}
+			s.recordRedrive(ctx, runID, hop.StepKey, attempts+1)
 			s.log.Info("run reconciler: re-drove stalled hop",
-				"runID", runID, "stepKey", hop.StepKey, "to", hop.To)
+				"runID", runID, "stepKey", hop.StepKey, "to", hop.To,
+				"attempt", attempts+1, "of", maxRedrives)
 			redriven = append(redriven, hop)
 		}
 	}
 	return redriven, nil
+}
+
+// redriveKey returns the raw exec-KV key of a hop's re-drive counter.
+func redriveKey(runID, stepKey string) string {
+	return "exec/" + runID + "/" + redrivePrefix + stepKey
+}
+
+// redriveAttempts reads how many times a hop has been re-driven.
+func (s *Schedule) redriveAttempts(ctx context.Context, runID, stepKey string) int {
+	entry, err := s.execKV.Get(ctx, redriveKey(runID, stepKey))
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(string(entry.Value()))
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// recordRedrive persists the hop's re-drive counter. Best-effort — a lost
+// write only means one extra re-drive.
+func (s *Schedule) recordRedrive(ctx context.Context, runID, stepKey string, attempts int) {
+	if _, err := s.execKV.Put(ctx, redriveKey(runID, stepKey), []byte(strconv.Itoa(attempts))); err != nil {
+		s.log.Error(err, "run reconciler: record re-drive failed",
+			"runID", runID, "stepKey", stepKey)
+	}
+}
+
+// failStep writes a terminal failed record for a hop that exhausted its
+// re-drives, removing it from the frontier and surfacing the failure in
+// run_status instead of looping side effects forever.
+func (s *Schedule) failStep(ctx context.Context, runID string, hop runner.EmitRecord, attempts int) {
+	rec := runner.StepRecord{
+		Node:   hop.To,
+		Status: runner.StepStatusFailed,
+		Error: fmt.Sprintf(
+			"re-drive limit reached after %d attempts — hop never completed (is the target module on an SDK >= v0.11 with durable support?)",
+			attempts),
+		CompletedAt: time.Now(),
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	key := "exec/" + runID + "/step/" + hop.StepKey
+	if _, err := s.execKV.Put(ctx, key, b); err != nil {
+		s.log.Error(err, "run reconciler: fail-step write failed",
+			"runID", runID, "stepKey", hop.StepKey)
+		return
+	}
+	s.log.Info("run reconciler: hop exhausted re-drives, run marked failed",
+		"runID", runID, "stepKey", hop.StepKey, "to", hop.To)
 }
 
 // readLedger scans the exec KV and groups step records by run.
@@ -166,10 +244,25 @@ func (s *Schedule) readLedger(ctx context.Context) (map[string]*runLedger, error
 	runs := map[string]*runLedger{}
 	for _, k := range keys {
 		parts := strings.SplitN(k, "/", 4)
-		if len(parts) != 4 || parts[0] != "exec" || parts[2] != "step" {
+		if len(parts) != 4 || parts[0] != "exec" {
 			continue
 		}
 		runID, stepKey := parts[1], parts[3]
+
+		// Re-drive counters are per-run debris: track them for GC but they
+		// carry no ledger record.
+		if parts[2] == "redrive" {
+			ledger := runs[runID]
+			if ledger == nil {
+				ledger = &runLedger{records: map[string]runner.StepRecord{}}
+				runs[runID] = ledger
+			}
+			ledger.keys = append(ledger.keys, k)
+			continue
+		}
+		if parts[2] != "step" {
+			continue
+		}
 
 		entry, err := s.execKV.Get(ctx, k)
 		if err != nil {

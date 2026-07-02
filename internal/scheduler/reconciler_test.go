@@ -174,6 +174,64 @@ func TestRunReconciler_EndToEnd_RedriveCompletesRun(t *testing.T) {
 	}
 }
 
+// TestRunReconciler_RedriveCapMarksRunFailed locks the unbounded-retry guard:
+// a hop whose target never writes a step record (the pre-v0.11-SDK-module
+// case) is re-driven at most maxRedrives times, then gets a terminal failed
+// record — the run leaves the frontier instead of re-executing side effects
+// forever.
+func TestRunReconciler_RedriveCapMarksRunFailed(t *testing.T) {
+	s, kv, published := newReconcilerFixture(t)
+
+	seedStep(t, kv, "run-cap", "run-cap.root", runner.StepRecord{
+		Node:        "flow1." + durableModule + ".a",
+		Status:      runner.StepStatusDone,
+		Emits:       []runner.EmitRecord{emitTo("SK1")},
+		CompletedAt: time.Now().Add(-10 * time.Minute),
+	})
+
+	// Passes 1..maxRedrives re-drive the hop (the target "module" never
+	// completes it, so no record ever appears).
+	for i := 1; i <= 3; i++ {
+		redriven, err := s.reconcileRuns(context.Background())
+		if err != nil {
+			t.Fatalf("pass %d: %v", i, err)
+		}
+		if len(redriven) != 1 {
+			t.Fatalf("pass %d: want 1 re-drive, got %d", i, len(redriven))
+		}
+	}
+	if got := len(*published); got != 3 {
+		t.Fatalf("want exactly 3 re-publishes, got %d", got)
+	}
+
+	// Pass 4: cap reached — no re-publish; the hop gets a terminal failed
+	// record instead.
+	redriven, err := s.reconcileRuns(context.Background())
+	if err != nil {
+		t.Fatalf("cap pass: %v", err)
+	}
+	if len(redriven) != 0 || len(*published) != 3 {
+		t.Fatalf("cap must stop re-drives: redriven=%d published=%d", len(redriven), len(*published))
+	}
+	entry, err := kv.Get(context.Background(), "exec/run-cap/step/SK1")
+	if err != nil {
+		t.Fatalf("failed record missing: %v", err)
+	}
+	var rec runner.StepRecord
+	if err := json.Unmarshal(entry.Value(), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != runner.StepStatusFailed || rec.Error == "" {
+		t.Fatalf("want terminal failed record, got %+v", rec)
+	}
+
+	// Pass 5: the run is out of the frontier for good — nothing happens.
+	redriven, err = s.reconcileRuns(context.Background())
+	if err != nil || len(redriven) != 0 {
+		t.Fatalf("failed run must stay terminal: %v %d", err, len(redriven))
+	}
+}
+
 func TestRunReconciler_GCsCompletedRuns(t *testing.T) {
 	s, kv, _ := newReconcilerFixture(t)
 	s.gcAfter = time.Millisecond // everything old enough immediately
