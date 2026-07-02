@@ -66,11 +66,25 @@ func GetInt(i interface{}) int {
 	if i == nil {
 		return 0
 	}
-	if x, ok := i.(float64); ok {
+	// Cover every numeric shape that reaches element maps: JSON decoding
+	// yields float64, proto accessors yield int32/int64, and Go literals
+	// yield int. The silent-zero fallthrough on int32 stacked every
+	// MCP-built node at the canvas origin before this was widened.
+	switch x := i.(type) {
+	case float64:
 		return int(x)
-	}
-	if x, ok := i.(int); ok {
+	case float32:
+		return int(x)
+	case int:
 		return x
+	case int32:
+		return int(x)
+	case int64:
+		return int(x)
+	case json.Number:
+		if n, err := x.Int64(); err == nil {
+			return int(n)
+		}
 	}
 	return 0
 }
