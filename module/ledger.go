@@ -43,13 +43,17 @@ const (
 	StepStatusFailed = "failed"
 )
 
-// StepRecord is the completion record of one durable hop.
+// StepRecord is the completion record of one durable hop. Timing fields
+// enrich the run view (per-step duration) without a separate trace/OTel
+// join — the run ledger is self-describing.
 type StepRecord struct {
 	Node        string       `json:"node"`
 	Status      string       `json:"status"`
 	Error       string       `json:"error,omitempty"`
 	Emits       []EmitRecord `json:"emits,omitempty"`
+	StartedAt   time.Time    `json:"startedAt,omitempty"`
 	CompletedAt time.Time    `json:"completedAt"`
+	DurationMs  int64        `json:"durationMs,omitempty"`
 }
 
 // stepLedgerPrefix namespaces ledger records inside the execution scope.

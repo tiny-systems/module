@@ -678,7 +678,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		)
 	}
 
-	c.writeStepRecord(ctx, err)
+	c.writeStepRecord(ctx, err, handleStart, handleDuration)
 
 	return resp.Value(), err
 }
@@ -689,7 +689,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 // terminal: the durability layer never re-runs business errors; that belongs
 // to explicit retry components / edge RetryPolicy. Best-effort — a lost write
 // only means a redelivery would re-execute the step, the pre-2b behavior.
-func (c *Runner) writeStepRecord(ctx context.Context, handleErr error) {
+func (c *Runner) writeStepRecord(ctx context.Context, handleErr error, startedAt time.Time, dur time.Duration) {
 	run, ok := RunFrom(ctx)
 	if !ok || c.state == nil {
 		return
@@ -699,7 +699,9 @@ func (c *Runner) writeStepRecord(ctx context.Context, handleErr error) {
 		Node:        c.name,
 		Status:      StepStatusDone,
 		Emits:       run.Emits(),
+		StartedAt:   startedAt,
 		CompletedAt: time.Now(),
+		DurationMs:  dur.Milliseconds(),
 	}
 	if handleErr != nil {
 		rec.Status = StepStatusFailed
