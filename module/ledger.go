@@ -20,13 +20,19 @@ import "time"
 // external tooling parse it.
 
 // EmitRecord is one durable hop published by a completed step — everything
-// needed to re-publish it verbatim.
+// needed to re-publish it verbatim, including the reply address so a
+// re-driven hop still reaches the origin instance.
 type EmitRecord struct {
 	To      string `json:"to"`
 	From    string `json:"from"`
 	EdgeID  string `json:"edgeID"`
 	StepKey string `json:"stepKey"`
 	Data    []byte `json:"data"`
+	// Reply addressing (empty for background runs). Carried so redelivery
+	// and reconciler re-drive preserve the synchronous-response route.
+	ReplySubject        string `json:"replySubject,omitempty"`
+	ReplyTarget         string `json:"replyTarget,omitempty"`
+	ReplyDeadlineUnixMs int64  `json:"replyDeadlineUnixMs,omitempty"`
 }
 
 // Step statuses. A failed step is terminal for the run reconciler — business

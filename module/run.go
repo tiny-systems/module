@@ -39,6 +39,22 @@ type Run struct {
 	RunID   string
 	StepKey string
 
+	// Reply addressing lets a durable run deliver a synchronous response
+	// back to the exact instance that started it (an http_server pod holding
+	// an open connection), instead of round-robining to any queue-group
+	// member. Set when the run is minted by a synchronous front door; empty
+	// for pure background runs.
+	//   ReplySubject — the core-NATS subject the origin instance subscribes
+	//     to; the hop targeting ReplyTarget is delivered here, not via the
+	//     durable work-queue.
+	//   ReplyTarget  — the "<nodeID>:<port>" whose inbound hop triggers the
+	//     addressed reply (the origin's response port).
+	//   ReplyDeadlineUnixMs — when the origin stops waiting and falls back to
+	//     poll; a reply published after it is dropped (no subscriber).
+	ReplySubject        string
+	ReplyTarget         string
+	ReplyDeadlineUnixMs int64
+
 	seqMu sync.Mutex
 	seq   map[string]int
 	// emits collects the durable hops published while handling this
@@ -49,6 +65,21 @@ type Run struct {
 // NewRun wraps an existing run identity arriving on a message.
 func NewRun(runID, stepKey string) *Run {
 	return &Run{RunID: runID, StepKey: stepKey, seq: map[string]int{}}
+}
+
+// WithReply attaches a reply address so the run's response hop is delivered
+// to the exact origin instance. Chainable; returns the same Run.
+func (r *Run) WithReply(subject, target string, deadlineUnixMs int64) *Run {
+	r.ReplySubject = subject
+	r.ReplyTarget = target
+	r.ReplyDeadlineUnixMs = deadlineUnixMs
+	return r
+}
+
+// IsReplyHop reports whether an emit to targetPortAddr ("<nodeID>:<port>")
+// should be delivered to the run's reply subject instead of the work-queue.
+func (r *Run) IsReplyHop(targetPortAddr string) bool {
+	return r.ReplySubject != "" && r.ReplyTarget != "" && targetPortAddr == r.ReplyTarget
 }
 
 // MintRun starts a new durable run at an entry node. The seed StepKey is
