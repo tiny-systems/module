@@ -155,12 +155,15 @@ func (s *Schedule) reconcileRuns(ctx context.Context) ([]runner.EmitRecord, erro
 			}
 
 			msg := &runner.Msg{
-				To:      hop.To,
-				From:    hop.From,
-				EdgeID:  hop.EdgeID,
-				Data:    hop.Data,
-				RunID:   runID,
-				StepKey: hop.StepKey,
+				To:                  hop.To,
+				From:                hop.From,
+				EdgeID:              hop.EdgeID,
+				Data:                hop.Data,
+				RunID:               runID,
+				StepKey:             hop.StepKey,
+				ReplySubject:        hop.ReplySubject,
+				ReplyTarget:         hop.ReplyTarget,
+				ReplyDeadlineUnixMs: hop.ReplyDeadlineUnixMs,
 			}
 			if _, err := s.msgHandler(ctx, msg); err != nil {
 				s.log.Error(err, "run reconciler: re-drive publish failed",

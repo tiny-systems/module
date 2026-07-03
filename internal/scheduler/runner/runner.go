@@ -1019,6 +1019,11 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	if durable {
 		msg.RunID = run.RunID
 		msg.StepKey = run.NextStepKey(edge.ID)
+		// Carry the reply address so every hop keeps it; the terminal hop
+		// (To == ReplyTarget) diverts to the origin instance in the transport.
+		msg.ReplySubject = run.ReplySubject
+		msg.ReplyTarget = run.ReplyTarget
+		msg.ReplyDeadlineUnixMs = run.ReplyDeadlineUnixMs
 	}
 
 	var lastErr error
@@ -1029,11 +1034,14 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 			// can carry it for reconciler re-drive.
 			if durable {
 				run.RecordEmit(EmitRecord{
-					To:      msg.To,
-					From:    msg.From,
-					EdgeID:  msg.EdgeID,
-					StepKey: msg.StepKey,
-					Data:    dataBytes,
+					To:                  msg.To,
+					From:                msg.From,
+					EdgeID:              msg.EdgeID,
+					StepKey:             msg.StepKey,
+					Data:                dataBytes,
+					ReplySubject:        msg.ReplySubject,
+					ReplyTarget:         msg.ReplyTarget,
+					ReplyDeadlineUnixMs: msg.ReplyDeadlineUnixMs,
 				})
 			}
 			return res, nil

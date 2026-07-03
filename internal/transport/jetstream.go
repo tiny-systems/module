@@ -257,6 +257,20 @@ func (t *JetStream) Handler(ctx context.Context, msg *runner.Msg) ([]byte, error
 // handler's re-emit (same deterministic StepKey) collapses to one stored
 // message inside the duplicate window.
 func (t *JetStream) publishDurable(ctx context.Context, moduleName string, msg *runner.Msg) ([]byte, error) {
+	// Addressed-response interception: the terminal reply hop is delivered
+	// to the exact origin instance via core NATS, NOT the work-queue (which
+	// would round-robin to any pod). Best-effort by design — if the origin
+	// pod died or its deadline passed, no subscriber remains and the reply
+	// is dropped; the caller falls back to polling. The background run is
+	// unaffected (this hop produces no further work).
+	if msg.IsReplyHop() {
+		if err := t.nc.Publish(msg.ReplySubject, msg.Data); err != nil {
+			t.log.Info("jetstream transport: addressed reply publish failed (origin likely gone)",
+				"replySubject", msg.ReplySubject, "runID", msg.RunID)
+		}
+		return nil, nil
+	}
+
 	natsMsg := &nats.Msg{
 		Subject: SubjectFor(moduleName),
 		Data:    msg.Data,
@@ -269,6 +283,15 @@ func (t *JetStream) publishDurable(ctx context.Context, moduleName string, msg *
 	if msg.StepKey != "" {
 		natsMsg.Header.Set(headerStepKey, msg.StepKey)
 		natsMsg.Header.Set(natsMsgIDHeader, msg.StepKey)
+	}
+	// Carry the reply address so downstream durable hops keep it — any of
+	// them might be the one wired back to the origin's response port.
+	if msg.ReplySubject != "" {
+		natsMsg.Header.Set(headerReplySubject, msg.ReplySubject)
+		natsMsg.Header.Set(headerReplyTarget, msg.ReplyTarget)
+		if msg.ReplyDeadlineUnixMs > 0 {
+			natsMsg.Header.Set(headerReplyDeadline, strconv.FormatInt(msg.ReplyDeadlineUnixMs, 10))
+		}
 	}
 	if msg.Depth > 0 {
 		natsMsg.Header.Set(headerMessageDepth, strconv.Itoa(msg.Depth))
@@ -394,15 +417,22 @@ func (t *JetStream) handleIncoming(parentCtx context.Context, handler runner.Han
 		}
 	}()
 
+	var replyDeadline int64
+	if d := headers.Get(headerReplyDeadline); d != "" {
+		replyDeadline, _ = strconv.ParseInt(d, 10, 64)
+	}
 	res, handlerErr := handler(ctx, &runner.Msg{
-		EdgeID:  headers.Get(headerEdgeID),
-		To:      headers.Get(headerTo),
-		From:    headers.Get(headerFrom),
-		Data:    m.Data(),
-		Depth:   depth,
-		Mode:    headers.Get(headerMode),
-		RunID:   headers.Get(headerRunID),
-		StepKey: headers.Get(headerStepKey),
+		EdgeID:              headers.Get(headerEdgeID),
+		To:                  headers.Get(headerTo),
+		From:                headers.Get(headerFrom),
+		Data:                m.Data(),
+		Depth:               depth,
+		Mode:                headers.Get(headerMode),
+		RunID:               headers.Get(headerRunID),
+		StepKey:             headers.Get(headerStepKey),
+		ReplySubject:        headers.Get(headerReplySubject),
+		ReplyTarget:         headers.Get(headerReplyTarget),
+		ReplyDeadlineUnixMs: replyDeadline,
 	})
 
 	close(stopIP)

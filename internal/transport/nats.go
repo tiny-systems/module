@@ -55,7 +55,13 @@ const (
 	headerMode         = "x-mode"
 	headerRunID        = "x-run-id"
 	headerStepKey      = "x-step-key"
-	natsMsgIDHeader    = "Nats-Msg-Id"
+	// Addressed-response reply routing — ride every durable hop so the
+	// address survives migration; the terminal reply hop diverts to
+	// headerReplySubject via core NATS.
+	headerReplySubject  = "x-reply-subject"
+	headerReplyTarget   = "x-reply-target"
+	headerReplyDeadline = "x-reply-deadline"
+	natsMsgIDHeader     = "Nats-Msg-Id"
 )
 
 // SubjectFor returns the NATS subject a given module subscribes to and

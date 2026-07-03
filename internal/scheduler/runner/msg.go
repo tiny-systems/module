@@ -36,6 +36,22 @@ type Msg struct {
 	// re-executed handler's re-emit within the duplicate window.
 	StepKey string `json:"stepKey,omitempty"`
 
+	// Reply addressing (see module.Run). When a hop's To equals ReplyTarget
+	// and ReplySubject is set, the transport delivers it via core NATS to
+	// ReplySubject — reaching the exact instance that started the run (e.g.
+	// the http_server pod holding an open connection) instead of a
+	// round-robin queue-group member. These ride every durable hop so the
+	// address survives migration; only the terminal reply hop diverts.
+	ReplySubject        string `json:"replySubject,omitempty"`
+	ReplyTarget         string `json:"replyTarget,omitempty"`
+	ReplyDeadlineUnixMs int64  `json:"replyDeadlineUnixMs,omitempty"`
+
 	//
 	Resp interface{} `json:"-"`
+}
+
+// IsReplyHop reports whether this hop should be delivered to ReplySubject
+// (the addressed origin) instead of the work-queue.
+func (m *Msg) IsReplyHop() bool {
+	return m.ReplySubject != "" && m.ReplyTarget != "" && m.To == m.ReplyTarget
 }

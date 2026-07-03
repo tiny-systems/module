@@ -162,6 +162,23 @@ func BeginRun(ctx context.Context) (context.Context, string) {
 	return WithRun(ctx, r), r.RunID
 }
 
+// BeginRunWithReply starts a durable run whose terminal hop (the one wired to
+// targetPortAddr, e.g. an http_server's "<nodeID>:response") is delivered
+// straight to replySubject via core NATS — reaching the exact instance that
+// started the run instead of a round-robin queue-group member. The origin
+// subscribes to replySubject and holds its connection until the reply arrives
+// or deadlineUnixMs passes. Used by synchronous front doors to keep a
+// request open over a durable run without pinning the whole run to one pod.
+//
+// Idempotent like BeginRun: an existing run on ctx is returned unchanged.
+func BeginRunWithReply(ctx context.Context, replySubject, targetPortAddr string, deadlineUnixMs int64) (context.Context, string) {
+	if r, ok := RunFrom(ctx); ok {
+		return ctx, r.RunID
+	}
+	r := MintRun().WithReply(replySubject, targetPortAddr, deadlineUnixMs)
+	return WithRun(ctx, r), r.RunID
+}
+
 // RunID returns the durable run id carried by ctx, if any. Components use
 // it to expose the run handle (e.g. returning it to an HTTP caller for
 // status polling).
