@@ -47,6 +47,16 @@ build_flow(
 )
 ` + "```" + `
 
+## Node Layout — Always Provide Positions
+
+Every node carries a canvas ` + "`position: {x, y}`" + ` (pixels). **If you omit it, nodes stack on top of each other at the origin — an unreadable pile.** A human will open this flow; lay it out like you'd draw it.
+
+- **Left-to-right in dataflow order.** Trigger on the left, each downstream node further right. Space nodes ~320px apart horizontally (` + "`x`" + `: 40, 360, 680, 1000, …).
+- **Stagger branches vertically** ~180–220px apart (` + "`y`" + `). Two trigger/entry nodes feeding one node: put them at different ` + "`y`" + ` and the shared node between them.
+- **Keep edges flowing one direction** where possible; avoid crossing.
+
+The position lives on the node element — ` + "`position: {x: 360, y: 120}`" + ` alongside its component/module/settings. Provide it for every node, every time.
+
 ## Expression Syntax
 
 Use ` + "`{{expression}}`" + ` for dynamic values in edge configurations:
@@ -201,7 +211,32 @@ For execution history: ` + "`get_traces`" + ` for recent runs, ` + "`get_trace_d
 
 ## Dashboard Widgets
 
-A node flagged with ` + "`set_dashboard(project, node, enabled: true)`" + ` renders its ` + "`_control`" + ` form as a widget on the project dashboard. Widgets are the user-facing surface of a flow: use them for values the user must provide (build with a placeholder first; don't block on a credential) and for running services the user should see (live status, exposed address). Prefer a widget over asking for values in chat.
+Flagging a node's ` + "`_control`" + ` form as a dashboard widget (via the dashboard tool your MCP server exposes — ` + "`set_dashboard`" + ` or ` + "`set_node_dashboard`" + `) is the user-facing surface of a flow. Use widgets for values the user must provide (build with a placeholder first; don't block on a credential) and for running services the user should see (live status, exposed address). Prefer a widget over asking for values in chat.
+
+**A widget renders as a form only if the node's ` + "`settings.context`" + ` has a matching configurable schema.** Without it the widget shows "Object is empty". The schema must use the ` + "`$defs`" + ` / ` + "`$ref`" + ` shape with ` + "`configurable: true`" + ` on the Context def:
+
+` + "```" + `
+settings: {context: {question: "..."}},
+settings_schema: {
+  "$defs": {
+    "Context":  {configurable: true, type: "object",
+                 properties: {question: {type: "string", title: "Question"}},
+                 required: ["question"]},
+    "Settings": {type: "object", properties: {context: {"$ref": "#/$defs/Context"}}}
+  },
+  "$ref": "#/$defs/Settings"
+}
+` + "```" + `
+
+**Two distinct forms — never merge them:**
+- **SETTINGS form** = configuration set ONCE (credentials, endpoints). Credentials belong on the consuming component's own settings via ` + "`[[secret:...]]`" + `, or — for a user-typed key — a dedicated one-time widget; NOT the per-run send form.
+- **SENDING form** = the widget fired every run, carrying only per-run inputs (question, target, ...).
+
+**User-typed credential + repeated input, the idiomatic shape** — two ` + "`signal`" + ` widgets into one ` + "`inject`" + `:
+- ` + "`Configure`" + ` signal (widget, apiKey) → ` + "`inject.config`" + ` — the SLOW port: persists to metadata (survives restarts), set once.
+- ` + "`Ask`" + ` signal (widget, question) → ` + "`inject.message`" + ` — the FAST port: pure passthrough, fired every time.
+- ` + "`inject.output`" + ` emits ` + "`{config, context, ...}`" + ` → downstream reads the key as ` + "`{{$.config.apiKey}}`" + ` and the input as ` + "`{{$.context.question}}`" + `.
+Match ` + "`config`" + ` (slow/persisted) to what's set once, ` + "`message`" + ` (fast) to what's sent often.
 
 ## Error Handling
 
