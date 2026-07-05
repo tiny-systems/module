@@ -281,6 +281,63 @@ func TestJS_NoImplicitRetryOnHandlerError(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------
+// Self-heal — a broker restart that drops the stream+consumer (store
+// loss) must not permanently break delivery. The receiver supervisor
+// re-ensures the stream, re-creates the consumer, and resubscribes.
+// (Regression for the playground _control outage: a node drain bounced
+// NATS, the stream was gone, and delivery stayed dead until a manual
+// module restart.)
+// ---------------------------------------------------------------------
+
+func TestJS_SelfHealAfterStreamLoss(t *testing.T) {
+	url, _ := startJetStream(t)
+	_, sender := newJetStreamTransport(t, url, "sender")
+	_, receiver := newJetStreamTransport(t, url, "target")
+
+	var calls int32
+	runJSReceiver(t, receiver, func(ctx context.Context, msg *runner.Msg) (any, error) {
+		atomic.AddInt32(&calls, 1)
+		return []byte("ok"), nil
+	})
+
+	// Works before the loss.
+	if _, err := sender.Handler(context.Background(), &runner.Msg{To: "flow.target.node", EdgeID: "pre"}); err != nil {
+		t.Fatalf("pre-loss handler: %v", err)
+	}
+
+	// Simulate the broker losing its store: delete the stream (its
+	// consumers go with it). Nothing re-creates it — except the
+	// receiver's self-heal supervisor, which is what we're testing.
+	adminNC, err := nats.Connect(url)
+	if err != nil {
+		t.Fatalf("admin connect: %v", err)
+	}
+	defer adminNC.Close()
+	adminJS, err := jetstream.New(adminNC)
+	if err != nil {
+		t.Fatalf("admin jetstream: %v", err)
+	}
+	if err := adminJS.DeleteStream(context.Background(), EdgeStreamName); err != nil {
+		t.Fatalf("delete stream: %v", err)
+	}
+
+	// After the loss the sender's publish fails (stream gone) until the
+	// receiver supervisor re-ensures it and resubscribes. Retry until a
+	// fresh request round-trips on the rebuilt consumer.
+	var lastErr error
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := sender.Handler(context.Background(), &runner.Msg{To: "flow.target.node", EdgeID: "post"})
+		if err == nil && string(resp) == "ok" {
+			return // healed
+		}
+		lastErr = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("receiver did not self-heal after stream loss; last err: %v", lastErr)
+}
+
 // Dedup test removed — was asserting Nats-Msg-Id-based dedup, but
 // JS dedup silently drops re-publishes from the stream which leaves
 // the sender hanging on its reply inbox. Will return once per-edge

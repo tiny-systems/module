@@ -311,38 +311,21 @@ func (t *JetStream) publishDurable(ctx context.Context, moduleName string, msg *
 	return nil, nil
 }
 
-// StartReceiver creates a durable consumer for this module and
-// dispatches each delivery to handler in its own goroutine.
+// StartReceiver runs the durable business-hop consumer for this module,
+// self-healing across broker restarts.
 func (t *JetStream) StartReceiver(ctx context.Context, handler runner.Handler) error {
 	subject := SubjectFor(t.moduleName)
-	consumer, err := t.js.CreateOrUpdateConsumer(ctx, EdgeStreamName, jetstream.ConsumerConfig{
-		Durable:       t.moduleName,
-		FilterSubject: subject,
-		DeliverPolicy: jetstream.DeliverAllPolicy,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       edgeAckWait,
-		MaxDeliver:    edgeMaxDeliver,
-		ReplayPolicy:  jetstream.ReplayInstantPolicy,
-	})
-	if err != nil {
-		return fmt.Errorf("jetstream consumer for %s: %w", subject, err)
-	}
-
-	cc, err := consumer.Consume(func(m jetstream.Msg) {
-		go t.handleIncoming(ctx, handler, m)
-	})
-	if err != nil {
-		return fmt.Errorf("jetstream consume on %s: %w", subject, err)
-	}
-
-	t.log.Info("jetstream transport: receiver subscribed",
-		"subject", subject,
-		"consumer", t.moduleName,
-	)
-
-	<-ctx.Done()
-	cc.Stop()
-	return nil
+	return t.superviseConsumer(ctx, "receiver", EdgeStreamName,
+		func(c context.Context) error { return EnsureEdgeStream(c, t.js) },
+		jetstream.ConsumerConfig{
+			Durable:       t.moduleName,
+			FilterSubject: subject,
+			DeliverPolicy: jetstream.DeliverAllPolicy,
+			AckPolicy:     jetstream.AckExplicitPolicy,
+			AckWait:       edgeAckWait,
+			MaxDeliver:    edgeMaxDeliver,
+			ReplayPolicy:  jetstream.ReplayInstantPolicy,
+		}, handler)
 }
 
 // StartSystemPortReceiver wires the per-pod consumer used for fan-out
@@ -357,35 +340,149 @@ func (t *JetStream) StartSystemPortReceiver(ctx context.Context, podName string,
 	}
 	subject := SubjectForSystem(t.moduleName)
 	consumerName := fmt.Sprintf("%s-sys-%s", t.moduleName, podName)
-	consumer, err := t.js.CreateOrUpdateConsumer(ctx, SysStreamName, jetstream.ConsumerConfig{
-		Durable:           consumerName,
-		FilterSubject:     subject,
-		DeliverPolicy:     jetstream.DeliverNewPolicy,
-		AckPolicy:         jetstream.AckExplicitPolicy,
-		AckWait:           edgeAckWait,
-		MaxDeliver:        edgeMaxDeliver,
-		ReplayPolicy:      jetstream.ReplayInstantPolicy,
-		InactiveThreshold: sysConsumerInactiveThreshold,
-	})
-	if err != nil {
-		return fmt.Errorf("jetstream sysport consumer for %s: %w", subject, err)
+	return t.superviseConsumer(ctx, "sysport receiver", SysStreamName,
+		func(c context.Context) error { return EnsureSysmsgStream(c, t.js) },
+		jetstream.ConsumerConfig{
+			Durable:           consumerName,
+			FilterSubject:     subject,
+			DeliverPolicy:     jetstream.DeliverNewPolicy,
+			AckPolicy:         jetstream.AckExplicitPolicy,
+			AckWait:           edgeAckWait,
+			MaxDeliver:        edgeMaxDeliver,
+			ReplayPolicy:      jetstream.ReplayInstantPolicy,
+			InactiveThreshold: sysConsumerInactiveThreshold,
+		}, handler)
+}
+
+// consumerHealthInterval is how often a running receiver re-checks that
+// its consumer still exists server-side. The Consume error handler
+// catches an active pull that hits a deleted consumer, but a broker that
+// restarts and loses its store can drop the stream+consumer silently
+// between pulls — this poll is the backstop that notices and rebuilds.
+const consumerHealthInterval = 20 * time.Second
+
+// superviseConsumer owns a durable consumer for the lifetime of ctx and
+// self-heals across broker restarts. A memory-blip or a NATS pod
+// reschedule can drop the stream and its consumers entirely; the
+// jetstream Consume loop cannot rebind to a stream that no longer
+// exists, so before this the only recovery was a module-pod restart
+// (which is exactly what bit the playground when a node drain bounced
+// NATS — _control delivery died until the module was kicked). Here, when
+// the stream/consumer goes missing we re-ensure the stream, re-create
+// the consumer, and resubscribe. Transient disconnects are left to the
+// nats.go client, which reconnects the underlying connection on its own.
+func (t *JetStream) superviseConsumer(
+	ctx context.Context,
+	label string,
+	streamName string,
+	ensureStream func(context.Context) error,
+	cfg jetstream.ConsumerConfig,
+	handler runner.Handler,
+) error {
+	const backoff = 2 * time.Second
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := ensureStream(ctx); err != nil {
+			t.log.Info("jetstream transport: "+label+" ensure stream failed, retrying", "err", err.Error())
+			if !sleepCtx(ctx, backoff) {
+				return nil
+			}
+			continue
+		}
+		consumer, err := t.js.CreateOrUpdateConsumer(ctx, streamName, cfg)
+		if err != nil {
+			t.log.Info("jetstream transport: "+label+" create consumer failed, retrying", "err", err.Error())
+			if !sleepCtx(ctx, backoff) {
+				return nil
+			}
+			continue
+		}
+
+		rebuild := make(chan struct{})
+		var once sync.Once
+		trigger := func(reason string, err error) {
+			once.Do(func() {
+				t.log.Info("jetstream transport: "+label+" lost, rebuilding", "reason", reason, "err", errString(err))
+				close(rebuild)
+			})
+		}
+
+		cc, err := consumer.Consume(
+			func(m jetstream.Msg) { go t.handleIncoming(ctx, handler, m) },
+			jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, cErr error) {
+				if isConsumerGone(cErr) {
+					trigger("consume error", cErr)
+				}
+			}),
+		)
+		if err != nil {
+			t.log.Info("jetstream transport: "+label+" consume failed, retrying", "err", err.Error())
+			if !sleepCtx(ctx, backoff) {
+				return nil
+			}
+			continue
+		}
+		t.log.Info("jetstream transport: "+label+" subscribed",
+			"subject", cfg.FilterSubject,
+			"consumer", cfg.Durable,
+		)
+
+		ticker := time.NewTicker(consumerHealthInterval)
+	watch:
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				cc.Stop()
+				return nil
+			case <-rebuild:
+				ticker.Stop()
+				cc.Stop()
+				break watch
+			case <-ticker.C:
+				if _, err := t.js.Consumer(ctx, streamName, cfg.Durable); isConsumerGone(err) {
+					ticker.Stop()
+					cc.Stop()
+					trigger("health check", err)
+					break watch
+				}
+			}
+		}
+		if !sleepCtx(ctx, backoff) {
+			return nil
+		}
 	}
+}
 
-	cc, err := consumer.Consume(func(m jetstream.Msg) {
-		go t.handleIncoming(ctx, handler, m)
-	})
-	if err != nil {
-		return fmt.Errorf("jetstream sysport consume on %s: %w", subject, err)
+// isConsumerGone reports whether err means the consumer or its stream no
+// longer exists server-side — the signal that a resubscribe won't help
+// and the whole thing must be rebuilt.
+func isConsumerGone(err error) bool {
+	if err == nil {
+		return false
 	}
+	return errors.Is(err, jetstream.ErrConsumerNotFound) ||
+		errors.Is(err, jetstream.ErrStreamNotFound) ||
+		errors.Is(err, jetstream.ErrConsumerDeleted)
+}
 
-	t.log.Info("jetstream transport: sysport receiver subscribed",
-		"subject", subject,
-		"consumer", consumerName,
-	)
+// sleepCtx sleeps for d, returning false if ctx is cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
 
-	<-ctx.Done()
-	cc.Stop()
-	return nil
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (t *JetStream) handleIncoming(parentCtx context.Context, handler runner.Handler, m jetstream.Msg) {
