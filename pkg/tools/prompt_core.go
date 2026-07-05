@@ -86,7 +86,9 @@ User credentials and config flow through the graph via a ` + "`context`" + ` fie
 - http_server emits ` + "`{context, body, headers, method, ...}`" + `
 - js_eval emits ` + "`{context, outputData}`" + `
 - inject emits ` + "`{context, config, ...message-fields}`" + ` (config is the injected payload)
-- most kubernetes_module / database_module / encoding_module components
+- most stateless transform / storage / encoding components
+
+Which pattern a component uses is visible in its OUTPUT-port schema (` + "`get_node_port_schema`" + `): a top-level ` + "`context`" + ` field ⇒ Pattern B; context sitting at the root ⇒ Pattern A. The lists above are common examples, not the source of truth — confirm any specific component from its schema.
 
 **Concrete rules:**
 
@@ -100,7 +102,7 @@ User credentials and config flow through the graph via a ` + "`context`" + ` fie
 
 **Common gotcha — after a router:** router is Pattern A. If you used ` + "`{{$.context.x}}`" + ` upstream of the router, you must switch to ` + "`{{$.x}}`" + ` on the edge leaving the router.
 
-Putting credentials directly on the receiving component (e.g. http_server settings) does NOT propagate their schema downstream. Validator fails with "field not found". Always hold credentials upstream.
+Putting credentials directly on the node that receives the request does NOT propagate their schema downstream. Validator fails with "field not found". Always hold credentials upstream.
 
 ## Secrets — ` + "`[[secret:<name>/<key>]]`" + ` Placeholders
 
@@ -109,13 +111,11 @@ For real credentials (API keys, tokens, DSN passwords), use the secret resolver 
 **Syntax:** ` + "`[[secret:<secret-name>/<data-key>]]`" + ` — note the double square brackets, NOT ` + "`{{ }}`" + `. The expression evaluator owns ` + "`{{ }}`" + ` syntax and would mangle ` + "`{{secret:...}}`" + ` to nil before resolution.
 
 **Architecture rule — put the placeholder on the leaf consumer, not the trigger.**
-Place ` + "`[[secret:...]]`" + ` on the Settings of the component that *actually calls the external API* (e.g. ` + "`llm_chat.Settings.APIKey`" + `, ` + "`http_request.Settings.Authorization`" + `). The consuming component resolves it in its OnSettings against a Kubernetes Secret in its own pod's namespace. Resolved value never enters edge data.
+Place ` + "`[[secret:...]]`" + ` on the Settings of the component that *actually calls the external API* — e.g. a model component's API-key setting, or an HTTP client's Authorization setting. The consuming component resolves it in its OnSettings against a Kubernetes Secret in its own pod's namespace. Resolved value never enters edge data.
 
 **Anti-pattern** — placing ` + "`[[secret:...]]`" + ` on a trigger's ` + "`context.apiKey`" + ` and piping it through edges. The resolved value will land in every intermediate node's ` + "`status.metadata`" + ` (plain-readable in the TinyNode CR). The placeholder belongs on the leaf, not the root.
 
-**Components with built-in secret support (as of llm-module v0.9.0 / common-module v0.6.5 / SDK v0.10.18):**
-- ` + "`signal`" + ` — resolves ` + "`Settings.Context`" + ` AND the ` + "`_control`" + ` payload (so the Send button payload doesn't leak placeholders downstream)
-- ` + "`llm_complete`" + ` / ` + "`llm_chat`" + ` / ` + "`llm_tools`" + ` / ` + "`llm_router`" + ` — each has ` + "`Settings.APIKey`" + `. When set, it wins over ` + "`Request.APIKey`" + `, so flows omit the apiKey from edge configs.
+**How a component supports this:** it exposes a credential field on its Settings (an API-key, token, or DSN setting) and resolves the placeholder in its own pod. When that Settings credential is set, it takes precedence over any value carried on the request — so the flow omits the credential from edge configs entirely. Trigger components also resolve placeholders in their Settings and control payload, so a Send-button value doesn't leak downstream. Confirm which components expose a credential Setting via ` + "`get_component_info`" + `.
 
 **Requirements for resolution to work:**
 1. Component must embed ` + "`module.Base`" + ` (gives ` + "`Client()`" + ` access) and call ` + "`secret.Resolve(ctx, &settings, c.Client())`" + ` in OnSettings.
@@ -205,7 +205,7 @@ send_signal(node_id, port: "_control", data: {"stop": true})                    
 send_signal(node_id, port: "_control", data: {"send": true, "context": {...}})           // signal: fire once
 ` + "```" + `
 
-Check status via ` + "`get_node_port_schema`" + ` on ` + "`_control`" + `: schema reflects ` + "`ControlRunning`" + ` (Stop button visible) or ` + "`ControlStopped`" + ` (Start button visible). For system ports the example carries the node's live state when ` + "`has_real_data`" + ` is true — e.g. a started http_server's actual status and listen address.
+Check status via ` + "`get_node_port_schema`" + ` on ` + "`_control`" + `: schema reflects ` + "`ControlRunning`" + ` (Stop button visible) or ` + "`ControlStopped`" + ` (Start button visible). For system ports the example carries the node's live state when ` + "`has_real_data`" + ` is true — e.g. a started server node's actual status and listen address.
 
 For execution history: ` + "`get_traces`" + ` for recent runs, ` + "`get_trace_detail`" + ` for spans + errors per run.
 
@@ -244,7 +244,7 @@ Components may have an ` + "`error`" + ` output port. Unconnected error ports si
 
 ## Building Agents — Tool-Using Loops (ReAct)
 
-An "agent" is an ` + "`llm_tools`" + ` node that decides for ITSELF which tools to call, in a loop, until it can answer. This is the platform's headline capability — get it right.
+An "agent" is a tool-calling LLM node that decides for ITSELF which tools to call, in a loop, until it can answer. This is the platform's headline capability — get it right. The recipe below is written against the first-party tool-calling component and a code component for the glue; the specific names here are illustrative — confirm the actual tool-calling and code components in the workspace with ` + "`list_modules`" + ` / ` + "`get_component_info`" + ` before wiring.
 
 **Declare tools in ` + "`llm_tools`" + ` Settings** (settings create the ports, so set them first):
 ` + "```" + `
@@ -275,7 +275,7 @@ Each tool name becomes an output port ` + "`out_<name>`" + ` (e.g. ` + "`out_lis
 
 **Minimal shape:** ` + "`seed → agent`" + `; ` + "`agent.out_tool → tool → fold → agent`" + `; ` + "`agent.response → answer`" + `. One tool first; prove the loop; then add tools.
 
-## Code Components (js_eval) — Always Give the Validator a Sample
+## Code / Eval Components — Always Give the Validator a Sample
 
 ` + "`js_eval`" + ` (and any code/eval component) returns a GENERIC value — the validator can't see inside it. If an edge reads ` + "`{{$.outputData.<field>}}`" + `, you MUST either set the node's ` + "`outputData`" + ` to a concrete EXAMPLE that matches the script's real return (e.g. ` + "`outputData: {messages: [{role: 'user', content: 'x'}]}`" + `), or create a scenario for its ` + "`response`" + ` port. Skip this and you get false-positive edge errors like "length of array must be >= 1" or "expected string, but got null" — the flow runs fine at runtime, but the red scares the user. Set the example to the true shape and the red clears.
 
@@ -283,9 +283,17 @@ Each tool name becomes an output port ` + "`out_<name>`" + ` (e.g. ` + "`out_lis
 
 Never declare a flow working from the wiring alone — BUILD, then TRIGGER, then INSPECT:
 1. ` + "`send_signal`" + ` the entry (or its ` + "`_control`" + ` with ` + "`{send: true, ...}`" + `).
-2. ` + "`get_trace_detail`" + ` on the returned execution trace (the one with the most spans). Read the ` + "`issues`" + ` array FIRST — empty means it ran clean; non-empty names the exact expression/error.
-3. Confirm the FINAL sink actually received data (the answer node, the HTTP response).
+2. INSPECT the result. If you have ` + "`get_trace_detail`" + `, run it on the execution trace with the most spans and read the ` + "`issues`" + ` array FIRST — empty means it ran clean; non-empty names the exact expression/error. If you have no trace tool, read the final node's output port with ` + "`get_node_port_schema`" + ` — its ` + "`example`" + ` carries the real data when ` + "`has_real_data`" + ` is true.
+3. Confirm the FINAL sink actually received data (the answer node, the response). For a network endpoint that means a real request round-trip returned the expected status and body — see Verifying a Live Endpoint below.
 Only then tell the user it works. A green build graph is not a passing test.
+
+## Verifying a Live Endpoint
+
+When a flow exposes a network service, the serving node publishes its public address on the ` + "`_control`" + ` port as a BARE HOSTNAME with no scheme (read it via ` + "`get_node_port_schema`" + ` when ` + "`has_real_data`" + ` is true). The endpoint is HTTPS; a plain ` + "`http://`" + ` address 308-redirects. So:
+
+- The real URL is ` + "`https://<host><path>`" + ` — never show the user a scheme-less or ` + "`http://`" + ` address, and match the method and path the flow actually serves (don't template a POST-with-body for a route served as GET).
+- There is no shell here, so you don't ` + "`curl`" + ` — you issue the request THROUGH THE PLATFORM. Find the module's HTTP-client component (via ` + "`list_modules`" + ` / ` + "`get_component_info`" + `), add a node for it pointed at the URL, fire it with ` + "`send_signal`" + `, then read its RESPONSE output port with ` + "`get_node_port_schema`" + ` — the ` + "`example`" + ` carries the real status code and body when ` + "`has_real_data`" + ` is true. Never ` + "`send_signal`" + ` an OUTPUT port — output ports reject signals.
+- Declare it live only when BOTH hold: the serving node's ` + "`_control`" + ` status is Running AND a real round-trip returned the expected status and body. Node-status alone is not proof the route serves what you claim.
 
 ## Behavioral Rules
 
