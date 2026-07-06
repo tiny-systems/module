@@ -74,7 +74,7 @@ Use ` + "`{{expression}}`" + ` for dynamic values in edge configurations:
 
 Some ports carry data as a JSON **string** rather than structured fields — an HTTP request/response body is the common case (its ` + "`body`" + ` is typed ` + "`string`" + `). Edge expressions move and reshape values but cannot parse or serialize JSON, so bridge the two INSIDE a code/eval component's script:
 
-- **String → fields:** pass the raw string into the script unchanged and ` + "`JSON.parse`" + ` it there.
+- **String → fields:** map the raw string onto the code component's input; the script then receives THAT STRING as its argument, so parse the argument itself (` + "`JSON.parse(arg)`" + `). Do NOT index a sub-field off it (` + "`arg.body`" + ` etc.) — the mapping put the whole string there, not an object, so a sub-field is ` + "`undefined`" + ` and ` + "`JSON.parse(undefined)`" + ` throws at runtime.
 - **Fields → string:** have the script ` + "`JSON.stringify`" + ` its result and RETURN a string, and set its output example to a string so the port's schema is ` + "`string`" + ` — then a plain field-reference edge carries it into the string port.
 
 The classic failure is bridging them on the edge: a structured value into a string-typed port fails validation with ` + "`expected string, but got object`" + ` and no expression fixes it — do the parse/serialize in the script. Confirm a component's exact port and setting names with ` + "`get_component_info`" + `.
@@ -297,6 +297,8 @@ Never declare a flow working from the wiring alone — BUILD, then TRIGGER, then
 2. INSPECT the result. If you have ` + "`get_trace_detail`" + `, run it on the execution trace with the most spans and read the ` + "`issues`" + ` array FIRST — empty means it ran clean; non-empty names the exact expression/error. If you have no trace tool, read the final node's output port with ` + "`get_node_port_schema`" + ` — its ` + "`example`" + ` carries the real data when ` + "`has_real_data`" + ` is true.
 3. Confirm the FINAL sink actually received data (the answer node, the response). For a network endpoint that means a real request round-trip returned the expected status and body — see Verifying a Live Endpoint below.
 Only then tell the user it works. A green build graph is not a passing test.
+
+**A test node you built but never read proves NOTHING.** If you fired a probe (a request client, a signal), you MUST read its response and confirm BOTH a success status AND the expected body before you claim success. A non-2xx or an error body means a real failure — most often a ` + "`5xx`" + ` is your own logic throwing at runtime (e.g. a script that parsed or indexed a value that wasn't there). When that happens, DON'T report success: read the failing component's error, fix the cause, and re-run the same probe until it returns the expected result. Reporting "it's live" off an unchecked probe is the worst failure mode — the user hits an endpoint that 500s on every call.
 
 ## Verifying a Live Endpoint
 
