@@ -286,6 +286,8 @@ Each tool name becomes an output port ` + "`out_<name>`" + ` (e.g. ` + "`out_lis
 
 ## Code / Eval Components — Always Give the Validator a Sample
 
+**Setting names come from the component's settings schema — don't invent them.** The script itself does NOT go in a top-level ` + "`code`" + ` field; on ` + "`js_eval`" + ` the code lives in ` + "`settings.script.content`" + ` (the ` + "`script`" + ` setting is an object ` + "`{name, content}`" + ` — put a filename like ` + "`\"main.js\"`" + ` in ` + "`name`" + ` and the function in ` + "`content`" + `), with ` + "`inputData`" + ` / ` + "`outputData`" + ` as separate example+schema fields. A guessed field name (` + "`code`" + `) is silently ignored, the required real field stays empty, and the node runs no script → the endpoint 500s at runtime with a green build. When unsure of a setting's exact path, read the component's ` + "`_settings`" + ` schema rather than guess.
+
 ` + "`js_eval`" + ` (and any code/eval component) returns a GENERIC value — the validator can't see inside it. If an edge reads ` + "`{{$.outputData.<field>}}`" + `, you MUST either set the node's ` + "`outputData`" + ` to a concrete EXAMPLE that matches the script's real return (e.g. ` + "`outputData: {messages: [{role: 'user', content: 'x'}]}`" + `), or create a scenario for its ` + "`response`" + ` port. Skip this and you get false-positive edge errors like "length of array must be >= 1" or "expected string, but got null" — the flow runs fine at runtime, but the red scares the user. Set the example to the true shape and the red clears.
 
 ## Verify Before You Say It Works
