@@ -4,7 +4,72 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
+
+// unknownSettings reports node settings whose names don't exist on the
+// component's _settings schema. A component silently ignores settings it
+// doesn't declare, so a mis-named field (the classic: a script dropped in
+// `code` when the component keeps it elsewhere) does nothing and the node
+// runs as a no-op — a green build that fails at runtime. Returns "" when
+// everything matches, when there are no settings, or when the schema can't
+// be resolved to a closed set of named fields (open/opaque schemas are
+// never guess-flagged, to avoid false positives).
+func unknownSettings(alias string, settings map[string]interface{}, schemaBytes []byte) string {
+	if len(settings) == 0 || len(schemaBytes) == 0 {
+		return ""
+	}
+	props := settingsProps(schemaBytes)
+	if len(props) == 0 {
+		return ""
+	}
+	var unknown []string
+	for k := range settings {
+		if _, ok := props[k]; !ok {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return ""
+	}
+	sort.Strings(unknown)
+	valid := make([]string, 0, len(props))
+	for k := range props {
+		valid = append(valid, k)
+	}
+	sort.Strings(valid)
+	return fmt.Sprintf(
+		"node '%s' sets unknown setting(s) %v — the component ignores settings it doesn't declare, so those fields silently do nothing. Valid settings: %v. Use these exact names (get_component_info reports the `settings` schema).",
+		alias, unknown, valid,
+	)
+}
+
+// settingsProps resolves a _settings JSON schema to its top-level setting
+// properties (name → sub-schema), following a single $ref into $defs to the
+// Settings object. Returns nil for open schemas (additionalProperties not
+// false) so callers skip the unknown-field check on those.
+func settingsProps(schemaBytes []byte) map[string]interface{} {
+	var root map[string]interface{}
+	if err := json.Unmarshal(schemaBytes, &root); err != nil {
+		return nil
+	}
+	node := root
+	if ref, ok := root["$ref"].(string); ok {
+		name := strings.TrimPrefix(ref, "#/$defs/")
+		if defs, ok := root["$defs"].(map[string]interface{}); ok {
+			if t, ok := defs[name].(map[string]interface{}); ok {
+				node = t
+			}
+		}
+	}
+	if ap, ok := node["additionalProperties"]; ok {
+		if b, isBool := ap.(bool); !isBool || b {
+			return nil // open schema — extra keys are allowed
+		}
+	}
+	props, _ := node["properties"].(map[string]interface{})
+	return props
+}
 
 // portSchemaBytes returns the raw JSON schema bytes for the named port
 // on the given component, or nil if the catalog didn't carry it. Input

@@ -324,3 +324,87 @@ func TestBuildFlow_NoRejectForNonConfigurableFields(t *testing.T) {
 		t.Errorf("expected AddNode to be called once, got %d", adder.calls)
 	}
 }
+
+// TestBuildFlow_RejectsUnknownSetting pins the anti-guessing check: a
+// setting name the component doesn't declare (the classic "script in a
+// `code` field") is rejected before any cluster mutation, and the error
+// names the offending key plus the valid ones.
+func TestBuildFlow_RejectsUnknownSetting(t *testing.T) {
+	adder := &countingNodeAdder{}
+	catalog := &mockModuleCatalog{components: map[string]ComponentInfo{
+		"ticker": {
+			Name:        "ticker",
+			InputPorts:  []string{"_settings"},
+			OutputPorts: []string{"out"},
+			InputPortDetails: []PortDetail{
+				{Name: "_settings", Schema: settingsSchemaPlain()},
+			},
+		},
+	}}
+	tool := NewBuildFlowTool()
+
+	res := tool.Execute(context.Background(), ExecutionContext{
+		ProjectName:   "p1",
+		FlowName:      "f1",
+		ModuleCatalog: catalog,
+		NodeAdder:     adder,
+		EdgeAdder:     &countingEdgeAdder{},
+	}, map[string]interface{}{
+		"nodes": []interface{}{
+			map[string]interface{}{
+				"alias":     "tick",
+				"component": "ticker",
+				"module":    "tinysystems/test-module",
+				"settings":  map[string]interface{}{"code": "oops"}, // schema only declares `delay`
+			},
+		},
+	})
+
+	if res.Success {
+		t.Fatalf("expected rejection for unknown setting, got success: %v", res.Output)
+	}
+	if !strings.Contains(res.Error, "code") || !strings.Contains(res.Error, "delay") {
+		t.Errorf("error should name the unknown key 'code' and the valid 'delay'; got: %s", res.Error)
+	}
+	if adder.calls != 0 {
+		t.Errorf("rejected build_flow must not call AddNode (called %d times)", adder.calls)
+	}
+}
+
+// TestBuildFlow_AcceptsKnownSetting is the happy path for the same check:
+// a declared setting name passes the unknown-field gate.
+func TestBuildFlow_AcceptsKnownSetting(t *testing.T) {
+	adder := &countingNodeAdder{}
+	catalog := &mockModuleCatalog{components: map[string]ComponentInfo{
+		"ticker": {
+			Name:        "ticker",
+			InputPorts:  []string{"_settings"},
+			OutputPorts: []string{"out"},
+			InputPortDetails: []PortDetail{
+				{Name: "_settings", Schema: settingsSchemaPlain()},
+			},
+		},
+	}}
+	tool := NewBuildFlowTool()
+
+	res := tool.Execute(context.Background(), ExecutionContext{
+		ProjectName:   "p1",
+		FlowName:      "f1",
+		ModuleCatalog: catalog,
+		NodeAdder:     adder,
+		EdgeAdder:     &countingEdgeAdder{},
+	}, map[string]interface{}{
+		"nodes": []interface{}{
+			map[string]interface{}{
+				"alias":     "tick",
+				"component": "ticker",
+				"module":    "tinysystems/test-module",
+				"settings":  map[string]interface{}{"delay": 1000},
+			},
+		},
+	})
+
+	if !res.Success {
+		t.Fatalf("known setting 'delay' must pass the unknown-field gate; got error: %s", res.Error)
+	}
+}

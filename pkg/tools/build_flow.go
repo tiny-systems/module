@@ -294,6 +294,11 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 	// its schema in settings_schema / edge.schema. Reject up front
 	// so the model sees the gap at authoring time, not as a red edge
 	// after the fact.
+	// Collect EVERY issue across all nodes and edges before failing, so a
+	// large build reports all its problems in one shot. Failing on the
+	// first bad element made the author fix-one / retry / fail-on-the-next
+	// over and over — a 20-node build could round-trip many times.
+	var issues []string
 	for _, n := range nodes {
 		comp := componentByAlias[n.Alias]
 		if comp == nil || len(n.Settings) == 0 {
@@ -301,12 +306,11 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 		settingsSchema := portSchemaBytes(comp, "_settings", true)
 		configurable := configurableFieldsIn(settingsSchema)
-		missing := requireSchemaForData(n.Settings, n.SettingsSchema, configurable)
-		if len(missing) > 0 {
-			return ToolResult{
-				Success: false,
-				Error:   schemaRequiredError("node", n.Alias, missing).Error(),
-			}
+		if missing := requireSchemaForData(n.Settings, n.SettingsSchema, configurable); len(missing) > 0 {
+			issues = append(issues, schemaRequiredError("node", n.Alias, missing).Error())
+		}
+		if u := unknownSettings(n.Alias, n.Settings, settingsSchema); u != "" {
+			issues = append(issues, u)
 		}
 	}
 	for i, e := range edges {
@@ -318,12 +322,15 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		// component — look it up in InputPortDetails, not output.
 		targetSchema := portSchemaBytes(target, e.ToPort, true)
 		configurable := configurableFieldsIn(targetSchema)
-		missing := requireSchemaForData(e.Configuration, e.Schema, configurable)
-		if len(missing) > 0 {
-			return ToolResult{
-				Success: false,
-				Error:   schemaRequiredError("edge", fmt.Sprintf("edges[%d] (%s → %s)", i, e.From, e.To), missing).Error(),
-			}
+		if missing := requireSchemaForData(e.Configuration, e.Schema, configurable); len(missing) > 0 {
+			issues = append(issues, schemaRequiredError("edge", fmt.Sprintf("edges[%d] (%s → %s)", i, e.From, e.To), missing).Error())
+		}
+	}
+	if len(issues) > 0 {
+		return ToolResult{
+			Success: false,
+			Error: fmt.Sprintf("build_flow found %d issue(s) — fix all of these, then resend the whole call:\n- %s",
+				len(issues), strings.Join(issues, "\n- ")),
 		}
 	}
 
