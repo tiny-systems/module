@@ -72,12 +72,12 @@ Use ` + "`{{expression}}`" + ` for dynamic values in edge configurations:
 
 ### JSON string boundaries
 
-Some ports carry a JSON **string**, not structured data — most notably an HTTP request/response ` + "`body`" + ` (typed ` + "`string`" + `). Expressions cannot parse or build that JSON; handle the conversion inside a code/eval component (confirm its ports with ` + "`get_component_info`" + `):
+Some ports carry data as a JSON **string** rather than structured fields — an HTTP request/response body is the common case (its ` + "`body`" + ` is typed ` + "`string`" + `). Edge expressions move and reshape values but cannot parse or serialize JSON, so bridge the two INSIDE a code/eval component's script:
 
-- **Incoming** (string → fields): pass the raw string in and parse it in the script — e.g. map ` + "`inputData: \"{{$.body}}\"`" + `, then ` + "`const data = JSON.parse(inputData)`" + ` at the top of the function.
-- **Outgoing** (fields → string): have the script RETURN a string (` + "`return JSON.stringify(result)`" + `), set the component's output example to a string so its schema is ` + "`string`" + `, then map it straight through: ` + "`body: \"{{$.outputData}}\"`" + ` (string → string, no conversion).
+- **String → fields:** pass the raw string into the script unchanged and ` + "`JSON.parse`" + ` it there.
+- **Fields → string:** have the script ` + "`JSON.stringify`" + ` its result and RETURN a string, and set its output example to a string so the port's schema is ` + "`string`" + ` — then a plain field-reference edge carries it into the string port.
 
-The classic failure is trying to bridge the two with an edge expression: an object → string ` + "`body`" + ` edge fails validation with ` + "`expected string, but got object`" + `, and NO expression fixes it — move the parse/stringify into the script.
+The classic failure is bridging them on the edge: a structured value into a string-typed port fails validation with ` + "`expected string, but got object`" + ` and no expression fixes it — do the parse/serialize in the script. Confirm a component's exact port and setting names with ` + "`get_component_info`" + `.
 
 ## Context Passthrough — Read this before wiring credentials
 
@@ -286,7 +286,7 @@ Each tool name becomes an output port ` + "`out_<name>`" + ` (e.g. ` + "`out_lis
 
 ## Code / Eval Components — Always Give the Validator a Sample
 
-**Setting names come from the component's settings schema — don't invent them.** The script itself does NOT go in a top-level ` + "`code`" + ` field; on ` + "`js_eval`" + ` the code lives in ` + "`settings.script.content`" + ` (the ` + "`script`" + ` setting is an object ` + "`{name, content}`" + ` — put a filename like ` + "`\"main.js\"`" + ` in ` + "`name`" + ` and the function in ` + "`content`" + `), with ` + "`inputData`" + ` / ` + "`outputData`" + ` as separate example+schema fields. A guessed field name (` + "`code`" + `) is silently ignored, the required real field stays empty, and the node runs no script → the endpoint 500s at runtime with a green build. When unsure of a setting's exact path, read the component's ` + "`_settings`" + ` schema rather than guess.
+**Setting field names come from the component's own settings schema — don't invent them.** A plausible-but-wrong name (e.g. dropping a script into a top-level ` + "`code`" + ` field a component doesn't have) is silently ignored: the real required field stays empty and the node runs as a no-op — a green build that fails at runtime. Read the exact setting paths from the component's ` + "`_settings`" + ` schema (` + "`get_component_info`" + ` reports it) before you set them, rather than guessing.
 
 ` + "`js_eval`" + ` (and any code/eval component) returns a GENERIC value — the validator can't see inside it. If an edge reads ` + "`{{$.outputData.<field>}}`" + `, you MUST either set the node's ` + "`outputData`" + ` to a concrete EXAMPLE that matches the script's real return (e.g. ` + "`outputData: {messages: [{role: 'user', content: 'x'}]}`" + `), or create a scenario for its ` + "`response`" + ` port. Skip this and you get false-positive edge errors like "length of array must be >= 1" or "expected string, but got null" — the flow runs fine at runtime, but the red scares the user. Set the example to the true shape and the red clears.
 

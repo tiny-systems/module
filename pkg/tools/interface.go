@@ -140,6 +140,11 @@ type ComponentInfo struct {
 	// Detailed port info with schemas — populated by GetModule, optional for ListModules
 	InputPortDetails  []PortDetail `json:"input_port_details,omitempty"`
 	OutputPortDetails []PortDetail `json:"output_port_details,omitempty"`
+	// SettingsSchema is the component's _settings port schema — it names
+	// the configurable setting fields (their exact paths + types) so
+	// callers set them by the real names instead of guessing. The
+	// _settings port itself is not wireable; this is config metadata.
+	SettingsSchema json.RawMessage `json:"settings_schema,omitempty"`
 }
 
 // ModuleInfo contains module metadata with its components
