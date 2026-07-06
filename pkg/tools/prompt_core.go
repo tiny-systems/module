@@ -68,7 +68,16 @@ Use ` + "`{{expression}}`" + ` for dynamic values in edge configurations:
 - **Math:** ` + "`abs`" + ` ` + "`ceil`" + ` ` + "`floor`" + ` ` + "`round`" + ` ` + "`sqrt`" + `. Arithmetic: ` + "`+`" + ` ` + "`-`" + ` ` + "`*`" + ` ` + "`/`" + ` ` + "`%`" + ` ` + "`**`" + `.
 - **Time:** ` + "`now()`" + `, ` + "`RFC3339(t)`" + `.
 
-**NOT supported:** Handlebars blocks (` + "`{{#each}}`" + `, ` + "`{{#if}}`" + `).
+**NOT supported:** Handlebars blocks (` + "`{{#each}}`" + `, ` + "`{{#if}}`" + `); pipe filters (` + "`{{$.x | foo}}`" + ` — there is NO ` + "`|`" + ` operator; it errors with ` + "`'foo' is not a constant`" + `); and JSON parse/serialize (no ` + "`fromjson`" + `/` + "`tojson`" + `/` + "`json`" + `). Expressions move and reshape values — they do NOT convert between a JSON string and structured data. Do that inside a code/eval component (see JSON string boundaries below).
+
+### JSON string boundaries
+
+Some ports carry a JSON **string**, not structured data — most notably an HTTP request/response ` + "`body`" + ` (typed ` + "`string`" + `). Expressions cannot parse or build that JSON; handle the conversion inside a code/eval component (confirm its ports with ` + "`get_component_info`" + `):
+
+- **Incoming** (string → fields): pass the raw string in and parse it in the script — e.g. map ` + "`inputData: \"{{$.body}}\"`" + `, then ` + "`const data = JSON.parse(inputData)`" + ` at the top of the function.
+- **Outgoing** (fields → string): have the script RETURN a string (` + "`return JSON.stringify(result)`" + `), set the component's output example to a string so its schema is ` + "`string`" + `, then map it straight through: ` + "`body: \"{{$.outputData}}\"`" + ` (string → string, no conversion).
+
+The classic failure is trying to bridge the two with an edge expression: an object → string ` + "`body`" + ` edge fails validation with ` + "`expected string, but got object`" + `, and NO expression fixes it — move the parse/stringify into the script.
 
 ## Context Passthrough — Read this before wiring credentials
 
