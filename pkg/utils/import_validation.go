@@ -207,11 +207,15 @@ func validateImportEdge(index int, elem map[string]interface{}, flowSet map[stri
 		return
 	}
 
-	// Configuration — required for data to flow through the edge.
-	// Without config, the target port receives its zero-value struct (source data is ignored).
+	// Configuration is how an edge remaps source fields into the target
+	// port. Plenty of legitimate edges carry none — error→response and
+	// router-default forwarding edges pass the message through as-is — and
+	// an already-running project exports exactly what it has. So a missing
+	// configuration is advisory, NOT a blocker: warn (it may indicate a
+	// forgotten mapping) but never fail a real import round-trip over it.
 	config := edgeData["configuration"]
 	if config == nil {
-		errors = append(errors, prefix+": missing data.configuration — without config the target port receives its default value, not the source data")
+		warnings = append(warnings, prefix+": no data.configuration — the target port receives its default value unless the source passes through (expected for forwarding/error edges)")
 	} else {
 		e, w := validateConfigExpressions(prefix, config)
 		errors = append(errors, e...)
@@ -233,10 +237,12 @@ func validateImportEdge(index int, elem map[string]interface{}, flowSet map[stri
 		}
 	}
 
-	// Validate configurable fields: if edge maps structured data into a field
-	// whose $def is configurable but bare, the faker/validator won't know the types.
+	// If an edge maps structured data into a configurable-but-bare $def, the
+	// faker can't synthesise correct types for simulation. That degrades the
+	// design-time preview, not the running flow — and real projects export
+	// this shape routinely — so it's advisory, not a blocker.
 	if config != nil && target != "" && targetHandle != "" {
-		errors = append(errors, validateConfigurableFieldSchemas(prefix, config, target, targetHandle, nodeHandleSchemas)...)
+		warnings = append(warnings, validateConfigurableFieldSchemas(prefix, config, target, targetHandle, nodeHandleSchemas)...)
 	}
 
 	return

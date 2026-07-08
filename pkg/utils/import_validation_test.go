@@ -5,9 +5,50 @@ import (
 	"testing"
 )
 
+func TestValidateProjectImport_ForwardingEdgeWithNoConfigIsNotBlocked(t *testing.T) {
+	// An error→response / router-default forwarding edge legitimately carries
+	// no data.configuration. A running project exports exactly this, so import
+	// must NOT block on it — warn at most. This is the export→import round-trip
+	// a real project (e.g. My IP Address) depends on.
+	data := &ProjectExport{
+		TinyFlows: []ExportFlow{{ResourceName: "flow1", Name: "Flow 1"}},
+		Elements: []map[string]interface{}{
+			{
+				"id": "node-a", "type": TinyNodeType, "flow": "flow1",
+				"data": map[string]interface{}{
+					"component": "http_client", "module": "tinysystems/http-module-v0",
+					"handles": []interface{}{},
+				},
+			},
+			{
+				"id": "node-b", "type": TinyNodeType, "flow": "flow1",
+				"data": map[string]interface{}{
+					"component": "http_server", "module": "tinysystems/http-module-v0",
+					"handles": []interface{}{},
+				},
+			},
+			{
+				"id": "edge1", "type": TinyEdgeType, "flow": "flow1",
+				"source": "node-a", "sourceHandle": "error",
+				"target": "node-b", "targetHandle": "response",
+				"data": map[string]interface{}{}, // no configuration — pure forwarding
+			},
+		},
+	}
+
+	errors, _ := ValidateProjectImport(data)
+	for _, e := range errors {
+		if strings.Contains(e, "configuration") {
+			t.Errorf("forwarding edge with no config must be advisory, not a blocking error: %v", e)
+		}
+	}
+}
+
 func TestValidateProjectImport_BareConfigurableWithStructuredEdgeConfig(t *testing.T) {
 	// Edge maps structured object into a configurable field, but target handle's
-	// $def is bare (no properties). Validation should catch this.
+	// $def is bare (no properties). This degrades faker/simulation fidelity but
+	// does NOT break the running flow, so it must surface as a WARNING — never a
+	// blocking error, or a real project's export→import round-trip fails.
 	data := &ProjectExport{
 		TinyFlows: []ExportFlow{{ResourceName: "flow1", Name: "Flow 1"}},
 		Elements: []map[string]interface{}{
@@ -80,18 +121,24 @@ func TestValidateProjectImport_BareConfigurableWithStructuredEdgeConfig(t *testi
 		},
 	}
 
-	errors, _ := ValidateProjectImport(data)
+	errors, warnings := ValidateProjectImport(data)
 
-	// Should have an error about bare configurable Context receiving structured data
+	// Must surface as a WARNING about the bare configurable def...
 	found := false
-	for _, e := range errors {
-		if strings.Contains(e, "configurable") && strings.Contains(e, "no properties") {
+	for _, w := range warnings {
+		if strings.Contains(w, "configurable") && strings.Contains(w, "no properties") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected error about bare configurable def receiving structured data, got errors: %v", errors)
+		t.Errorf("expected warning about bare configurable def receiving structured data, got warnings: %v", warnings)
+	}
+	// ...and must NOT be a blocking error (that would break the import round-trip).
+	for _, e := range errors {
+		if strings.Contains(e, "configurable") && strings.Contains(e, "no properties") {
+			t.Errorf("bare configurable def must be advisory, not a blocking error: %v", e)
+		}
 	}
 }
 
