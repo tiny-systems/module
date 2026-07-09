@@ -31,6 +31,15 @@ spec:
           {{- toYaml .Values.securityContext | nindent 12 }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
+        {{- if .Values.natsURL }}
+        env:
+          # NATS JetStream KV persistence: traces are mirrored to this
+          # broker and rehydrated on restart. Unset = RAM-only (history
+          # lost on restart). The install job points this at the same
+          # per-namespace tinysystems-nats broker the modules use.
+          - name: NATS_URL
+            value: {{ .Values.natsURL | quote }}
+        {{- end }}
         ports:
         - name: otlp-grpc
           containerPort: {{ .Values.service.targetPort }}

@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/tiny-systems/otel-collector
   pullPolicy: Always
-  tag: "0.5.3"
+  tag: "0.6.0"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -58,3 +58,7 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# NATS JetStream KV endpoint for trace persistence across restarts.
+# Empty = RAM-only. Set by the install job to the per-namespace broker.
+natsURL: ""
