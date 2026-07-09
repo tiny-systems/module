@@ -454,6 +454,24 @@ entries:
   tinysystems-nats:
   - apiVersion: v2
     appVersion: 2.14.2
+    created: "2026-07-09T15:44:46.548194851Z"
+    dependencies:
+    - name: nats
+      repository: https://nats-io.github.io/k8s/helm/charts/
+      version: 2.14.2
+    description: Per-namespace NATS JetStream broker for the Tiny Systems runtime.
+      Cross-module messaging and durable execution ride this broker; one release per
+      namespace, shared by every module installed there. Installed automatically by
+      the platform's module-install job (and by the generated desktop install commands)
+      alongside the CRD and OTEL releases — clients never configure it by hand.
+    digest: 5d89c31777844caeb51b6acbdf3eac662b39875b13132d1211d51c90cca866d0
+    name: tinysystems-nats
+    type: application
+    urls:
+    - https://github.com/tiny-systems/module/releases/download/tinysystems-nats-0.1.1/tinysystems-nats-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
+    appVersion: 2.14.2
     created: "2026-07-09T07:31:45.594261776Z"
     dependencies:
     - name: nats
@@ -1436,4 +1454,4 @@ entries:
     urls:
     - https://github.com/tiny-systems/module/releases/download/tinysystems-otel-collector-0.1.0/tinysystems-otel-collector-0.1.0.tgz
     version: 0.1.0
-generated: "2026-07-09T11:33:13.097571335Z"
+generated: "2026-07-09T15:44:46.548399795Z"
