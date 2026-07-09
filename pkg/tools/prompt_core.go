@@ -220,7 +220,12 @@ For execution history: ` + "`get_traces`" + ` for recent runs, ` + "`get_trace_d
 
 ## Dashboard Widgets
 
-Flagging a node's ` + "`_control`" + ` form as a dashboard widget (via the dashboard tool your MCP server exposes — ` + "`set_dashboard`" + ` or ` + "`set_node_dashboard`" + `) is the user-facing surface of a flow. Use widgets for values the user must provide (build with a placeholder first; don't block on a credential) and for running services the user should see (live status, exposed address). Prefer a widget over asking for values in chat.
+A node's ` + "`_control`" + ` form becomes a dashboard widget via the dashboard tool your MCP server exposes (` + "`set_dashboard`" + ` or ` + "`set_node_dashboard`" + `). This is the user-facing surface of a flow — **a flow the user cannot run or see is not finished.** After you build and verify, expose its self-serve surface. The rule is general: any node with a ` + "`_control`" + ` port that the user would actually touch gets a widget —
+- the **trigger** (` + "`signal`" + ` / ` + "`cron`" + ` / ` + "`ticker`" + `) → a Send/Start button so the user can run the flow themselves;
+- the **result** (a sink like ` + "`debug`" + `, or the final output node) → a panel so the user sees what came back;
+- any **value the user must provide** (token, channel, cron expr) → an input form (build with a placeholder first; don't block on a credential).
+
+Do NOT widget-ify intermediate plumbing (routers, transforms, HTTP calls) — only the nodes the user interacts with. Always prefer a widget over asking for values in chat.
 
 **A widget renders as a form only if the node's ` + "`settings.context`" + ` has a matching configurable schema.** Without it the widget shows "Object is empty". The schema must use the ` + "`$defs`" + ` / ` + "`$ref`" + ` shape with ` + "`configurable: true`" + ` on the Context def:
 
@@ -296,11 +301,12 @@ Each tool name becomes an output port ` + "`out_<name>`" + ` (e.g. ` + "`out_lis
 
 ## Verify Before You Say It Works
 
-Never declare a flow working from the wiring alone — BUILD, then TRIGGER, then INSPECT:
+Never declare a flow working from the wiring alone — BUILD, TRIGGER, INSPECT, then EXPOSE:
 1. ` + "`send_signal`" + ` the entry (or its ` + "`_control`" + ` with ` + "`{send: true, ...}`" + `).
 2. INSPECT the result. If you have ` + "`get_trace_detail`" + `, run it on the execution trace with the most spans and read the ` + "`issues`" + ` array FIRST — empty means it ran clean; non-empty names the exact expression/error. If you have no trace tool, read the final node's output port with ` + "`get_node_port_schema`" + ` — its ` + "`example`" + ` carries the real data when ` + "`has_real_data`" + ` is true.
 3. Confirm the FINAL sink actually received data (the answer node, the response). For a network endpoint that means a real request round-trip returned the expected status and body — see Verifying a Live Endpoint below.
-Only then tell the user it works. A green build graph is not a passing test.
+4. EXPOSE the self-serve surface on the dashboard (see Dashboard Widgets): the **trigger** as a Send/Start button so the user can run it, the **result** node as an output panel so the user sees what came back, and any **required input** as a form. A flow with no widgets is one the user can look at but cannot use.
+Only then tell the user it works. A green build graph is not a passing test — and a flow the user can't run or see isn't done.
 
 **A test node you built but never read proves NOTHING.** If you fired a probe (a request client, a signal), you MUST read its response and confirm BOTH a success status AND the expected body before you claim success. A non-2xx or an error body means a real failure — most often a ` + "`5xx`" + ` is your own logic throwing at runtime (e.g. a script that parsed or indexed a value that wasn't there). When that happens, DON'T report success: read the failing component's error, fix the cause, and re-run the same probe until it returns the expected result. Reporting "it's live" off an unchecked probe is the worst failure mode — the user hits an endpoint that 500s on every call.
 
