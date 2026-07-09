@@ -44,3 +44,31 @@ func TestNamespaceRelease(t *testing.T) {
 		t.Errorf("Release = %q, want %q", Release(), "rel")
 	}
 }
+
+func TestPostgresDSN(t *testing.T) {
+	// Missing creds → clear error (bundle disabled / outside chart).
+	t.Setenv("RELEASE_NAME", "rel")
+	if _, err := PostgresDSN("pgvector"); err == nil {
+		t.Fatal("expected error without credential env")
+	}
+
+	// Full env → DSN with deterministic host + escaped password.
+	t.Setenv("BUNDLE_PGVECTOR_USER", "tinysystems")
+	t.Setenv("BUNDLE_PGVECTOR_PASSWORD", "p@ss/w:rd")
+	t.Setenv("BUNDLE_PGVECTOR_DB", "tinysystems")
+	dsn, err := PostgresDSN("pgvector")
+	if err != nil {
+		t.Fatalf("PostgresDSN: %v", err)
+	}
+	want := "postgres://tinysystems:p%40ss%2Fw%3Ard@rel-pgvector:5432/tinysystems?sslmode=disable"
+	if dsn != want {
+		t.Errorf("dsn = %q, want %q", dsn, want)
+	}
+
+	// Explicit host override wins.
+	t.Setenv("BUNDLE_PGVECTOR_HOST", "external-pg.example.com")
+	dsn, _ = PostgresDSN("pgvector")
+	if dsn != "postgres://tinysystems:p%40ss%2Fw%3Ard@external-pg.example.com:5432/tinysystems?sslmode=disable" {
+		t.Errorf("host override not honored: %q", dsn)
+	}
+}

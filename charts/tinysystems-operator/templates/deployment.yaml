@@ -70,6 +70,22 @@ spec:
           - name: TINY_NATS_URL
             value: {{ .Values.natsURL | quote }}
           {{- end }}
+          {{- if .Values.pgvector.enabled }}
+          # pgvector bundle credentials — consumed by bundle.PostgresDSN
+          # ("pgvector") so components (vector_upsert/vector_search) work
+          # with no user-supplied DSN. Password comes from the bitnami
+          # subchart's own Secret (key "password" = the custom user's),
+          # never from values.
+          - name: BUNDLE_PGVECTOR_USER
+            value: {{ .Values.pgvector.auth.username | quote }}
+          - name: BUNDLE_PGVECTOR_DB
+            value: {{ .Values.pgvector.auth.database | quote }}
+          - name: BUNDLE_PGVECTOR_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-pgvector
+                key: password
+          {{- end }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}
         livenessProbe:

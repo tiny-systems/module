@@ -15,7 +15,9 @@ package bundle
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 )
 
 // DefaultPort is what http-ish bundle subcharts expose on. TEI's
@@ -47,6 +49,40 @@ func URLOr(name, fallback string) string {
 		return url
 	}
 	return fallback
+}
+
+// PostgresDSN returns a connection string for a credentialed Postgres
+// bundle (e.g. "pgvector"). Unlike URL(), a database needs credentials,
+// which the operator chart injects as env when the bundle is enabled —
+// the password sourced from the bundle's own Secret, never from values:
+//
+//	BUNDLE_<NAME>_HOST     (optional; defaults to <release>-<name>)
+//	BUNDLE_<NAME>_USER
+//	BUNDLE_<NAME>_PASSWORD (secretKeyRef into the bundle's Secret)
+//	BUNDLE_<NAME>_DB
+//
+// Returns an error when the credential env is absent — the bundle is
+// disabled or the module runs outside the chart — so callers can fall
+// back to a user-supplied DSN or fail with a clear message.
+func PostgresDSN(name string) (string, error) {
+	prefix := "BUNDLE_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+	user := os.Getenv(prefix + "_USER")
+	pass := os.Getenv(prefix + "_PASSWORD")
+	db := os.Getenv(prefix + "_DB")
+	if user == "" || pass == "" || db == "" {
+		return "", fmt.Errorf("bundle.PostgresDSN(%q): %s_USER/_PASSWORD/_DB env not set — bundle disabled or module not running inside the operator chart; supply a DSN explicitly", name, prefix)
+	}
+	host := os.Getenv(prefix + "_HOST")
+	if host == "" {
+		release, ok := os.LookupEnv("RELEASE_NAME")
+		if !ok || release == "" {
+			return "", fmt.Errorf("bundle.PostgresDSN(%q): RELEASE_NAME env not set and no %s_HOST override", name, prefix)
+		}
+		host = fmt.Sprintf("%s-%s", release, name)
+	}
+	// sslmode=disable: in-cluster ClusterIP service, same namespace.
+	return fmt.Sprintf("postgres://%s:%s@%s:5432/%s?sslmode=disable",
+		url.QueryEscape(user), url.QueryEscape(pass), host, url.PathEscape(db)), nil
 }
 
 // Namespace returns the namespace the module pod is running in.
