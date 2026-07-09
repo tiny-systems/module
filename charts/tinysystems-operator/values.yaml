@@ -132,6 +132,20 @@ pgvector:
       scripts:
         enable-pgvector.sql: |
           CREATE EXTENSION IF NOT EXISTS vector;
+    # The official pgvector/pgvector image writes its unix socket + lock
+    # file to /var/run/postgresql (Debian's compiled-in default), but the
+    # bitnami chart runs with readOnlyRootFilesystem and only mounts
+    # writable emptyDirs at bitnami-specific paths — so Postgres crashloops
+    # on "could not create lock file /var/run/postgresql/.s.PGSQL.5432.lock:
+    # Read-only file system". Bitnami's own image uses a different socket
+    # dir, so this only bites with the pgvector image. Give it a writable
+    # emptyDir there. fsGroup makes it writable by the postgres uid.
+    extraVolumes:
+      - name: postgresql-run
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: postgresql-run
+        mountPath: /var/run/postgresql
     persistence:
       size: 8Gi
 
