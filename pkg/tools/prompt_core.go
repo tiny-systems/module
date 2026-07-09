@@ -68,7 +68,7 @@ Use ` + "`{{expression}}`" + ` for dynamic values in edge configurations:
 - **Math:** ` + "`abs`" + ` ` + "`ceil`" + ` ` + "`floor`" + ` ` + "`round`" + ` ` + "`sqrt`" + `. Arithmetic: ` + "`+`" + ` ` + "`-`" + ` ` + "`*`" + ` ` + "`/`" + ` ` + "`%`" + ` ` + "`**`" + `.
 - **Time:** ` + "`now()`" + `, ` + "`RFC3339(t)`" + `.
 
-**NOT supported:** Handlebars blocks (` + "`{{#each}}`" + `, ` + "`{{#if}}`" + `); pipe filters (` + "`{{$.x | foo}}`" + ` — there is NO ` + "`|`" + ` operator; it errors with ` + "`'foo' is not a constant`" + `); and JSON parse/serialize (no ` + "`fromjson`" + `/` + "`tojson`" + `/` + "`json`" + `). Expressions move and reshape values — they do NOT convert between a JSON string and structured data. Do that inside a code/eval component (see JSON string boundaries below).
+**NOT supported:** Handlebars blocks (` + "`{{#each}}`" + `, ` + "`{{#if}}`" + `); pipe filters (` + "`{{$.x | foo}}`" + ` — there is NO ` + "`|`" + ` operator; it errors with ` + "`'foo' is not a constant`" + `); and JSON parse/serialize (no ` + "`fromjson`" + `/` + "`tojson`" + `/` + "`json`" + `); and array/object LITERALS — you cannot construct a new collection in an expression (` + "`{{[$.a, $.b]}}`" + ` or ` + "`{{ {k: $.v} }}`" + ` both fail with ` + "`'[' is not a constant`" + `). To wrap a value in a one-element array, append to a list, or assemble an object, do it inside a js_eval script and reference its output — never in a ` + "`{{ }}`" + ` edge. Expressions move and reshape values — they do NOT convert between a JSON string and structured data. Do that inside a code/eval component (see JSON string boundaries below).
 
 ### JSON string boundaries
 
