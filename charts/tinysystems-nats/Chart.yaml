@@ -1,0 +1,21 @@
+apiVersion: v2
+name: tinysystems-nats
+description: >-
+  Per-namespace NATS JetStream broker for the Tiny Systems runtime.
+  Cross-module messaging and durable execution ride this broker; one
+  release per namespace, shared by every module installed there.
+  Installed automatically by the platform's module-install job (and by
+  the generated desktop install commands) alongside the CRD and OTEL
+  releases — clients never configure it by hand.
+type: application
+version: 0.1.0
+appVersion: "2.14.2"
+
+dependencies:
+  # Official NATS chart, pinned. The wrapper exists so (a) the release
+  # carries our name and defaults (JetStream on, small file store) and
+  # (b) the service name is deterministic (fullnameOverride below) so
+  # the install job can derive the broker URL without discovery calls.
+  - name: nats
+    version: "2.14.2"
+    repository: "https://nats-io.github.io/k8s/helm/charts/"

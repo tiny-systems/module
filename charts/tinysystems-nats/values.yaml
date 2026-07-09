@@ -1,0 +1,33 @@
+# Values routed into the official nats subchart. Keep this minimal —
+# upstream defaults are sane; we only pin what the runtime contract
+# depends on.
+nats:
+  # Deterministic service name: the module-install job derives the
+  # broker URL as nats://tinysystems-nats.<namespace>.svc:4222 without
+  # any discovery round-trip. One broker per namespace, so a fixed name
+  # cannot collide. Override only if you must run a second broker in
+  # the same namespace (you almost certainly must not — transport
+  # subjects are namespace-blind and modules sharing a namespace must
+  # share the broker).
+  fullnameOverride: tinysystems-nats
+
+  config:
+    # JetStream is what durable execution runs on (work-queue streams,
+    # step ledger, run state). Without it modules fall back to blocking
+    # mode. File store on a small PVC so runs survive broker restarts;
+    # OTEL trace/KV storage is expected to move onto this broker too.
+    jetstream:
+      enabled: true
+      fileStore:
+        pvc:
+          size: 2Gi
+
+  # No debug sidecar deployment — one less pod per namespace. Exec into
+  # any module pod (or run nats-box ad hoc) when debugging the broker.
+  natsBox:
+    enabled: false
+
+  # Single replica: matches the current single-broker-per-namespace
+  # contract. HA (3-replica clustered JetStream) is the documented
+  # prerequisite for durable-by-default and can be turned on later via
+  # nats.config.cluster without changing the service name.
