@@ -99,6 +99,11 @@ func (t *ReadProjectTool) Execute(ctx context.Context, execCtx ExecutionContext,
 				"nodes_per_flow": flowNodeCounts,
 			},
 			"elements": projectData.Elements,
+			// Structural faults (dangling nodes, unconnected error ports,
+			// broken edges). Non-empty means the flow is NOT done — fix
+			// each before declaring success. Shared across every surface
+			// that uses this tool (platform, local mcp-server, desktop).
+			"issues": FlowIssues(projectData.Elements),
 		},
 	}
 }
