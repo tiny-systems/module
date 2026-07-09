@@ -21,6 +21,35 @@ nats:
       fileStore:
         pvc:
           size: 2Gi
+          # Guard the durable volume against accidental teardown.
+          # helm.sh/resource-policy=keep tells Helm to leave this PVC in
+          # place on `helm uninstall`, so the release can be removed and
+          # reinstalled without dropping run state. Belt-and-suspenders:
+          # PVCs born from a StatefulSet volumeClaimTemplate aren't
+          # Helm-owned, so uninstall wouldn't reap them anyway — but the
+          # annotation makes the intent explicit and survives any future
+          # packaging change.
+          merge:
+            metadata:
+              annotations:
+                helm.sh/resource-policy: keep
+
+  # The real Retain policy: tell the StatefulSet controller never to
+  # delete the JetStream PVC when the set is deleted or scaled down.
+  # This is the k8s default today, but pinning it means no future values
+  # change or cluster policy can flip it to Delete and strip durable run
+  # state out from under running flows.
+  #
+  # NOTE: this protects the PVC. Whether the *underlying disk* survives a
+  # PVC deletion is governed by the StorageClass reclaimPolicy (commonly
+  # Delete), which a chart cannot force — a truly disk-safe install wants
+  # a StorageClass with reclaimPolicy: Retain.
+  statefulSet:
+    merge:
+      spec:
+        persistentVolumeClaimRetentionPolicy:
+          whenDeleted: Retain
+          whenScaled: Retain
 
   # No debug sidecar deployment — one less pod per namespace. Exec into
   # any module pod (or run nats-box ad hoc) when debugging the broker.
