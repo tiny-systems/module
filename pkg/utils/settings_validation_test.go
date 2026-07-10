@@ -5,22 +5,29 @@ import (
 	"testing"
 )
 
-// jsEvalSchema mirrors the shape the reflector emits for js_eval Settings:
-// a top-level $ref into $defs, outputData required + configurable, script
-// required but NOT configurable (must not be flagged by this check).
+// jsEvalSchema mirrors the REAL shape the reflector emits for js_eval
+// Settings: a top-level $ref into $defs, and each property is itself a $ref
+// to a generated def — the `configurable` flag + title/description live on
+// the DEF (Outputdata), not the property. script $refs a NON-configurable
+// def and must never be flagged. modules is required but non-configurable
+// (empty [] is legitimate) — also must not be flagged.
 const jsEvalSchema = `{
   "$ref": "#/$defs/Settings",
   "$defs": {
     "Settings": {
       "type": "object",
-      "required": ["outputData", "script"],
+      "required": ["outputData", "script", "modules"],
       "properties": {
-        "outputData": {"configurable": true, "title": "Output object",
-          "description": "Downstream edges from this node are validated against this shape."},
-        "inputData":  {"configurable": true, "title": "Input object"},
-        "script":     {"title": "Script"}
+        "outputData": {"$ref": "#/$defs/Outputdata", "propertyOrder": 3},
+        "inputData":  {"$ref": "#/$defs/Inputdata", "propertyOrder": 2},
+        "script":     {"$ref": "#/$defs/Script", "propertyOrder": 4},
+        "modules":    {"type": "array"}
       }
-    }
+    },
+    "Outputdata": {"type": "object", "configurable": true, "title": "Output object",
+      "description": "Downstream edges from this node are validated against this shape."},
+    "Inputdata":  {"type": "object", "configurable": true, "title": "Input object"},
+    "Script":     {"type": "object", "title": "Script", "required": ["content"]}
   }
 }`
 
@@ -49,9 +56,10 @@ func TestSettingsIssues_RequiredConfigurableUnset(t *testing.T) {
 			if !strings.Contains(joined, c.wantSubstr) {
 				t.Errorf("%s: expected %q in %q", c.name, c.wantSubstr, joined)
 			}
-			// script is required but NOT configurable — must never be flagged.
-			if strings.Contains(joined, "Script") {
-				t.Errorf("%s: non-configurable required field 'script' was wrongly flagged: %q", c.name, joined)
+			// script + modules are required but NOT configurable — a required
+			// scalar/array that rides a default must never be flagged.
+			if strings.Contains(joined, "Script") || strings.Contains(strings.ToLower(joined), "modules") {
+				t.Errorf("%s: a non-configurable required field was wrongly flagged: %q", c.name, joined)
 			}
 		}
 	}

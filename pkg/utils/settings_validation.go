@@ -44,23 +44,37 @@ func SettingsIssues(settingsSchema, settingsConfig []byte) []string {
 		if !ok {
 			continue
 		}
-		if !isConfigurable(prop) {
+		// The configurable flag + title/description sit on the property OR,
+		// when the reflector emitted a $ref (an `any`-typed field points at a
+		// generated def like Outputdata), on that def. Merge both so we read
+		// them wherever they landed.
+		def := prop
+		if resolved := resolveLocalRef(schema, stringField(prop, "$ref")); resolved != nil {
+			def = resolved
+		}
+		if !isConfigurable(def) {
 			continue // only schema-carrying fields; scalars ride defaults
 		}
 		if !isBlankValue(config[name]) {
 			continue // author supplied a shape/example — good
 		}
-		title := stringField(prop, "title")
-		if title == "" {
-			title = name
-		}
+		title := firstNonEmpty(stringField(def, "title"), stringField(prop, "title"), name)
 		msg := fmt.Sprintf("REQUIRED SETTING NOT SET: `%s` on this node has no schema/example.", title)
-		if d := stringField(prop, "description"); d != "" {
+		if d := firstNonEmpty(stringField(def, "description"), stringField(prop, "description")); d != "" {
 			msg += " " + d
 		}
 		issues = append(issues, msg)
 	}
 	return issues
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // settingsShape returns the Settings object's properties + required list,
