@@ -8,7 +8,7 @@ description: >-
   the generated desktop install commands) alongside the CRD and OTEL
   releases — clients never configure it by hand.
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "2.14.2"
 
 dependencies:

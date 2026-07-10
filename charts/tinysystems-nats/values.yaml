@@ -34,6 +34,26 @@ nats:
               annotations:
                 helm.sh/resource-policy: keep
 
+    # Broker auth: require a token on every connection. Read from
+    # $NATS_TOKEN (wired onto the nats container below), sourced from the
+    # tinysystems-nats-auth secret. This locks the durable KV — no
+    # anonymous or other-workspace client can connect; the operator who
+    # runs the broker can (Tier-1 boundary). << >> unquotes so the rendered
+    # config references the env var, not a literal token.
+    merge:
+      authorization:
+        token: << $NATS_TOKEN >>
+
+  # Feed the token to the NATS server as $NATS_TOKEN from the chart-managed
+  # secret — it lives in the Secret, never in the rendered ConfigMap.
+  container:
+    env:
+      NATS_TOKEN:
+        valueFrom:
+          secretKeyRef:
+            name: tinysystems-nats-auth
+            key: token
+
   # The real Retain policy: tell the StatefulSet controller never to
   # delete the JetStream PVC when the set is deleted or scaled down.
   # This is the k8s default today, but pinning it means no future values
