@@ -148,6 +148,8 @@ build_flow(
 )
 ` + "```" + `
 
+**Embeddings — ` + "`embed_text`" + ` ONLY.** To turn text into the vector that ` + "`vector_upsert`" + ` / ` + "`vector_search`" + ` require, use ` + "`embed_text`" + ` (embedding-module) — it emits a real ` + "`[]float32`" + `. NEVER wire ` + "`llm_complete`" + ` or ` + "`llm_chat`" + ` as an "embedder": they return TEXT, not a vector, so mapping their output into an ` + "`embedding`" + ` field fails validation (` + "`expected array`" + `) and the memory silently never works. If ` + "`embed_text`" + ` is not installed, surface that as a missing dependency — do NOT improvise an embedder from a chat/completion component.
+
 If a component you need doesn't yet support ` + "`[[secret:...]]`" + ` in its Settings, the temporary workaround is to carry the credential through context — but raise it as a gap, because the leak audit will show resolved values in every intermediate node's status.
 
 ## Schema Extension
