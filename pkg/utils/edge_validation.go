@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -214,6 +215,14 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 	// Check if any expression evaluation errors occurred
 	if len(evalErrors) > 0 {
 		msg := fmt.Sprintf("expression error: %s", evalErrors[0])
+		// If the failing expression references a field that actually EXISTS
+		// elsewhere in the source shape, this isn't an "unverifiable" gap —
+		// it's a WRONG PATH (the classic $.x vs $.context.x mix-up). Name the
+		// correct path and return a real, fixable error instead of the
+		// mystifying "not parsed yet" warning: runtime would fail too.
+		if hint := pathHint(portDataNode, evalErrors[0]); hint != "" {
+			return errors.New(msg + " — " + hint)
+		}
 		if isUnverifiableEvalError(evalErrors[0]) {
 			return fmt.Errorf("%w: %s", ErrEdgeUnverifiable, msg)
 		}
@@ -259,6 +268,84 @@ func isUnverifiableEvalError(msg string) bool {
 		return true
 	}
 	return false
+}
+
+var jsonPathRefRe = regexp.MustCompile(`\$(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])+`)
+
+// pathHint turns a failed-expression error into an actionable correction:
+// for each $.path in the expression, if that field NAME exists at exactly
+// one OTHER path in the source shape, it names that path. Empty when no
+// single better path exists — the caller then falls back to the generic
+// "unverifiable" warning. This is what makes the $.realIP vs
+// $.context.realIP mistake self-correcting instead of a cryptic
+// "not parsed yet".
+func pathHint(root *ajson.Node, errStr string) string {
+	if root == nil {
+		return ""
+	}
+	for _, p := range jsonPathRefRe.FindAllString(errStr, -1) {
+		name := leafFieldName(p)
+		if name == "" {
+			continue
+		}
+		if correct := findFieldPath(root, name); correct != "" && correct != p {
+			return fmt.Sprintf("field `%s` is at `%s`, not `%s`", name, correct, p)
+		}
+	}
+	return ""
+}
+
+// leafFieldName returns the last object key in a JSONPath ("$.context.realIP"
+// -> "realIP"), or "" when the path ends in an array index or is malformed.
+func leafFieldName(path string) string {
+	seg := path
+	if i := strings.LastIndexByte(seg, '.'); i >= 0 {
+		seg = seg[i+1:]
+	}
+	if seg == "" || strings.ContainsAny(seg, "[]$") {
+		return ""
+	}
+	return seg
+}
+
+// findFieldPath searches the source data for an object key named `name` and
+// returns its JSONPath (e.g. "$.context.realIP"). Returns "" when the name
+// appears NOWHERE (genuinely unverifiable) or at MORE THAN ONE path
+// (ambiguous — a suggestion would be a guess). Descends one array element
+// only; simulated arrays are homogeneous.
+func findFieldPath(root *ajson.Node, name string) string {
+	var hits []string
+	var walk func(n *ajson.Node, path string)
+	walk = func(n *ajson.Node, path string) {
+		if n == nil || len(hits) > 1 {
+			return
+		}
+		switch {
+		case n.IsObject():
+			for _, k := range n.Keys() {
+				child, err := n.GetKey(k)
+				if err != nil {
+					continue
+				}
+				cp := path + "." + k
+				if k == name {
+					hits = append(hits, "$"+cp)
+				}
+				walk(child, cp)
+			}
+		case n.IsArray():
+			if n.Size() > 0 {
+				if child, err := n.GetIndex(0); err == nil {
+					walk(child, path+"[0]")
+				}
+			}
+		}
+	}
+	walk(root, "")
+	if len(hits) == 1 {
+		return hits[0]
+	}
+	return ""
 }
 
 // isUnverifiableSchemaError reports whether a JSON Schema validation failure
