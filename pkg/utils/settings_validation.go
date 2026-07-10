@@ -40,6 +40,16 @@ func SettingsIssues(settingsSchema, settingsConfig []byte) []string {
 
 	var issues []string
 	for _, name := range required {
+		// `context` is the SDK's universal message-passthrough — configurable
+		// and often marked required by a component, but legitimately blank
+		// (it IS the widget form / the data that flows through at runtime),
+		// never an author-declared output shape. Flagging it would fire on
+		// almost every node, so it's excluded by framework convention (not a
+		// component name — `context` is a first-class SDK primitive, Pattern
+		// A/B in the core guide).
+		if strings.EqualFold(name, "context") {
+			continue
+		}
 		prop, ok := props[name].(map[string]any)
 		if !ok {
 			continue

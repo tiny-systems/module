@@ -16,17 +16,19 @@ const jsEvalSchema = `{
   "$defs": {
     "Settings": {
       "type": "object",
-      "required": ["outputData", "script", "modules"],
+      "required": ["outputData", "script", "modules", "context"],
       "properties": {
         "outputData": {"$ref": "#/$defs/Outputdata", "propertyOrder": 3},
         "inputData":  {"$ref": "#/$defs/Inputdata", "propertyOrder": 2},
         "script":     {"$ref": "#/$defs/Script", "propertyOrder": 4},
+        "context":    {"$ref": "#/$defs/Context", "propertyOrder": 1},
         "modules":    {"type": "array"}
       }
     },
     "Outputdata": {"type": "object", "configurable": true, "title": "Output object",
       "description": "Downstream edges from this node are validated against this shape."},
     "Inputdata":  {"type": "object", "configurable": true, "title": "Input object"},
+    "Context":    {"type": "object", "configurable": true, "title": "Context"},
     "Script":     {"type": "object", "title": "Script", "required": ["content"]}
   }
 }`
@@ -56,10 +58,11 @@ func TestSettingsIssues_RequiredConfigurableUnset(t *testing.T) {
 			if !strings.Contains(joined, c.wantSubstr) {
 				t.Errorf("%s: expected %q in %q", c.name, c.wantSubstr, joined)
 			}
-			// script + modules are required but NOT configurable — a required
-			// scalar/array that rides a default must never be flagged.
-			if strings.Contains(joined, "Script") || strings.Contains(strings.ToLower(joined), "modules") {
-				t.Errorf("%s: a non-configurable required field was wrongly flagged: %q", c.name, joined)
+			// script + modules are required but NOT configurable, and context
+			// is the SDK passthrough (required+configurable but blank by
+			// design) — none may ever be flagged.
+			if strings.Contains(joined, "Script") || strings.Contains(strings.ToLower(joined), "modules") || strings.Contains(joined, "Context") {
+				t.Errorf("%s: a field that must not be flagged was flagged: %q", c.name, joined)
 			}
 		}
 	}
