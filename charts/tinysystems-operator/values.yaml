@@ -100,7 +100,10 @@ managerService:
 tei:
   enabled: false
   image:
-    tag: cpu-1.5
+    # cpu-1.9: cpu-1.5 had a model-download bug ("relative URL without a
+    # base") that crashlooped TEI on first boot. Keep in sync with the
+    # tei subchart default.
+    tag: cpu-1.9
   # Modest defaults so the bundle fits on typical single-node dev
   # clusters and small staging pools. Production embedding workloads
   # should bump these via --set tei.resources.requests.memory=...
