@@ -218,6 +218,10 @@ send_signal(node_id, port: "_control", data: {"send": true, "context": {...}})  
 
 Check status via ` + "`get_node_port_schema`" + ` on ` + "`_control`" + `: schema reflects ` + "`ControlRunning`" + ` (Stop button visible) or ` + "`ControlStopped`" + ` (Start button visible). For system ports the example carries the node's live state when ` + "`has_real_data`" + ` is true — e.g. a started server node's actual status and listen address.
 
+**A freshly built flow needs a beat to wake up.** After ` + "`build_flow`" + ` each new node has to reconcile and its module has to start listening on the node's port before a signal fired at the entry will travel down the chain. Fire in that gap and the signal reaches the LIVE trigger but the downstream nodes aren't listening yet — the trace shows ONLY the trigger (` + "`spans: 1, errors: 0`" + `) and looks deceptively "clean". That is NOT a passing test and NOT a broken flow: the chain simply hadn't come up. If your test fire shows only the trigger span and the downstream nodes you wired are missing from ` + "`ran_nodes`" + `, wait a few seconds and fire ONCE more. Do not start "debugging" a flow that was only asleep.
+
+**To test, fire the ENTRY trigger — never a middle node.** Send your test signal to the flow's first node (` + "`_control`" + ` with ` + "`{send: true, ...}`" + `) and read the terminal sink. Do NOT ` + "`send_signal`" + ` a component in the MIDDLE of the chain (an ` + "`embed_text`" + `, a ` + "`vector_upsert`" + `) to "test that piece" — a signal injected mid-chain runs asynchronously with no inspectable execution trace, so ` + "`get_trace_detail`" + ` returns "trace not found" and you burn turns chasing a void. One fire at the entry exercises the whole path.
+
 For execution history: ` + "`get_traces`" + ` for recent runs, ` + "`get_trace_detail`" + ` for spans + errors per run.
 
 ## Dashboard Widgets
