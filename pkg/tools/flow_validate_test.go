@@ -46,6 +46,23 @@ func TestFlowIssues_CleanFlow(t *testing.T) {
 	}
 }
 
+func TestFlowIssues_ConfigError(t *testing.T) {
+	// a schema-aware ProjectReader populated data.config_error on a wired node
+	js := node("js", "js_eval", "response")
+	js["data"].(map[string]interface{})["config_error"] = "REQUIRED SETTING NOT SET: `Output object` on this node has no schema/example."
+	els := []map[string]interface{}{
+		node("sig", "signal", "out"),
+		js,
+		edge("e1", "sig", "out", "js", ""),
+		edge("e2", "js", "response", "sig", ""),
+	}
+	got := FlowIssues(els)
+	joined := strings.Join(got, " | ")
+	if !strings.Contains(joined, "NODE js") || !strings.Contains(joined, "Output object") {
+		t.Fatalf("expected a NODE config_error issue naming the field, got %v", got)
+	}
+}
+
 func TestFlowIssues_DanglingNode(t *testing.T) {
 	els := []map[string]interface{}{
 		node("sig", "signal", "out"),

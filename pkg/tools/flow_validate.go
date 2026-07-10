@@ -53,6 +53,14 @@ func FlowIssues(elements []map[string]interface{}) []string {
 		if id == "" {
 			continue
 		}
+		// A required-but-unset configurable setting (e.g. a code component's
+		// output-shape field) — populated by a schema-aware ProjectReader as
+		// data.config_error. Surfaced here so the same gate that blocks on
+		// broken edges also blocks on a node that skipped a required schema.
+		if ce := elemDataStr(el, "config_error"); ce != "" {
+			issues = append(issues, fmt.Sprintf(
+				"NODE %s (%s): %s", id, elemDataStr(el, "component"), ce))
+		}
 		if !connected[id] {
 			issues = append(issues, fmt.Sprintf(
 				"DANGLING NODE %s (%s): no edges at all — wire it into the flow or delete it.",
