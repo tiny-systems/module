@@ -218,10 +218,48 @@ func SimulatePortDataFromMaps(
 			}
 		}
 
+		// Match the SDK's runtime context ergonomics: a message's `context`
+		// fields are reachable at BOTH $.context.x AND $.x (Pattern A + B), and
+		// that propagates through nested passthrough. The schema-based generator
+		// only NESTS context, so $.context.maxmind (which the live flow reads)
+		// and $.realIP (spread to root) were missing in sim — false-red edges
+		// that went green the instant a real trace was picked. Spread here so
+		// simulated data carries the SAME shape that actually flows.
+		// Non-destructive (never overwrites), so real trace overlays are safe.
+		result = spreadContext(result)
+
 		return result, nil
 	}
 
 	return inspect(ctx, inspectPortFullName)
+}
+
+// spreadContext replicates runtime context ergonomics: for every object that
+// carries a `context` object, its fields are also exposed at the parent level
+// (without overwriting existing keys), recursively — so context.context.context
+// flattens up to every level exactly as a real trace shows.
+func spreadContext(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = spreadContext(val)
+		}
+		if ctx, ok := t["context"].(map[string]interface{}); ok {
+			for k, val := range ctx {
+				if _, exists := t[k]; !exists {
+					t[k] = val
+				}
+			}
+		}
+		return t
+	case []interface{}:
+		for i, val := range t {
+			t[i] = spreadContext(val)
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // SimulatePortDataSimple generates mock data for a port without runtime/trace data.
