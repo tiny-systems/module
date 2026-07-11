@@ -25,6 +25,7 @@ import (
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/resource"
+	"github.com/tiny-systems/module/pkg/secret"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/pkg/wire"
@@ -74,6 +75,14 @@ type Runner struct {
 
 	// settings dedup: skip Handle() when _settings data hasn't changed
 	portMsg cmap.ConcurrentMap[string, any]
+
+	// settingsSecretAt records (port → unix-nano) the last time settings
+	// carrying a [[secret:...]] placeholder were delivered. Byte-identical
+	// settings are normally deduped, but the Secret behind a placeholder can
+	// be created or rotated without the raw bytes changing — so such settings
+	// are re-delivered (OnSettings re-runs, re-resolving) once secretResolveTTL
+	// has elapsed, rather than being skipped forever.
+	settingsSecretAt cmap.ConcurrentMap[string, int64]
 
 	// reconcileDebouncer coalesces rapid reconcile requests to protect K8s API server
 	reconcileDebouncer *ReconcileDebouncer
@@ -125,6 +134,25 @@ const (
 	FromSignal = wire.FromSignal
 )
 
+// secretResolveTTL bounds how often byte-identical settings carrying a
+// [[secret:...]] placeholder are re-delivered so OnSettings re-resolves them.
+// Well under the 5-minute reconcile requeue, so re-resolution effectively
+// happens once per reconcile (created/rotated Secrets picked up without a pod
+// restart) while rapid reconcile bursts don't hammer the Secret API.
+const secretResolveTTL = 60 * time.Second
+
+// secretResolveTTLLapsed reports whether secretResolveTTL has elapsed since
+// settings carrying a secret placeholder were last delivered for port. A
+// missing timestamp (never recorded) counts as lapsed so the first re-delivery
+// isn't withheld.
+func (c *Runner) secretResolveTTLLapsed(port string) bool {
+	last, ok := c.settingsSecretAt.Get(port)
+	if !ok {
+		return true
+	}
+	return time.Now().UnixNano()-last >= int64(secretResolveTTL)
+}
+
 func NewRunner(component m.Component) *Runner {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	return &Runner{
@@ -134,7 +162,8 @@ func NewRunner(component m.Component) *Runner {
 		nodePortsLock: &sync.RWMutex{},
 
 		// settings dedup cache
-		portMsg: cmap.New[any](),
+		portMsg:          cmap.New[any](),
+		settingsSecretAt: cmap.New[int64](),
 
 		// debounce reconcile requests to protect K8s API (1s window)
 		reconcileDebouncer: NewReconcileDebouncer(time.Second),
@@ -564,16 +593,31 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		portData = nodePort.Configuration
 	}
 
-	// Skip settings delivery when data hasn't changed between reconciliations
+	// Skip settings delivery when data hasn't changed between reconciliations.
+	// Exception: settings carrying a [[secret:...]] placeholder are re-delivered
+	// once secretResolveTTL has elapsed even when the raw bytes are identical —
+	// the Secret behind the placeholder can be created or rotated without the
+	// stored settings changing, so OnSettings must re-run to re-resolve it.
+	// OnSettings is idempotent (it ran on every reconcile before this dedup).
 	if port == v1alpha1.SettingsPort {
+		hasSecret := secret.ContainsPlaceholder(portData)
 		if prevPortData, ok := c.portMsg.Get(port); ok && cmp.Equal(portData, prevPortData) {
-			c.log.Info("runner msg handler: skipping settings (data unchanged)",
+			if !hasSecret || !c.secretResolveTTLLapsed(port) {
+				c.log.Info("runner msg handler: skipping settings (data unchanged)",
+					"port", port,
+					"node", c.name,
+				)
+				return nil, nil
+			}
+			c.log.Info("runner msg handler: re-delivering settings to re-resolve secrets (TTL lapsed)",
 				"port", port,
 				"node", c.name,
 			)
-			return nil, nil
 		}
 		c.portMsg.Set(port, portData)
+		if hasSecret {
+			c.settingsSecretAt.Set(port, time.Now().UnixNano())
+		}
 	}
 
 	u, err := uuid.NewUUID()

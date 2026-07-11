@@ -26,11 +26,13 @@
 //   - The K8sClient injection point (ClientAware.OnClient) already
 //     exists; no new SDK hook required.
 //
-// Rotation: this resolver does not watch for changes. To pick up a
-// rotated Secret, the component must re-trigger OnSettings (e.g. by
-// re-sending the settings message, or restarting the pod). Watch-
-// based invalidation is a deliberate follow-up — first ship the
-// simple version, add cache + watch once usage patterns are clear.
+// Rotation: Resolve itself does not watch for changes — it resolves
+// whatever the Secret holds at call time. Automatic pickup of a
+// created or rotated Secret is driven by the runner: settings carrying
+// a placeholder (see ContainsPlaceholder) are re-delivered on a TTL so
+// OnSettings re-runs and re-resolves, without a pod restart. A
+// Secret-informer watch remains a possible future optimisation if the
+// reconcile-cadence latency ever proves too coarse.
 package secret
 
 import (
@@ -167,6 +169,49 @@ func walk(ctx context.Context, v reflect.Value, client module.K8sClient) error {
 		return nil
 	}
 	return nil
+}
+
+// ContainsPlaceholder reports whether v holds any string that is a whole
+// `[[secret:<name>/<key>]]` placeholder. Read-only companion to Resolve: the
+// runner uses it to decide whether byte-identical settings still need periodic
+// re-resolution. The raw settings bytes never change once stored, but the
+// Secret behind the placeholder can be created or rotated — so a node whose
+// settings carry a placeholder must re-run OnSettings on a TTL rather than be
+// deduped away forever.
+func ContainsPlaceholder(v any) bool {
+	return containsPlaceholder(reflect.ValueOf(v))
+}
+
+func containsPlaceholder(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.String:
+		return placeholderRe.MatchString(v.String())
+	case reflect.Ptr, reflect.Interface:
+		if v.IsNil() {
+			return false
+		}
+		return containsPlaceholder(v.Elem())
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if containsPlaceholder(v.Field(i)) {
+				return true
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			if containsPlaceholder(v.Index(i)) {
+				return true
+			}
+		}
+	case reflect.Map:
+		iter := v.MapRange()
+		for iter.Next() {
+			if containsPlaceholder(iter.Value()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func fetch(ctx context.Context, client module.K8sClient, name, key string) (string, error) {
