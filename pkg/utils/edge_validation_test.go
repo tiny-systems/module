@@ -2,12 +2,44 @@ package utils
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/pkg/schema"
 )
+
+// The name-mix-up hint must fire ONLY against real (trace/scenario) data. On a
+// SIMULATED shape the configurable-any `context` passthrough over-nests one
+// level per hop, so the hint would confidently point at a phantom path and
+// tell the author to break a working expression — regressed the myipaddress
+// flow (edge red + "$.realIP is at $.context.realIP" though the live flow
+// correctly uses $.realIP).
+func TestValidateEdgeSchema_HintGatedOnRealData(t *testing.T) {
+	portSchema, _ := ajson.Unmarshal([]byte(`{"type":"object","properties":{"url":{"type":"string"}}}`))
+	// Source shape has realIP nested under context (the over-nested sim case).
+	portData := map[string]any{"context": map[string]any{"realIP": "1.2.3.4"}}
+	edgeConfig := []byte(`{"url":"{{'http://' + $.realIP}}"}`) // wrong path
+
+	// Simulated (hasReal=false): no hint, unverifiable warning.
+	errSim := ValidateEdgeSchema(portSchema, portData, edgeConfig, false)
+	if errSim == nil || !IsUnverifiable(errSim) {
+		t.Fatalf("simulated: want unverifiable warning, got %v", errSim)
+	}
+	if strings.Contains(errSim.Error(), "$.context.realIP") {
+		t.Errorf("simulated: hint must be suppressed, got %q", errSim.Error())
+	}
+
+	// Real data (hasReal=true): hint names the correct path, hard error.
+	errReal := ValidateEdgeSchema(portSchema, portData, edgeConfig, true)
+	if errReal == nil || !strings.Contains(errReal.Error(), "$.context.realIP") {
+		t.Errorf("real: want hint naming $.context.realIP, got %v", errReal)
+	}
+	if IsUnverifiable(errReal) {
+		t.Errorf("real: a named-path mix-up should be a hard error, not unverifiable")
+	}
+}
 
 func TestValidateEdgeSchema(t *testing.T) {
 	tests := []struct {
@@ -130,7 +162,7 @@ func TestValidateEdgeSchema(t *testing.T) {
 				}
 			}
 
-			err := ValidateEdgeSchema(portSchema, tt.incomingPortData, []byte(tt.edgeConfiguration))
+			err := ValidateEdgeSchema(portSchema, tt.incomingPortData, []byte(tt.edgeConfiguration), true)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateEdgeSchema() error = %v, wantErr %v", err, tt.wantErr)

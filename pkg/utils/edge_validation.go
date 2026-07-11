@@ -69,7 +69,8 @@ func ValidateEdgeWithSchemaAndRuntimeData(ctx context.Context, nodesMap map[stri
 	}
 
 	// Validate the edge using the custom schema
-	return ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration)
+	_, sourceHasRealData := runtimeData[sourcePortFullName]
+	return ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration, sourceHasRealData)
 }
 
 // ValidateEdgeWithPrecomputedMaps validates an edge using pre-computed flow maps.
@@ -89,7 +90,8 @@ func ValidateEdgeWithPrecomputedMaps(ctx context.Context, portSchemaMap map[stri
 		return fmt.Errorf("cannot get port data: %v", err)
 	}
 
-	err = ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration)
+	_, sourceHasRealData := runtimeData[sourcePortFullName]
+	err = ValidateEdgeSchema(edgeSchema, portData, edgeConfiguration, sourceHasRealData)
 	if err != nil {
 		// Diagnostic: log source port schema and simulated data when validation fails
 		if sourceSchema, ok := portSchemaMap[sourcePortFullName]; ok {
@@ -129,14 +131,15 @@ func ValidateEdgeWithRuntimeData(ctx context.Context, nodesMap map[string]v1alph
 	}
 
 	// Validate the edge
-	return ValidateEdgeSchema(targetPortSchema, portData, edgeConfiguration)
+	_, sourceHasRealData := runtimeData[sourcePortFullName]
+	return ValidateEdgeSchema(targetPortSchema, portData, edgeConfiguration, sourceHasRealData)
 }
 
 // ValidateEdgeSchema validates the edge configuration against the target port schema.
 // This is the lower-level validation function that can be used when you already have
 // the port schema and simulated port data (e.g., in the platform's graph builder).
 // Returns nil if valid, or an error (possibly *jsonschema.ValidationError) if invalid.
-func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, edgeConfiguration []byte) error {
+func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, edgeConfiguration []byte, sourceHasRealData bool) error {
 	if portSchema == nil {
 		// No schema means any data is valid
 		return nil
@@ -215,13 +218,18 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 	// Check if any expression evaluation errors occurred
 	if len(evalErrors) > 0 {
 		msg := fmt.Sprintf("expression error: %s", evalErrors[0])
-		// If the failing expression references a field that actually EXISTS
-		// elsewhere in the source shape, this isn't an "unverifiable" gap —
-		// it's a WRONG PATH (the classic $.x vs $.context.x mix-up). Name the
-		// correct path and return a real, fixable error instead of the
-		// mystifying "not parsed yet" warning: runtime would fail too.
-		if hint := pathHint(portDataNode, evalErrors[0]); hint != "" {
-			return errors.New(msg + " — " + hint)
+		// Offer a "field is at $.correct" hint ONLY when the source shape is
+		// REAL (from a trace/scenario). Against a SIMULATED shape the hint is
+		// dangerous: the configurable-any `context` passthrough over-nests one
+		// level per hop in simulation, so pathHint would confidently point at a
+		// phantom path (e.g. suggest $.context.realIP when the live flow
+		// correctly uses $.realIP) and tell the author to break a working
+		// expression. With real data the shape is authoritative, so the mix-up
+		// hint is trustworthy.
+		if sourceHasRealData {
+			if hint := pathHint(portDataNode, evalErrors[0]); hint != "" {
+				return errors.New(msg + " — " + hint)
+			}
 		}
 		if isUnverifiableEvalError(evalErrors[0]) {
 			return fmt.Errorf("%w: %s", ErrEdgeUnverifiable, msg)

@@ -1265,7 +1265,7 @@ func TestValidateEdgeSchema_WithOverlaidSchema(t *testing.T) {
 				t.Fatalf("Unmarshal overlaid schema: %v", err)
 			}
 
-			err = ValidateEdgeSchema(portSchema, tt.portData, []byte(tt.edgeConfig))
+			err = ValidateEdgeSchema(portSchema, tt.portData, []byte(tt.edgeConfig), true)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("error = %v, wantErr %v\n  schema: %s", err, tt.wantErr, overlaidSchema)
