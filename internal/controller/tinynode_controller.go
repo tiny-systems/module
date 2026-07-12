@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +49,9 @@ type TinyNodeReconciler struct {
 	IsLeader  *atomic.Bool
 	// leadershipCh receives events when leadership changes to trigger requeue of all nodes
 	leadershipCh chan event.GenericEvent
+	// leadershipMu guards lazy creation of leadershipCh — OnStartedLeading
+	// (elector goroutine) can race SetupWithManager (main) at pod start
+	leadershipMu sync.Mutex
 	// Namespace for resource operations
 	Namespace string
 }
@@ -127,9 +131,12 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Mark observed generation
 	node.Status.ObservedGeneration = node.ObjectMeta.Generation
 
-	// Only leader updates status
+	// Only leader updates status. Requeue instead of dropping: at pod start
+	// reconciles run BEFORE leadership is won, and without a retry the node's
+	// published status (schemas included) stays stale until its next Spec
+	// change — a module upgrade then never refreshes existing nodes.
 	if !r.IsLeader.Load() {
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Update timestamp for periodic heartbeat
@@ -143,20 +150,34 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
+// ensureLeadershipCh lazily creates the (buffered, size-1) leadership channel.
+// It must exist BEFORE leadership can be won: on a restarted single-replica
+// pod the old holder releases the lease at shutdown, so OnStartedLeading often
+// fires before SetupWithManager runs — with a nil channel the requeue-all was
+// silently dropped and every node's published status stayed stale until its
+// next Spec change. The buffer holds the one coalesced event until the
+// controller starts consuming the source.
+func (r *TinyNodeReconciler) ensureLeadershipCh() chan event.GenericEvent {
+	r.leadershipMu.Lock()
+	defer r.leadershipMu.Unlock()
+	if r.leadershipCh == nil {
+		r.leadershipCh = make(chan event.GenericEvent, 1)
+	}
+	return r.leadershipCh
+}
+
 // RequeueAllOnLeadershipChange triggers requeue of all TinyNodes when this pod becomes leader.
 func (r *TinyNodeReconciler) RequeueAllOnLeadershipChange() {
-	if r.leadershipCh == nil {
-		return
-	}
+	ch := r.ensureLeadershipCh()
 	select {
-	case r.leadershipCh <- event.GenericEvent{Object: &operatorv1alpha1.TinyNode{}}:
+	case ch <- event.GenericEvent{Object: &operatorv1alpha1.TinyNode{}}:
 	default:
 	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.leadershipCh = make(chan event.GenericEvent, 1)
+	r.ensureLeadershipCh()
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.TinyNode{}).
