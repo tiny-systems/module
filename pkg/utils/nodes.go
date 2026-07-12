@@ -271,6 +271,29 @@ func GetConfigurableDefinitions(node v1alpha1.TinyNode, from *string) map[string
 	return defs
 }
 
+// GetPortExampleMap collects each SOURCE port's own published example payload,
+// keyed by full port name. Components publish a live example of what every
+// port emits: runner.ReadStatus serializes the port's Configuration struct
+// (e.g. js_eval's Response{OutputData: settings.OutputData}) into
+// Status.Ports[].Configuration on every settings change. The simulator uses
+// these to gap-fill fields its schema mock left null — an opaque
+// `configurable: any` output otherwise simulates as null and makes every
+// downstream edge unverifiable without a hand-authored scenario. Target
+// ports are skipped: their Configuration is default input config, and
+// simulation of targets is driven by incoming edges.
+func GetPortExampleMap(nodesMap map[string]v1alpha1.TinyNode) map[string][]byte {
+	examples := map[string][]byte{}
+	for _, node := range nodesMap {
+		for _, np := range node.Status.Ports {
+			if !np.Source || len(np.Configuration) == 0 {
+				continue
+			}
+			examples[GetPortFullName(node.Name, np.Name)] = np.Configuration
+		}
+	}
+	return examples
+}
+
 // MergeConfigurableDefinitions merges source node definitions into target node definitions.
 // Target definitions always take precedence — they define what the target port accepts.
 // Source definitions only fill in gaps (defs that the target doesn't have at all).

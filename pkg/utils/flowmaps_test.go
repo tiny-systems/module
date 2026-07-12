@@ -556,6 +556,7 @@ func TestFullPipeline_StatusPage(t *testing.T) {
 		[]byte(`{"context":"{{$.context}}","url":"{{$.context.endpoints[0].url}}","method":"GET","timeout":10}`),
 		overlaidSchema,
 		nil,
+		nil, // portExampleMap
 	)
 	if err != nil {
 		t.Errorf("ValidateEdgeWithPrecomputedMaps() unexpected error: %v\n  overlaid schema: %s", err, overlaidSchema)
@@ -647,6 +648,7 @@ func TestFullPipeline_FirestoreToDebug(t *testing.T) {
 		[]byte(`{"context":"{{$.error}}","data":"{{$}}"}`),
 		overlaidSchema,
 		nil,
+		nil, // portExampleMap
 	)
 	if err != nil {
 		t.Errorf("expected no error (no overlay applied, bare context accepts string), got: %v\n  overlaid schema: %s", err, overlaidSchema)
@@ -859,6 +861,7 @@ func TestFullPipeline_RouterToDebug(t *testing.T) {
 		[]byte(`{"context":"default route"}`),
 		overlaidSchema,
 		nil,
+		nil, // portExampleMap
 	)
 	if err != nil {
 		t.Errorf("expected no error (string into Context type:string), got: %v\n  overlaid schema: %s", err, overlaidSchema)
@@ -940,6 +943,7 @@ func TestFullPipeline_TypedContextRejectsString(t *testing.T) {
 		[]byte(`{"context":"{{$.error}}","endpoint":"/api"}`),
 		overlaidSchema,
 		nil,
+		nil, // portExampleMap
 	)
 	if err == nil {
 		t.Error("expected error (string into typed object context), got nil")

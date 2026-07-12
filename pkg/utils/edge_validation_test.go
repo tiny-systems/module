@@ -923,6 +923,7 @@ func TestValidateEdgeWithPrecomputedMaps_ConfigurableOverlay(t *testing.T) {
 				[]byte(tt.edgeConfiguration),
 				overlaidSchema,
 				nil, // no runtime data
+				nil, // portExampleMap
 			)
 
 			if (err != nil) != tt.wantErr {
@@ -1072,6 +1073,7 @@ func TestValidateEdgeWithPrecomputedMaps_Basic(t *testing.T) {
 				[]byte(tt.edgeConfig),
 				edgeSchemaBytes,
 				tt.runtimeData,
+				nil, // portExampleMap
 			)
 
 			if (err != nil) != tt.wantErr {

@@ -2,7 +2,10 @@ package utils
 
 import (
 	"context"
+	"strings"
 	"testing"
+
+	"github.com/goccy/go-json"
 
 	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -124,6 +127,7 @@ func TestSimulatePortDataFromMaps(t *testing.T) {
 				tt.edgeConfigMap,
 				tt.inspectPort,
 				tt.runtimeData,
+				nil, // portExampleMap
 			)
 
 			if (err != nil) != tt.wantErr {
@@ -1885,4 +1889,100 @@ func mustUnmarshal(s string) *ajson.Node {
 		panic(err)
 	}
 	return n
+}
+
+func TestFillGaps(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     interface{}
+		example  interface{}
+		expected string // JSON
+	}{
+		{
+			name:     "null base takes example wholesale",
+			base:     nil,
+			example:  map[string]interface{}{"userMessage": "hi"},
+			expected: `{"userMessage":"hi"}`,
+		},
+		{
+			name:     "concrete base wins over example",
+			base:     "typed-mock",
+			example:  "stale-example",
+			expected: `"typed-mock"`,
+		},
+		{
+			name: "fills only null and missing keys",
+			base: map[string]interface{}{
+				"context":    map[string]interface{}{"resolved": "from-chain"},
+				"outputData": nil,
+			},
+			example: map[string]interface{}{
+				"context":    nil, // must NOT clobber resolved context
+				"outputData": map[string]interface{}{"userMessage": "hi"},
+			},
+			expected: `{"context":{"resolved":"from-chain"},"outputData":{"userMessage":"hi"}}`,
+		},
+		{
+			name: "recurses into shared objects",
+			base: map[string]interface{}{
+				"outputData": map[string]interface{}{"kept": "mock", "gap": nil},
+			},
+			example: map[string]interface{}{
+				"outputData": map[string]interface{}{"kept": "stale", "gap": "filled", "extra": "added"},
+			},
+			expected: `{"outputData":{"extra":"added","gap":"filled","kept":"mock"}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fillGaps(tt.base, tt.example)
+			b, err := json.Marshal(got)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(b) != tt.expected {
+				t.Errorf("fillGaps() = %s, want %s", b, tt.expected)
+			}
+		})
+	}
+}
+
+// TestSimulatePortData_PortExampleGapFill is the js_eval case end to end: an
+// opaque output field simulates as null, and the port's own published example
+// (Status.Ports Configuration) must fill it — while a runtimeData overlay
+// (scenario/trace) still wins over the example.
+func TestSimulatePortData_PortExampleGapFill(t *testing.T) {
+	schemaJSON := `{"type":"object","properties":{"outputData":{}}}`
+	schemaNode, err := ajson.Unmarshal([]byte(schemaJSON))
+	if err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	portSchemaMap := map[string]*ajson.Node{"node1:response": schemaNode}
+
+	example := map[string][]byte{
+		"node1:response": []byte(`{"outputData":{"userMessage":"a landing page for a jazz bar"}}`),
+	}
+
+	// example fills the null mock
+	got, err := SimulatePortDataFromMaps(context.Background(), portSchemaMap, nil, "node1:response", nil, example)
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	b, _ := json.Marshal(got)
+	if !strings.Contains(string(b), `"userMessage":"a landing page for a jazz bar"`) {
+		t.Errorf("example did not gap-fill: %s", b)
+	}
+
+	// scenario/trace overlay still wins over the example
+	runtime := map[string][]byte{
+		"node1:response": []byte(`{"outputData":{"userMessage":"from-scenario"}}`),
+	}
+	got, err = SimulatePortDataFromMaps(context.Background(), portSchemaMap, nil, "node1:response", runtime, example)
+	if err != nil {
+		t.Fatalf("simulate with runtime: %v", err)
+	}
+	b, _ = json.Marshal(got)
+	if !strings.Contains(string(b), `"from-scenario"`) {
+		t.Errorf("runtimeData must win over example: %s", b)
+	}
 }

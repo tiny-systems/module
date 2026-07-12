@@ -63,7 +63,7 @@ func ValidateEdgeWithSchemaAndRuntimeData(ctx context.Context, nodesMap map[stri
 	}
 
 	// Simulate port data for the source port (using runtime data if available)
-	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, runtimeData)
+	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, runtimeData, GetPortExampleMap(nodesMap))
 	if err != nil {
 		return fmt.Errorf("cannot get port data: %v", err)
 	}
@@ -76,7 +76,7 @@ func ValidateEdgeWithSchemaAndRuntimeData(ctx context.Context, nodesMap map[stri
 // ValidateEdgeWithPrecomputedMaps validates an edge using pre-computed flow maps.
 // Use this when GetFlowMaps has already been called (e.g., in buildGraphEvents) to avoid
 // redundant snapshot calls that cause inconsistent validation results.
-func ValidateEdgeWithPrecomputedMaps(ctx context.Context, portSchemaMap map[string]*ajson.Node, edgeConfigMap map[string][]Destination, sourcePortFullName string, edgeConfiguration []byte, edgeSchemaBytes []byte, runtimeData map[string][]byte) error {
+func ValidateEdgeWithPrecomputedMaps(ctx context.Context, portSchemaMap map[string]*ajson.Node, edgeConfigMap map[string][]Destination, sourcePortFullName string, edgeConfiguration []byte, edgeSchemaBytes []byte, runtimeData map[string][]byte, portExampleMap map[string][]byte) error {
 	if len(edgeSchemaBytes) == 0 {
 		return nil
 	}
@@ -85,7 +85,7 @@ func ValidateEdgeWithPrecomputedMaps(ctx context.Context, portSchemaMap map[stri
 		return fmt.Errorf("invalid edge schema: %v", err)
 	}
 
-	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, edgeConfigMap, sourcePortFullName, runtimeData)
+	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, edgeConfigMap, sourcePortFullName, runtimeData, portExampleMap)
 	if err != nil {
 		return fmt.Errorf("cannot get port data: %v", err)
 	}
@@ -125,7 +125,7 @@ func ValidateEdgeWithRuntimeData(ctx context.Context, nodesMap map[string]v1alph
 	}
 
 	// Simulate port data for the source port (using runtime data if available)
-	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, runtimeData)
+	portData, err := SimulatePortDataFromMaps(ctx, portSchemaMap, destinationsMap, sourcePortFullName, runtimeData, GetPortExampleMap(nodesMap))
 	if err != nil {
 		return fmt.Errorf("cannot get port data: %v", err)
 	}

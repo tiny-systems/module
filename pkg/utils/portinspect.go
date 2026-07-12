@@ -21,17 +21,22 @@ func SimulatePortData(ctx context.Context, nodesMap map[string]v1alpha1.TinyNode
 		return nil, err
 	}
 
-	return SimulatePortDataFromMaps(ctx, portSchemaMap, edgeConfigMap, inspectPortFullName, runtimeData)
+	return SimulatePortDataFromMaps(ctx, portSchemaMap, edgeConfigMap, inspectPortFullName, runtimeData, GetPortExampleMap(nodesMap))
 }
 
 // SimulatePortDataFromMaps generates mock data using pre-computed flow maps.
 // This is useful when you already have the maps from GetFlowMaps and want to avoid recomputing them.
+// portExampleMap (from GetPortExampleMap) carries each source port's own
+// published example; fields the schema mock leaves null are gap-filled from
+// it, so the simulation is self-sufficient without scenarios. Pass nil to
+// skip example seeding.
 func SimulatePortDataFromMaps(
 	ctx context.Context,
 	portSchemaMap map[string]*ajson.Node,
 	edgeConfigMap map[string][]Destination,
 	inspectPortFullName string,
 	runtimeData map[string][]byte,
+	portExampleMap map[string][]byte,
 ) (interface{}, error) {
 	var (
 		visited = make(map[string]struct{})
@@ -198,6 +203,20 @@ func SimulatePortDataFromMaps(
 			return nil, err
 		}
 
+		// Gap-fill from the port's own published example (the component's
+		// Status.Ports Configuration — e.g. js_eval's declared outputData).
+		// STRICTLY fills what the mock left null or missing: an explicit
+		// schema's typed mock values are never overridden, and the
+		// trace/scenario overlay below still wins over everything.
+		if portExampleMap != nil {
+			if ex, ok := portExampleMap[portName]; ok && len(ex) > 0 {
+				var exVal interface{}
+				if err := json.Unmarshal(ex, &exVal); err == nil && exVal != nil {
+					result = fillGaps(result, exVal)
+				}
+			}
+		}
+
 		// If runtime data is available for this port, layer it on top
 		// of the simulated data. Trace data (from a real run) is the
 		// source of truth and replaces wholesale; scenario data (user-
@@ -321,6 +340,35 @@ func fillTypedDefaults(data interface{}, schemaBytes []byte) interface{} {
 		asMap[k] = mergeMocksIntoObject(current, fieldSchema)
 	}
 	return asMap
+}
+
+// fillGaps returns base with nulls and missing object keys filled from
+// example, recursively. Unlike mergeOverlay, base ALWAYS wins where it has a
+// concrete value — an explicit schema's typed mock or chain-resolved data is
+// never overridden by a (possibly stale) example. Only sim gaps (null / absent
+// keys) are filled.
+func fillGaps(base, example interface{}) interface{} {
+	if example == nil {
+		return base
+	}
+	if base == nil {
+		return example
+	}
+	baseMap, baseOK := base.(map[string]interface{})
+	exMap, exOK := example.(map[string]interface{})
+	if !baseOK || !exOK {
+		// concrete non-object base wins; mismatched shapes keep base
+		return base
+	}
+	for k, ev := range exMap {
+		bv, exists := baseMap[k]
+		if !exists || bv == nil {
+			baseMap[k] = ev
+			continue
+		}
+		baseMap[k] = fillGaps(bv, ev)
+	}
+	return baseMap
 }
 
 // mergeOverlay layers overlay onto base. When both are objects, the result
