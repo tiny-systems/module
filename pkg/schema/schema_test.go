@@ -516,3 +516,41 @@ func TestUpdateWithDefinitions_ValidationIntegration(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateWithDefinitions_BareNeverMasksRich: a stored bare snapshot
+// (additionalProperties only — saved automatically at build time) must not
+// replace a real def that has explicit properties (enriched server-side from
+// observed data). A def WITH authored properties still wins as before.
+func TestUpdateWithDefinitions_BareNeverMasksRich(t *testing.T) {
+	realSchema := []byte(`{
+		"$ref": "#/$defs/Response",
+		"$defs": {
+			"Outputdata": {
+				"type": "object", "configurable": true, "path": "$.outputData",
+				"additionalProperties": {"type": "string"},
+				"properties": {"userMessage": {"type": "string", "default": "jazz"}}
+			},
+			"Response": {"type": "object", "properties": {"outputData": {"$ref": "#/$defs/Outputdata"}}}
+		}
+	}`)
+
+	// stored snapshot: bare — must NOT mask
+	bare, _ := ajson.Unmarshal([]byte(`{"type":"object","configurable":true,"path":"$.outputData","additionalProperties":{"type":"string"}}`))
+	got, err := UpdateWithDefinitions(realSchema, map[string]*ajson.Node{"Outputdata": bare})
+	if err != nil {
+		t.Fatalf("UpdateWithDefinitions: %v", err)
+	}
+	if !strings.Contains(string(got), `"userMessage"`) {
+		t.Errorf("bare stored def masked the enriched real def: %s", got)
+	}
+
+	// authored schema: has properties — MUST win
+	authored, _ := ajson.Unmarshal([]byte(`{"type":"object","configurable":true,"path":"$.outputData","properties":{"title":{"type":"string"}}}`))
+	got, err = UpdateWithDefinitions(realSchema, map[string]*ajson.Node{"Outputdata": authored})
+	if err != nil {
+		t.Fatalf("UpdateWithDefinitions authored: %v", err)
+	}
+	if !strings.Contains(string(got), `"title"`) || strings.Contains(string(got), `"userMessage"`) {
+		t.Errorf("authored def must replace the real def: %s", got)
+	}
+}

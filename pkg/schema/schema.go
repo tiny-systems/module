@@ -71,6 +71,16 @@ func UpdateWithDefinitions(realSchema []byte, configurableDefinitionNodes map[st
 			}
 		}
 
+		// A collected def that is still BARE must never mask a real def that
+		// HAS explicit properties — e.g. the component's live schema enriched
+		// server-side from observed data. Bare snapshots (stored automatically
+		// at build time) carry no authored intent; the moment a user authors
+		// properties in the schema editor, their def HasProperties and wins
+		// exactly as before.
+		if ok && !HasProperties(conf) && HasProperties(realSchemaDef) {
+			continue
+		}
+
 		if ok {
 			// replace this real status def with configurable one
 			// copy important props before replace
