@@ -9,6 +9,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -267,6 +268,17 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 		defs[defName] = *updated
 	}
 
+	// Materialize the observed data shape into the schema. Reflection over an
+	// `any` field holding a map can only say "bare object"; the LIVE VALUE
+	// knows the actual keys and types (js_eval's outputData
+	// {userMessage: "..."} → properties.userMessage: string, default set to
+	// the observed value so the simulator mocks REAL example data). This is
+	// the ONE inference point: the published Status schema feeds edge
+	// validation, the MCP tools, and the UI — none of them infer on their own.
+	// Operates on the typed defs in place — untouched schemas serialize
+	// byte-identically to before.
+	enrichDefsFromValue(defs, getDefinitionName(reflect.TypeOf(val)), val)
+
 	sh.WithExtraPropertiesItem("$defs", defs)
 
 	// schema post-processing hook
@@ -275,6 +287,133 @@ func CreateSchema(val interface{}) (jsonschema.Schema, error) {
 	}
 
 	return sh, nil
+}
+
+// enrichDefsFromValue walks the reflected definitions alongside the live value
+// and fills object defs that have NO explicit properties (bare map reflection)
+// with properties inferred from the value's actual keys. Existing explicit
+// properties are never modified — recursion only descends through them to
+// reach nested any-typed fields.
+func enrichDefsFromValue(defs map[string]jsonschema.Schema, rootDefName string, val interface{}) {
+	valBytes, err := json.Marshal(val)
+	if err != nil {
+		return // best-effort; never fail schema creation
+	}
+	var value interface{}
+	if err := json.Unmarshal(valBytes, &value); err != nil {
+		return
+	}
+
+	visited := map[string]struct{}{}
+
+	var walkSchema func(s *jsonschema.Schema, v interface{})
+	var walkDef func(defName string, v interface{})
+
+	walkDef = func(defName string, v interface{}) {
+		if _, seen := visited[defName]; seen {
+			return
+		}
+		visited[defName] = struct{}{}
+		def, ok := defs[defName]
+		if !ok {
+			return
+		}
+		walkSchema(&def, v)
+		defs[defName] = def
+	}
+
+	walkSchema = func(s *jsonschema.Schema, v interface{}) {
+		if s == nil || v == nil {
+			return
+		}
+		if s.Ref != nil {
+			walkDef(strings.TrimPrefix(*s.Ref, "#/$defs/"), v)
+			return
+		}
+
+		// descend arrays into items with the first element
+		if arr, ok := v.([]interface{}); ok {
+			if s.Items != nil && s.Items.SchemaOrBool != nil && len(arr) > 0 {
+				walkSchema(s.Items.SchemaOrBool.TypeObject, arr[0])
+			}
+			return
+		}
+
+		vm, ok := v.(map[string]interface{})
+		if !ok || len(vm) == 0 {
+			return
+		}
+
+		if len(s.Properties) > 0 {
+			// explicit properties — never modified, only descended
+			for k, pv := range vm {
+				if p, ok := s.Properties[k]; ok {
+					walkSchema(p.TypeObject, pv)
+				}
+			}
+			return
+		}
+
+		// bare object (map/any reflection) — materialize observed keys
+		if s.Type != nil && !s.HasType(jsonschema.Object) {
+			return
+		}
+		keys := make([]string, 0, len(vm))
+		for k := range vm {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for i, k := range keys {
+			node := inferValueSchema(vm[k])
+			node["propertyOrder"] = i + 1
+			nodeBytes, err := json.Marshal(node)
+			if err != nil {
+				continue
+			}
+			var ps jsonschema.Schema
+			if err := ps.UnmarshalJSON(nodeBytes); err != nil {
+				continue
+			}
+			s.WithPropertiesItem(k, ps.ToSchemaOrBool())
+		}
+	}
+
+	walkDef(rootDefName, value)
+}
+
+// inferValueSchema builds a property schema from an observed value, carrying
+// the value itself as `default` so the schema-based data generator mocks the
+// REAL example instead of placeholder filler.
+func inferValueSchema(v interface{}) map[string]interface{} {
+	switch t := v.(type) {
+	case string:
+		return map[string]interface{}{"type": "string", "default": t}
+	case float64:
+		return map[string]interface{}{"type": "number", "default": t}
+	case bool:
+		return map[string]interface{}{"type": "boolean", "default": t}
+	case []interface{}:
+		node := map[string]interface{}{"type": "array", "default": t}
+		if len(t) > 0 {
+			node["items"] = inferValueSchema(t[0])
+		}
+		return node
+	case map[string]interface{}:
+		props := map[string]interface{}{}
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for i, k := range keys {
+			p := inferValueSchema(t[k])
+			p["propertyOrder"] = i + 1
+			props[k] = p
+		}
+		return map[string]interface{}{"type": "object", "properties": props}
+	default:
+		return map[string]interface{}{}
+	}
 }
 
 func getPath(defName string, all map[string]tagDefinition, path []string) []string {

@@ -2,11 +2,13 @@ package schema
 
 import (
 	"fmt"
+	"strings"
+	"testing"
+
 	"github.com/goccy/go-json"
 	"github.com/google/go-cmp/cmp"
-	"github.com/tiny-systems/ajson"
 	"github.com/swaggest/jsonschema-go"
-	"testing"
+	"github.com/tiny-systems/ajson"
 )
 
 type ModifyContext any
@@ -477,6 +479,16 @@ func TestCreateSchema(t *testing.T) {
 					"ContextItem": *((&jsonschema.Schema{}).
 						WithType(jsonschema.Object.Type()).
 						WithAdditionalProperties((&jsonschema.Schema{}).WithType(jsonschema.String.Type()).ToSchemaOrBool()).
+						// enrichment materializes observed data keys as explicit
+						// properties (default = observed value) so the schema is
+						// self-describing for validation, MCP, and the UI
+						WithProperties(map[string]jsonschema.SchemaOrBool{
+							"field_1_1": (&jsonschema.Schema{}).
+								WithType(jsonschema.String.Type()).
+								WithDefault("dsds").
+								WithExtraPropertiesItem("propertyOrder", 1).
+								ToSchemaOrBool(),
+						}).
 						WithExtraPropertiesItem("path", "$.context[0]")),
 					"Control": *((&jsonschema.Schema{}).WithType(jsonschema.Object.Type()).
 						WithRequired("context", "send").
@@ -513,4 +525,34 @@ func TestCreateSchema(t *testing.T) {
 
 func getStrPtr(s string) *string {
 	return &s
+}
+
+// TestCreateSchema_InferPropertiesFromValue is the js_eval outputData case:
+// an `any` settings field holding a map must publish explicit properties
+// inferred from the observed value (JSON types: string vs number vs bool),
+// with `default` carrying the value so the mocker generates the REAL example.
+func TestCreateSchema_InferPropertiesFromValue(t *testing.T) {
+	type OutputData any
+	type Settings struct {
+		OutputData OutputData `json:"outputData" configurable:"true" title:"Output object"`
+	}
+	var s Settings
+	_ = json.Unmarshal([]byte(`{"outputData":{"userMessage":"a jazz bar","count":5,"active":true}}`), &s)
+
+	got, err := CreateSchema(s)
+	if err != nil {
+		t.Fatalf("CreateSchema: %v", err)
+	}
+	b, _ := got.MarshalJSON()
+	sch := string(b)
+
+	for _, want := range []string{
+		`"userMessage":{"default":"a jazz bar","type":"string"`,
+		`"count":{"default":5,"type":"number"`,
+		`"active":{"default":true,"type":"boolean"`,
+	} {
+		if !strings.Contains(sch, want) {
+			t.Errorf("schema missing %s\nfull: %s", want, sch)
+		}
+	}
 }
