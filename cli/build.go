@@ -261,6 +261,14 @@ func filterNullValues(m map[string]interface{}) map[string]interface{} {
 // authors don't need to set it manually.
 const AgentToolTag = "agent_tool"
 
+// SyncRPCTag marks a component that blocks on a synchronous response
+// (module.SyncRPC capability). The platform keeps the connected
+// subgraph around such components on classic request/reply delivery —
+// durable fire-and-forget hops would never return the result the
+// component is waiting on. Auto-added; authors implement the
+// interface, never set the tag by hand.
+const SyncRPCTag = "sync_rpc"
+
 func getComponentApi(c module.Component) api.PublishComponent {
 	componentInfo := c.GetInfo()
 
@@ -283,6 +291,23 @@ func getComponentApi(c module.Component) api.PublishComponent {
 		}
 		if info.Description != "" {
 			componentInfo.Info = info.Description
+		}
+	}
+
+	// Synchronous-response declaration: the component tells the world
+	// it blocks waiting for a downstream result, and the platform
+	// derives delivery modes from that — the component's ONE line of
+	// transport policy, replacing flow-level mode configuration.
+	if _, ok := c.(module.SyncRPC); ok {
+		hasTag := false
+		for _, t := range componentInfo.Tags {
+			if t == SyncRPCTag {
+				hasTag = true
+				break
+			}
+		}
+		if !hasTag {
+			componentInfo.Tags = append(componentInfo.Tags, SyncRPCTag)
 		}
 	}
 
