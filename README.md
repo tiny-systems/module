@@ -1,21 +1,23 @@
 # Tiny Systems Module SDK
 
-A Kubebuilder-based Kubernetes operator SDK for building flow-based workflow engines. This SDK provides the complete infrastructure for developing modular operators that can be composed into visual workflows.
+The Kubernetes operator SDK behind [Tiny Systems](https://tinysystems.io) — the self-hosted AI agent runtime. You use this SDK to build **modules**: the capabilities a prompt-built agent composes (an LLM call, an HTTP server, a database query, a Slack notifier), each shipped as a Helm-installable operator that reconciles its components as real workloads.
 
 ## Overview
 
-Tiny Systems Module SDK enables developers to create **module operators** (like `common-module`, `http-module`, `grpc-module`) that bring specific functionality into a Kubernetes-native flow engine. Each module provides reusable components that can be connected through a port-based architecture to create complex workflows.
+An agent on Tiny Systems is a graph of components passing typed messages. This SDK is how you write the components. A module (like `common-module`, `http-module`, `llm-module`) is a Kubebuilder-based operator that brings one or more components into the cluster; the platform wires them together from a prompt and the operators run them.
 
 ### Key Features
 
-- **Port-Based Component Architecture**: Visual programming model with input/output ports
-- **JSON Schema-Driven Configuration**: Automatic schema generation with UI hints
-- **Message Routing & Retry Logic**: Intelligent routing with exponential backoff
-- **Multi-Module Communication**: gRPC-based inter-module communication
-- **Expression-Based Data Transformation**: Mustache-style `{{expression}}` syntax with JSONPath for flexible data mapping
-- **Kubernetes-Native**: Everything is a CRD with standard controller patterns
-- **OpenTelemetry Integration**: Built-in observability with tracing and metrics
-- **CLI Tools**: Complete tooling for running and building modules
+- **Port-Based Component Architecture**: components expose typed input/output ports; the runtime maps data between them
+- **JSON Schema-Driven Configuration**: automatic schema generation with UI hints
+- **Durable Execution**: trigger-driven agents persist every step to a JetStream run ledger and survive pod restarts; the transport is derived from the components (see the `SyncRPC` capability), never configured by hand
+- **Message Routing & Retry Logic**: explicit per-edge retry with backoff (single-shot by default)
+- **Multi-Module Communication**: NATS/JetStream transport between modules, with request/reply load-balancing across replicas
+- **Expression-Based Data Transformation**: `{{expression}}` syntax with JSONPath for data mapping
+- **Kubernetes-Native**: everything is a CRD with standard controller patterns
+- **OpenTelemetry Integration**: built-in tracing and metrics
+- **MCP-Native**: components can opt into being agent tools (`AgentTool`) so an LLM can call them directly
+- **CLI Tools**: tooling for running and building modules
 
 ## Table of Contents
 
