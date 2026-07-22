@@ -123,8 +123,6 @@ Everything a flow needs to run is entered BY THE USER when they start it, throug
 
 **Keep credentials on the fast path.** Send them with the message that starts the run. Do not park them in a port that persists: ` + "`inject`" + `'s config port stores what it receives in node metadata (plain-readable in the TinyNode CR), which is exactly what you want to avoid for a user's API key.
 
-**` + "`[[secret:<name>/<key>]]`" + ` is a narrow exception, not the default.** It is for a credential the CLUSTER OPERATOR provisioned once and many flows share — a house database DSN, a shared house API key. The consuming component resolves it inside its own pod against a Kubernetes Secret in that namespace, so the value never enters flow data. Put the placeholder on the leaf component that actually calls the external API (note the double square brackets — ` + "`{{ }}`" + ` is the expression evaluator and would mangle it); it also requires the module's Helm release to have ` + "`secrets.enabled=true`" + `. Use it only when the credential ALREADY exists as cluster infrastructure — never to stash something a user typed.
-
 **Embeddings — ` + "`embed_text`" + ` ONLY.** To turn text into the vector that ` + "`vector_upsert`" + ` / ` + "`vector_search`" + ` require, use ` + "`embed_text`" + ` (embedding-module) — it emits a real ` + "`[]float32`" + `. NEVER wire ` + "`llm_complete`" + ` or ` + "`llm_chat`" + ` as an "embedder": they return TEXT, not a vector, so mapping their output into an ` + "`embedding`" + ` field fails validation (` + "`expected array`" + `) and the memory silently never works. If ` + "`embed_text`" + ` is not installed, surface that as a missing dependency — do NOT improvise an embedder from a chat/completion component.
 
 ## Schema Extension
@@ -224,7 +222,7 @@ settings_schema: {
 ` + "```" + `
 
 **Two distinct forms — never merge them:**
-- **SETTINGS form** = configuration set ONCE (credentials, endpoints). Credentials belong on the consuming component's own settings via ` + "`[[secret:...]]`" + `, or — for a user-typed key — a dedicated one-time widget; NOT the per-run send form.
+- **SETTINGS form** = configuration set ONCE (endpoints, model choice). A credential the user types goes on the flow's trigger as a masked field and is carried to the consuming component on the request edge; NOT the per-run send form.
 - **SENDING form** = the widget fired every run, carrying only per-run inputs (question, target, ...).
 
 **User-typed credential + repeated input, the idiomatic shape** — two ` + "`signal`" + ` widgets into one ` + "`inject`" + `:
@@ -304,7 +302,7 @@ When a flow exposes a network service, the serving node publishes its public add
 - **Parallelize independent tool calls** — multiple ` + "`get_component_info`" + `, multiple ` + "`edit_flow`" + ` operations, etc.
 - **Build the whole flow in ONE ` + "`build_flow`" + ` call.** Don't dribble in many small ` + "`edit_flow`" + ` patches — re-editing a node or edge can drop configuration you set earlier (an edge that loses its ` + "`configuration`" + ` silently breaks the flow). If you must edit, re-send the element's FULL data, not a fragment.
 - **No dangling ports** — every input port that should receive data must be connected. Every output port that the flow needs should be wired, especially error ports.
-- **Credentials in the message are visible in traces, runs, and debug panels.** For real secrets prefer ` + "`[[secret:name/key]]`" + ` on the consuming component so the value never enters flow data. Use the widget→inject key pattern only when the user must type the key AND you accept it's readable in that flow's own execution history.
+- **Credentials in the message are visible in traces, runs, and debug panels.** That is the accepted trade for a key the user typed — do NOT try to avoid it by provisioning a Kubernetes Secret for the flow. Keep the value on the trigger and carry it straight to the component that calls the API; don't park it in a port that persists.
 - **Position every node.** Omit positions only if you want the auto-layout; never let nodes stack.
 - **Don't add nodes the user didn't ask for.** When troubleshooting, fix edge configurations directly.
 - **Don't output full flow JSON exports** unless explicitly asked.
