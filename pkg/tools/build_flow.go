@@ -479,8 +479,14 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 
 		result, err := execCtx.EdgeConfigurer.ConfigureEdge(ctx, execCtx.ProjectName, execCtx.FlowName, ce.EdgeID, e.Configuration, e.Schema, "")
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("edge %s -> %s config: %s", e.From, e.To, err.Error()))
 			edgesOutput[j]["config_valid"] = false
+			msg := fmt.Sprintf("edge %s -> %s config: %s", e.From, e.To, err.Error())
+			if note := unwireEdge(ctx, execCtx, ce.EdgeID); note != "" {
+				msg += " (" + note + ")"
+			} else {
+				edgesOutput[j]["removed"] = true
+			}
+			errors = append(errors, msg)
 			continue
 		}
 
@@ -490,7 +496,13 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			if result.Hint != "" {
 				msg += " (hint: " + result.Hint + ")"
 			}
-			warnings = append(warnings, msg)
+			if note := unwireEdge(ctx, execCtx, ce.EdgeID); note != "" {
+				msg += " (" + note + ")"
+			} else {
+				edgesOutput[j]["removed"] = true
+				msg += " — edge removed; re-send it with a corrected configuration"
+			}
+			errors = append(errors, msg)
 		}
 	}
 
@@ -559,3 +571,30 @@ func parseAliasPort(s string) (alias, port string, ok bool) {
 }
 
 var _ Tool = (*BuildFlowTool)(nil)
+
+// unwireEdge removes an edge whose configuration was rejected, returning a
+// non-empty note when it could not be removed.
+//
+// ConfigureEdge deliberately refuses to persist a configuration that fails
+// validation — but AddEdge has already wired the edge by then. Leaving it is
+// the worst of both worlds: the edge carries NO mapping, so at runtime the
+// target falls back to its own settings example and the flow serves confident,
+// fabricated data behind a green build. (Observed live: a cluster-health
+// endpoint that returned a hand-written sample pod instead of the real 14.)
+//
+// Removing the edge makes the flow visibly incomplete instead — a dangling
+// port the author must fix — which is a failure you can see.
+func unwireEdge(ctx context.Context, execCtx ExecutionContext, edgeID string) string {
+	if execCtx.FlowModifier == nil {
+		return "edge left wired WITHOUT configuration — no flow modifier available to remove it; delete it manually or it will run on target defaults"
+	}
+	ops := []FlowOperation{{Op: "delete", ID: edgeID, Element: map[string]interface{}{"type": "tinyEdge"}}}
+	results, err := execCtx.FlowModifier.ApplyFlowChanges(ctx, execCtx.ProjectName, execCtx.FlowName, ops)
+	if err != nil {
+		return "edge left wired WITHOUT configuration — removal failed: " + err.Error()
+	}
+	if len(results) > 0 && !results[0].Success {
+		return "edge left wired WITHOUT configuration — removal failed: " + results[0].Error
+	}
+	return ""
+}
