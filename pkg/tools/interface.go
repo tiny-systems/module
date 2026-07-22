@@ -123,8 +123,8 @@ type PortDetail struct {
 
 // ComponentInfo contains component metadata for validation and discovery
 type ComponentInfo struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 	// Info carries the component's behavior notes (blocking semantics,
 	// gotchas, when to use it). Populated when the module operator
 	// publishes TinyModuleComponentStatus.Info; LLM callers should read
@@ -274,17 +274,17 @@ type PublicModuleSummary struct {
 // get_module_info: summary + components with port schemas + RBAC
 // permissions + helm install configuration.
 type PublicModuleDetails struct {
-	Name                     string                 `json:"name"`
-	FullName                 string                 `json:"full_name,omitempty"`
-	Description              string                 `json:"description"`
-	Verified                 bool                   `json:"verified"`
-	LatestVersion            string                 `json:"latest_version,omitempty"`
-	SDKVersion               string                 `json:"sdk_version,omitempty"`
-	ReleaseNotes             string                 `json:"release_notes,omitempty"`
-	Repo                     string                 `json:"repo,omitempty"`
-	Tag                      string                 `json:"tag,omitempty"`
-	RequiresKubernetesAccess bool                   `json:"requires_kubernetes_access,omitempty"`
-	Components               []PublicModuleComponent `json:"components,omitempty"`
+	Name                     string                   `json:"name"`
+	FullName                 string                   `json:"full_name,omitempty"`
+	Description              string                   `json:"description"`
+	Verified                 bool                     `json:"verified"`
+	LatestVersion            string                   `json:"latest_version,omitempty"`
+	SDKVersion               string                   `json:"sdk_version,omitempty"`
+	ReleaseNotes             string                   `json:"release_notes,omitempty"`
+	Repo                     string                   `json:"repo,omitempty"`
+	Tag                      string                   `json:"tag,omitempty"`
+	RequiresKubernetesAccess bool                     `json:"requires_kubernetes_access,omitempty"`
+	Components               []PublicModuleComponent  `json:"components,omitempty"`
 	Permissions              []PublicModulePermission `json:"permissions,omitempty"`
 	HelmInstall              *PublicModuleHelmInstall `json:"helm_install,omitempty"`
 }
@@ -292,11 +292,11 @@ type PublicModuleDetails struct {
 // PublicModuleComponent describes one component inside a public module:
 // name + author-written description/info + tags + its typed ports.
 type PublicModuleComponent struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	Info        string              `json:"info,omitempty"`
-	Tags        []string            `json:"tags,omitempty"`
-	Ports       []PublicModulePort  `json:"ports,omitempty"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Info        string             `json:"info,omitempty"`
+	Tags        []string           `json:"tags,omitempty"`
+	Ports       []PublicModulePort `json:"ports,omitempty"`
 }
 
 // PublicModulePort is the typed port metadata published alongside a
@@ -320,14 +320,14 @@ type PublicModulePermission struct {
 // by local installers — command template, user-fillable fields,
 // prerequisites, warnings, and the storage/ingress facet flags.
 type PublicModuleHelmInstall struct {
-	Command         string                   `json:"command,omitempty"`
-	ChartRepo       string                   `json:"chart_repo,omitempty"`
-	ChartName       string                   `json:"chart_name,omitempty"`
-	Prerequisites   []string                 `json:"prerequisites,omitempty"`
-	Warnings        []string                 `json:"warnings,omitempty"`
-	RequiresIngress bool                     `json:"requires_ingress,omitempty"`
-	RequiresStorage bool                     `json:"requires_storage,omitempty"`
-	Fields          []PublicModuleHelmField  `json:"fields,omitempty"`
+	Command         string                  `json:"command,omitempty"`
+	ChartRepo       string                  `json:"chart_repo,omitempty"`
+	ChartName       string                  `json:"chart_name,omitempty"`
+	Prerequisites   []string                `json:"prerequisites,omitempty"`
+	Warnings        []string                `json:"warnings,omitempty"`
+	RequiresIngress bool                    `json:"requires_ingress,omitempty"`
+	RequiresStorage bool                    `json:"requires_storage,omitempty"`
+	Fields          []PublicModuleHelmField `json:"fields,omitempty"`
 }
 
 // PublicModuleHelmField is one user-fillable field in the helm install
@@ -347,6 +347,21 @@ type PublicModuleHelmField struct {
 // runtime values from TinyWidgetPage CRDs + TinyNode status ports.
 type DashboardReader interface {
 	ReadDashboard(ctx context.Context, projectName string) (*DashboardData, error)
+}
+
+// DashboardWriter pins a node's port to the project dashboard as a widget, or
+// unpins it. This is the write half of DashboardReader.
+//
+// It exists because a credential a user must type has nowhere else to go: the
+// canonical pattern is a widget with a secret:true field that the user fills in
+// at start-up. Without a write path an agent can build the node and declare the
+// schema but cannot surface the form, so the flow dead-ends in "now go add a
+// widget by hand" — which is why agents reach for cluster Secrets instead.
+type DashboardWriter interface {
+	// SetNodeWidget pins nodeID's port as a widget when enabled, and removes it
+	// when not. Returns the dashboard page the widget landed on. Pinning an
+	// already-pinned port, or unpinning an absent one, is not an error.
+	SetNodeWidget(ctx context.Context, projectName, nodeID, portName string, enabled bool) (page string, err error)
 }
 
 // DashboardData is the full dashboard payload for a project.
@@ -609,6 +624,7 @@ type ExecutionContext struct {
 
 	// Dashboard
 	DashboardReader DashboardReader
+	DashboardWriter DashboardWriter
 
 	// Session-scoped utility
 	PositionTracker PositionTracker
