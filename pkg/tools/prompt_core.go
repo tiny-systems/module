@@ -115,44 +115,17 @@ Which pattern a component uses is visible in its OUTPUT-port schema (` + "`get_n
 
 Putting credentials directly on the node that receives the request does NOT propagate their schema downstream. Validator fails with "field not found". Always hold credentials upstream.
 
-## Secrets — ` + "`[[secret:<name>/<key>]]`" + ` Placeholders
+## Credentials — the user supplies them, per flow
 
-For real credentials (API keys, tokens, DSN passwords), use the secret resolver instead of carrying them through the context pipeline. The plain ` + "`context`" + ` propagation pattern above leaks secrets into every intermediate node's status metadata; the secret resolver keeps them in the consuming component pod's memory only.
+Everything a flow needs to run is entered BY THE USER when they start it, through a widget on the flow's own trigger. Declare the field with ` + "`secret: true`" + ` in the trigger's settings_schema and it renders masked in the Widgets tab (see Dashboard Widgets below). The value rides the Send payload into that run — nothing is provisioned ahead of time and nothing is written into a cluster object.
 
-**Syntax:** ` + "`[[secret:<secret-name>/<data-key>]]`" + ` — note the double square brackets, NOT ` + "`{{ }}`" + `. The expression evaluator owns ` + "`{{ }}`" + ` syntax and would mangle ` + "`{{secret:...}}`" + ` to nil before resolution.
+**Do NOT create cluster resources for an individual flow.** No per-flow Kubernetes Secret, ConfigMap, or anything else. Modules are shared infrastructure: one module deployment serves every flow that uses it, so thousands of flows would mean thousands of Secrets — and that one shared module pod would need read access to all of them. It does not scale, and it is a blast radius. If you are about to run ` + "`kubectl create secret`" + ` for a flow you are building, stop and ask the user for the value through a widget instead.
 
-**Architecture rule — put the placeholder on the leaf consumer, not the trigger.**
-Place ` + "`[[secret:...]]`" + ` on the Settings of the component that *actually calls the external API* — e.g. a model component's API-key setting, or an HTTP client's Authorization setting. The consuming component resolves it in its OnSettings against a Kubernetes Secret in its own pod's namespace. Resolved value never enters edge data.
+**Keep credentials on the fast path.** Send them with the message that starts the run. Do not park them in a port that persists: ` + "`inject`" + `'s config port stores what it receives in node metadata (plain-readable in the TinyNode CR), which is exactly what you want to avoid for a user's API key.
 
-**Anti-pattern** — placing ` + "`[[secret:...]]`" + ` on a trigger's ` + "`context.apiKey`" + ` and piping it through edges. The resolved value will land in every intermediate node's ` + "`status.metadata`" + ` (plain-readable in the TinyNode CR). The placeholder belongs on the leaf, not the root.
-
-**How a component supports this:** it exposes a credential field on its Settings (an API-key, token, or DSN setting) and resolves the placeholder in its own pod. When that Settings credential is set, it takes precedence over any value carried on the request — so the flow omits the credential from edge configs entirely. Trigger components also resolve placeholders in their Settings and control payload, so a Send-button value doesn't leak downstream. Confirm which components expose a credential Setting via ` + "`get_component_info`" + `.
-
-**Requirements for resolution to work:**
-1. Component must embed ` + "`module.Base`" + ` (gives ` + "`Client()`" + ` access) and call ` + "`secret.Resolve(ctx, &settings, c.Client())`" + ` in OnSettings.
-2. Helm release installed with ` + "`secrets.enabled=true`" + ` — adds the namespace-scoped Role granting get/list/watch on Secrets.
-3. The Kubernetes Secret must exist in the same namespace as the module pod (` + "`kubectl create secret generic <name> --from-literal=<key>=<value>`" + `).
-
-**Example — RAG flow with no secret leakage:**
-
-` + "```" + `
-build_flow(
-  nodes: [
-    {alias: "ask", component: "signal", module: "tinysystems/common-module-v0",
-     settings: {context: {question: "What's in memory?"}}},
-    {alias: "embed", component: "embed_text", module: "tinysystems/embedding-module-v0"},
-    {alias: "search", component: "vector_search", module: "tinysystems/database-module-v0",
-     settings: {table: "memories", dsn: "[[secret:demo-db/dsn]]"}},
-    {alias: "chat", component: "llm_chat", module: "tinysystems/llm-module-v0",
-     settings: {provider: "anthropic", apiKey: "[[secret:demo-keys/anthropic]]"}},
-  ],
-  // Signal context only carries the question — no credentials flow through edges.
-)
-` + "```" + `
+**` + "`[[secret:<name>/<key>]]`" + ` is a narrow exception, not the default.** It is for a credential the CLUSTER OPERATOR provisioned once and many flows share — a house database DSN, a shared house API key. The consuming component resolves it inside its own pod against a Kubernetes Secret in that namespace, so the value never enters flow data. Put the placeholder on the leaf component that actually calls the external API (note the double square brackets — ` + "`{{ }}`" + ` is the expression evaluator and would mangle it); it also requires the module's Helm release to have ` + "`secrets.enabled=true`" + `. Use it only when the credential ALREADY exists as cluster infrastructure — never to stash something a user typed.
 
 **Embeddings — ` + "`embed_text`" + ` ONLY.** To turn text into the vector that ` + "`vector_upsert`" + ` / ` + "`vector_search`" + ` require, use ` + "`embed_text`" + ` (embedding-module) — it emits a real ` + "`[]float32`" + `. NEVER wire ` + "`llm_complete`" + ` or ` + "`llm_chat`" + ` as an "embedder": they return TEXT, not a vector, so mapping their output into an ` + "`embedding`" + ` field fails validation (` + "`expected array`" + `) and the memory silently never works. If ` + "`embed_text`" + ` is not installed, surface that as a missing dependency — do NOT improvise an embedder from a chat/completion component.
-
-If a component you need doesn't yet support ` + "`[[secret:...]]`" + ` in its Settings, the temporary workaround is to carry the credential through context — but raise it as a gap, because the leak audit will show resolved values in every intermediate node's status.
 
 ## Schema Extension
 
