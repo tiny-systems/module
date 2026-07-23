@@ -1092,6 +1092,20 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		}
 		lastErr = err
 
+		// A module-marked permanent error is authoritative: the component
+		// already declared it non-retryable (errors.NonRetryable / a
+		// PermanentError — e.g. an LLM "unauthorized" or "quota_exceeded"),
+		// so never retry it, regardless of MaxAttempts and without the flow
+		// author having to re-list its code. This is the common case; the
+		// policy's NonRetryableErrorCodes below stays only as an advanced
+		// override for codes a module did NOT mark permanent.
+		if perrors.IsPermanent(err) {
+			c.log.Info("send to edge: short-circuit on module-marked permanent error",
+				"to", edgeTo, "edgeID", edge.ID, "code", perrors.ErrorCode(err),
+			)
+			return nil, err
+		}
+
 		// Short-circuit on a code that the policy lists as non-retryable.
 		if code := perrors.ErrorCode(err); code != "" && policy != nil {
 			for _, blocked := range policy.NonRetryableErrorCodes {
