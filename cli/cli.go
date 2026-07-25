@@ -24,6 +24,7 @@ func RegisterCommands(rootCmd *cobra.Command) {
 	applyBuildFlags(buildCmd)
 	toolsCmd.AddCommand(buildCmd)
 	toolsCmd.AddCommand(infoCmd)
+	toolsCmd.AddCommand(rbacValuesCmd)
 
 	applyHookFlags(preInstallCmd)
 	rootCmd.AddCommand(preInstallCmd)
