@@ -492,9 +492,14 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 
 		edgesOutput[j]["config_valid"] = result.Valid
 		if result.Valid && result.Hint != "" {
-			// Surface advisories on valid edges (e.g. mapping a field the target
-			// doesn't declare) instead of dropping them silently.
+			// Surface advisories on valid edges (a field the target doesn't
+			// declare, or an expression that can't be verified without a
+			// scenario) BOTH on the edge and in the top-level warnings[]. On the
+			// edge alone they sit next to config_valid:true and get read as
+			// noise, so the flow ships with amber validation warnings the model
+			// never acted on.
 			edgesOutput[j]["hint"] = result.Hint
+			warnings = append(warnings, fmt.Sprintf("edge %s -> %s: %s", e.From, e.To, result.Hint))
 		}
 		if !result.Valid {
 			msg := fmt.Sprintf("edge %s -> %s validation: %s", e.From, e.To, result.Error)
@@ -554,9 +559,12 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 	}
 
 	// Hint about the next obvious step depending on whether the build was clean.
-	if len(errors) > 0 {
+	switch {
+	case len(errors) > 0:
 		output["hint"] = "Some operations failed — use edit_flow to fix the specific issues listed in errors[]."
-	} else {
+	case len(warnings) > 0:
+		output["hint"] = fmt.Sprintf("Flow built, but %d warning(s) in warnings[] — each is an edge whose expression the validator can't verify. Resolve them before relying on the flow: add a `schema` hint to the edge when it navigates into a generic/any-typed value (e.g. $.context.foo), or a scenario (sample port data) when a typed field has no sample. Then send_signal to verify runtime.", len(warnings))
+	default:
 		output["hint"] = "Flow built. Find the trigger node in nodes_created and call send_signal(node_id) to verify behavior, then get_trace_detail(trace_id) to inspect the result."
 	}
 
