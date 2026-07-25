@@ -491,6 +491,11 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 
 		edgesOutput[j]["config_valid"] = result.Valid
+		if result.Valid && result.Hint != "" {
+			// Surface advisories on valid edges (e.g. mapping a field the target
+			// doesn't declare) instead of dropping them silently.
+			edgesOutput[j]["hint"] = result.Hint
+		}
 		if !result.Valid {
 			msg := fmt.Sprintf("edge %s -> %s validation: %s", e.From, e.To, result.Error)
 			if result.Hint != "" {

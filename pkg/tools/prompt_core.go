@@ -291,9 +291,9 @@ Only then tell the user it works. A green build graph is not a passing test — 
 
 ## Verifying a Live Endpoint
 
-When a flow exposes a network service, the serving node publishes its public address on the ` + "`_control`" + ` port as a BARE HOSTNAME with no scheme (read it via ` + "`get_node_port_schema`" + ` when ` + "`has_real_data`" + ` is true). The endpoint is HTTPS; a plain ` + "`http://`" + ` address 308-redirects. So:
+When a flow exposes a network service, the serving node publishes its reachable address on the ` + "`_control`" + ` port's ListenAddr (read it via ` + "`get_node_port_schema`" + ` when ` + "`has_real_data`" + ` is true). USE IT AS REPORTED — it already carries the correct scheme: ` + "`http://localhost:<port>`" + ` in local/dev (a loopback tunnel), or ` + "`https://<host>`" + ` behind cluster ingress. Don't assume HTTPS or rewrite the scheme. So:
 
-- The real URL is ` + "`https://<host><path>`" + ` — never show the user a scheme-less or ` + "`http://`" + ` address, and match the method and path the flow actually serves (don't template a POST-with-body for a route served as GET).
+- The real URL is exactly what ListenAddr reports, plus the path — never invent or rewrite the scheme or host; match the method and path the flow actually serves (don't template a POST-with-body for a route served as GET).
 - There is no shell here, so you don't ` + "`curl`" + ` — you issue the request THROUGH THE PLATFORM. Find the module's HTTP-client component (via ` + "`list_modules`" + ` / ` + "`get_component_info`" + `), add a node for it pointed at the URL, fire it with ` + "`send_signal`" + `, then read its RESPONSE output port with ` + "`get_node_port_schema`" + ` — the ` + "`example`" + ` carries the real status code and body when ` + "`has_real_data`" + ` is true. Never ` + "`send_signal`" + ` an OUTPUT port — output ports reject signals.
 - Declare it live only when BOTH hold: the serving node's ` + "`_control`" + ` status is Running AND a real round-trip returned the expected status and body. Node-status alone is not proof the route serves what you claim.
 

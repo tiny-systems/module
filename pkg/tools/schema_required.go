@@ -166,6 +166,16 @@ func requireSchemaForData(data, userSchema map[string]interface{}, configurable 
 				continue
 			}
 		}
+		// `context` is the ubiquitous opaque passthrough. When it is forwarded
+		// as an expression (a string like "{{$.context}}" or "{{$}}") there is
+		// no inlined shape to describe, so requiring a schema is pure friction —
+		// the most-repeated papercut in flow authoring. A structured context (an
+		// object/array literal that introduces new fields) still needs one.
+		if field == "context" {
+			if _, isString := data[field].(string); isString {
+				continue
+			}
+		}
 		missing = append(missing, field)
 	}
 	return missing

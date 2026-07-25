@@ -327,7 +327,14 @@ func editFlowConfigureEdge(ctx context.Context, execCtx ExecutionContext, input 
 		}
 		return ToolResult{Success: false, Error: result.Error, Output: output}
 	}
-	return ToolResult{Success: true, Output: map[string]interface{}{"valid": true, "edge_id": edgeID}}
+	out := map[string]interface{}{"valid": true, "edge_id": edgeID}
+	if result.Hint != "" {
+		// A valid edge can still carry an advisory (e.g. it maps a field the
+		// target port doesn't declare, which persists but is dropped at runtime).
+		// Surface it — dropping it here is what let silent data loss ship green.
+		out["hint"] = result.Hint
+	}
+	return ToolResult{Success: true, Output: out}
 }
 
 func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input map[string]interface{}) ToolResult {
@@ -385,6 +392,13 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 	if len(result.Ports) > 0 {
 		output["ports"] = result.Ports
 		output["hint"] = "Settings may have changed available ports. Use these port names for edit_flow add_edge."
+	}
+	if result.Hint != "" {
+		if existing, ok := output["hint"].(string); ok && existing != "" {
+			output["hint"] = existing + " " + result.Hint
+		} else {
+			output["hint"] = result.Hint
+		}
 	}
 	return ToolResult{Success: true, Output: output}
 }
