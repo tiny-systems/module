@@ -41,15 +41,22 @@ Generate the module's index values.yaml with this so the self-hosted install
 grants exactly the RBAC the module declares via registry.SetRequirements,
 instead of a hand-copied overlay that drifts.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// A module that declares no RBAC needs no overlay at all: emit nothing
+		// so its index values.yaml is simply absent, which is what the drift
+		// gate compares against (empty). Emitting `rbac: {}` here would read as
+		// drift versus a missing file.
+		reqs := registry.GetRequirements()
+		if reqs == nil || (!reqs.RBAC.EnableKubernetesResourceAccess && len(reqs.RBAC.ExtraRules) == 0) {
+			return
+		}
+
 		// Mirror the operator chart's values shape: a top-level `rbac` key
 		// holding the module's RBACRequirements (json tags already match the
 		// chart's .Values.rbac.* keys).
 		var overlay struct {
 			RBAC module.RBACRequirements `json:"rbac"`
 		}
-		if reqs := registry.GetRequirements(); reqs != nil {
-			overlay.RBAC = reqs.RBAC
-		}
+		overlay.RBAC = reqs.RBAC
 		out, err := yaml.Marshal(overlay)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "marshal rbac values: %v\n", err)
