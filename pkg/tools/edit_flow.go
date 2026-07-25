@@ -34,7 +34,10 @@ Actions and their required fields:
   Removes a node and its edges.
 
 - action="add_edge": from_node, from_port, to_node, to_port
-  Connects two ports. Returns edge_id and whether configuration is needed.
+  Optional: configuration (+ schema) — pass them to wire AND configure in one call
+  (same mapping/schema rules as configure_edge). Omit to just create the wire and
+  get back the target port schema to configure next.
+  Returns edge_id and whether configuration is still needed.
 
 - action="delete_edge": edge_id
   Removes an edge.
@@ -97,7 +100,7 @@ func (t *EditFlowTool) Schema() map[string]interface{} {
 			},
 			"configuration": map[string]interface{}{
 				"type":        "object",
-				"description": "(configure_edge) Data mapping using {{expression}} syntax. Object or JSON string.",
+				"description": "(add_edge, configure_edge) Data mapping using {{expression}} syntax. Object or JSON string. On add_edge it's applied to the new edge in the same call.",
 			},
 			"settings": map[string]interface{}{
 				"type":        "object",
@@ -105,7 +108,7 @@ func (t *EditFlowTool) Schema() map[string]interface{} {
 			},
 			"schema": map[string]interface{}{
 				"type":        "object",
-				"description": "(configure_edge, configure_node) Optional JSON-Schema overrides for configurable fields.",
+				"description": "(add_edge, configure_edge, configure_node) Optional JSON-Schema overrides for configurable fields. Required when configuration fills a configurable field like context.",
 			},
 			"trace_id": map[string]interface{}{
 				"type":        "string",
@@ -230,6 +233,32 @@ func editFlowAddEdge(ctx context.Context, execCtx ExecutionContext, input map[st
 	result, err := execCtx.EdgeAdder.AddEdge(ctx, execCtx.ProjectName, execCtx.FlowName, fromNode, fromPort, toNode, toPort)
 	if err != nil {
 		return ToolResult{Success: false, Error: fmt.Sprintf("failed to add edge: %s", err.Error())}
+	}
+
+	// One-call add+configure: if the caller supplied a configuration inline,
+	// apply it to the freshly-created edge instead of ignoring it. The old
+	// behavior accepted `configuration`/`schema` (they're valid JSON) but never
+	// applied them — shipping an unconfigured edge and forcing a second
+	// configure_edge round-trip, which reads as "carried config silently
+	// dropped". Reuse the configure_edge path verbatim (schema-required check,
+	// validation, hint surfacing) by injecting the new edge id.
+	if cfg := input["configuration"]; cfg != nil {
+		if _, ok := cfg.(map[string]interface{}); ok {
+		} else if _, ok := cfg.(string); !ok {
+			cfg = nil // not a map or JSON string — ignore, fall through to add-only
+		}
+		if cfg != nil {
+			input["edge_id"] = result.EdgeID
+			res := editFlowConfigureEdge(ctx, execCtx, input)
+			outMap, _ := res.Output.(map[string]interface{})
+			if outMap == nil {
+				outMap = map[string]interface{}{}
+			}
+			outMap["edge_id"] = result.EdgeID
+			outMap["edge_created"] = true
+			res.Output = outMap
+			return res
+		}
 	}
 
 	output := map[string]interface{}{
