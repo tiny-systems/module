@@ -27,15 +27,65 @@ import (
 
 // Which edges deserve scaffolding is decided from the SOURCE port's
 // published schema, not a component whitelist: any output port with
-// `configurable:true` fields (context passthrough, js_eval outputData,
-// json_decode payloads, …) has shapes the validator can't chain-walk
-// without sample data. A hardcoded component list rots — new components
-// (and renamed ports) silently fall outside it, and their edges ship
-// with amber "cannot verify without a scenario" warnings the model then
-// has to resolve by hand. Fixed-typed fields on the same port are NOT
-// scaffolded — scenarios only matter for configurable fields (see
-// platform/docs/scenarios.md), and a string placeholder written into a
-// typed field could contradict the real schema.
+// SHAPELESS fields — a $defs entry with no properties/items/typed shape
+// (context passthrough, js_eval outputData, json_decode payloads, …) —
+// has data the validator can't chain-walk without sample data. The
+// `configurable:true` flag alone is not enough: output ports republish
+// resolved schemas where the passthrough defs (e.g. pod_logs_get's
+// Context) carry no flag at all, just no shape. A hardcoded component
+// list rots the same way — new components silently fall outside it and
+// their edges ship with amber "cannot verify without a scenario"
+// warnings the model then has to resolve by hand. Fixed-typed fields on
+// the same port are NOT scaffolded — scenarios only matter for variadic
+// fields (see platform/docs/scenarios.md), and a string placeholder
+// written into a typed field could contradict the real schema.
+
+// shapelessFieldsIn returns the top-level field names of a port schema
+// whose $defs entry the chain-walker has nothing to verify against:
+// marked configurable, or carrying neither properties, items,
+// additionalProperties, nor a scalar type. Field names come from each
+// def's `path` ("$.context" → "context"); defs with deeper or missing
+// paths are ignored — scaffolding writes top-level port data.
+func shapelessFieldsIn(schemaBytes []byte) []string {
+	if len(schemaBytes) == 0 {
+		return nil
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(schemaBytes, &root); err != nil {
+		return nil
+	}
+	defs, ok := root["$defs"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, raw := range defs {
+		def, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		path, _ := def["path"].(string)
+		if !strings.HasPrefix(path, "$.") {
+			continue
+		}
+		field := strings.TrimPrefix(path, "$.")
+		if strings.ContainsAny(field, ".[") {
+			continue // nested def, not a top-level port field
+		}
+		if configurable, _ := def["configurable"].(bool); configurable {
+			out = append(out, field)
+			continue
+		}
+		if def["properties"] != nil || def["items"] != nil || def["additionalProperties"] != nil {
+			continue // has shape — the walker can verify it
+		}
+		if t, _ := def["type"].(string); t != "" && t != "object" {
+			continue // scalar-typed — verifiable
+		}
+		out = append(out, field)
+	}
+	return out
+}
 
 // expressionRe matches `{{...}}` expressions in edge configuration values.
 var expressionRe = regexp.MustCompile(`\{\{([^}]+)\}\}`)
@@ -66,18 +116,22 @@ func scaffoldScenarios(
 	portData := map[string]map[string]interface{}{}
 
 	for _, e := range edges {
-		// Schema-driven gate: scaffold only when the source output port
-		// declares configurable fields, and only the paths rooted in one.
-		configurable := configurableFieldsIn(portSchemaBytes(componentByAlias[e.FromAlias], e.FromPort, false))
-		if len(configurable) == 0 {
+		// Schema-driven gate: scaffold only when the source output port has
+		// shapeless fields AND the edge actually navigates into one — a port
+		// whose referenced paths are all fixed-typed is fully verifiable
+		// from its schema, and writing a sample would only switch the
+		// validator into scenario-resolution mode for nothing.
+		schemaBytes := portSchemaBytes(componentByAlias[e.FromAlias], e.FromPort, false)
+		shapeless := shapelessFieldsIn(schemaBytes)
+		if len(shapeless) == 0 {
+			continue
+		}
+		paths := extractPathsFromConfig(e.Configuration)
+		if len(pathsUnderFields(paths, shapeless)) == 0 {
 			continue
 		}
 		nodeID, ok := createdNodes[e.FromAlias]
 		if !ok || nodeID == "" {
-			continue
-		}
-		paths := pathsUnderFields(extractPathsFromConfig(e.Configuration), configurable)
-		if len(paths) == 0 {
 			continue
 		}
 		portFullName := nodeID + ":" + e.FromPort
@@ -85,8 +139,25 @@ func scaffoldScenarios(
 		if mock == nil {
 			mock = map[string]interface{}{}
 		}
+		// Once a scenario sample exists for a port, the validator resolves
+		// EVERY expression against it — so the sample must cover all
+		// referenced paths, not just the shapeless ones. Shapeless paths
+		// get "<leaf>" markers; fixed-typed paths get a placeholder of the
+		// schema's own type so the sample can't contradict it. A fixed
+		// path the schema doesn't actually declare is skipped — it should
+		// keep failing validation, that's a genuine config error.
+		shapelessPaths := map[string]struct{}{}
+		for _, p := range pathsUnderFields(paths, shapeless) {
+			shapelessPaths[p] = struct{}{}
+		}
 		for _, p := range paths {
-			setPath(mock, p, placeholderFor(p))
+			if _, isShapeless := shapelessPaths[p]; isShapeless {
+				setPath(mock, p, placeholderFor(p))
+				continue
+			}
+			if v, ok := typedPlaceholder(schemaBytes, p); ok {
+				setPath(mock, p, v)
+			}
 		}
 		portData[portFullName] = mock
 	}
@@ -139,6 +210,100 @@ type scaffoldEdge struct {
 	FromAlias     string
 	FromPort      string
 	Configuration map[string]interface{}
+}
+
+// typedPlaceholder resolves a dotted path against the port schema and returns
+// a placeholder of the declared type — "<leaf>" for strings, 0 for numbers,
+// false for booleans, empty containers for arrays/objects — so a scaffolded
+// sample can never contradict a fixed field's schema. Returns ok=false when
+// the schema doesn't declare the path (the caller should NOT fabricate data
+// for it — an undeclared path is a real config error worth failing on).
+func typedPlaceholder(schemaBytes []byte, path string) (interface{}, bool) {
+	if len(schemaBytes) == 0 {
+		return nil, false
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(schemaBytes, &root); err != nil {
+		return nil, false
+	}
+	defs, _ := root["$defs"].(map[string]interface{})
+	// Find the root def (path "$"), falling back to the top-level $ref.
+	var cur map[string]interface{}
+	for _, raw := range defs {
+		if def, ok := raw.(map[string]interface{}); ok {
+			if p, _ := def["path"].(string); p == "$" {
+				cur = def
+				break
+			}
+		}
+	}
+	if cur == nil {
+		cur = deref(root, defs)
+	}
+	if cur == nil {
+		return nil, false
+	}
+	parts := strings.Split(path, ".")
+	for i, raw := range parts {
+		m := segmentRe.FindStringSubmatch(raw)
+		if m == nil {
+			return nil, false
+		}
+		key, isArray := m[1], m[2] != ""
+		props, _ := cur["properties"].(map[string]interface{})
+		next, ok := props[key].(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		next = deref(next, defs)
+		if next == nil {
+			return nil, false
+		}
+		if isArray {
+			items, ok := next["items"].(map[string]interface{})
+			if !ok {
+				return nil, false
+			}
+			next = deref(items, defs)
+			if next == nil {
+				return nil, false
+			}
+		}
+		if i == len(parts)-1 {
+			leaf := key
+			switch t, _ := next["type"].(string); t {
+			case "string":
+				return fmt.Sprintf("<%s>", leaf), true
+			case "integer", "number":
+				return 0, true
+			case "boolean":
+				return false, true
+			case "array":
+				return []interface{}{}, true
+			case "object":
+				return map[string]interface{}{}, true
+			default:
+				return fmt.Sprintf("<%s>", leaf), true
+			}
+		}
+		cur = next
+	}
+	return nil, false
+}
+
+// deref follows a `$ref: "#/$defs/X"` indirection one level, returning the
+// node itself when it carries no ref. Returns nil for a dangling ref.
+func deref(node map[string]interface{}, defs map[string]interface{}) map[string]interface{} {
+	ref, _ := node["$ref"].(string)
+	if ref == "" {
+		return node
+	}
+	name := strings.TrimPrefix(ref, "#/$defs/")
+	if name == ref || defs == nil {
+		return nil
+	}
+	target, _ := defs[name].(map[string]interface{})
+	return target
 }
 
 // pathsUnderFields keeps only the paths whose first segment is one of the

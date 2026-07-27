@@ -462,6 +462,25 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		})
 	}
 
+	// Auto-scaffold scenarios BEFORE configuring edges, so the very first
+	// validation pass already has placeholder shapes to chain-walk against
+	// — scaffolding after validation would leave the first build's output
+	// carrying warnings the scaffold has just fixed. See
+	// build_flow_scenarios.go for what qualifies (shapeless source
+	// fields), driven by the source port's schema rather than a component
+	// whitelist.
+	scaffoldEdges := make([]scaffoldEdge, 0, len(edges))
+	for _, e := range edges {
+		scaffoldEdges = append(scaffoldEdges, scaffoldEdge{
+			FromAlias:     e.FromAlias,
+			FromPort:      e.FromPort,
+			Configuration: e.Configuration,
+		})
+	}
+	if scaffoldWarnings := scaffoldScenarios(ctx, execCtx, aliasToNodeID, componentByAlias, scaffoldEdges); len(scaffoldWarnings) > 0 {
+		warnings = append(warnings, scaffoldWarnings...)
+	}
+
 	// Execute: configure edges
 	for j, ce := range edgesCreated {
 		e := edges[ce.Index]
@@ -514,25 +533,6 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			}
 			errors = append(errors, msg)
 		}
-	}
-
-	// Auto-scaffold scenarios for configurable-any emitters (json_decode,
-	// js_eval, http response, template). Without this, downstream edges
-	// that reference $.decoded.imageTag etc. get amber warnings until the
-	// user authors a scenario manually. This drops a placeholder scenario
-	// in place so the validator has shape to chain-walk against. Which
-	// edges qualify is read from the source port's schema (configurable
-	// fields), so any component's variadic output is covered — no list.
-	scaffoldEdges := make([]scaffoldEdge, 0, len(edges))
-	for _, e := range edges {
-		scaffoldEdges = append(scaffoldEdges, scaffoldEdge{
-			FromAlias:     e.FromAlias,
-			FromPort:      e.FromPort,
-			Configuration: e.Configuration,
-		})
-	}
-	if scaffoldWarnings := scaffoldScenarios(ctx, execCtx, aliasToNodeID, componentByAlias, scaffoldEdges); len(scaffoldWarnings) > 0 {
-		warnings = append(warnings, scaffoldWarnings...)
 	}
 
 	// Build output
