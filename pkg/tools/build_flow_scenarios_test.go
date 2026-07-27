@@ -112,6 +112,18 @@ func TestSetPathArrayIntermediate(t *testing.T) {
 	}
 }
 
+func TestPathsUnderFields(t *testing.T) {
+	got := pathsUnderFields(
+		[]string{"context.who", "logs", "outputData.items[0].name", "context", "podName"},
+		[]string{"context", "outputData"},
+	)
+	sort.Strings(got)
+	want := []string{"context", "context.who", "outputData.items[0].name"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pathsUnderFields mismatch: got %v want %v", got, want)
+	}
+}
+
 func TestSetPathFirstWriterWins(t *testing.T) {
 	dst := map[string]interface{}{}
 	setPath(dst, "a.b", "first")

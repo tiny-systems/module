@@ -520,11 +520,9 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 	// js_eval, http response, template). Without this, downstream edges
 	// that reference $.decoded.imageTag etc. get amber warnings until the
 	// user authors a scenario manually. This drops a placeholder scenario
-	// in place so the validator has shape to chain-walk against.
-	emitterByAlias := map[string]string{}
-	for _, n := range nodes {
-		emitterByAlias[n.Alias] = n.Component
-	}
+	// in place so the validator has shape to chain-walk against. Which
+	// edges qualify is read from the source port's schema (configurable
+	// fields), so any component's variadic output is covered — no list.
 	scaffoldEdges := make([]scaffoldEdge, 0, len(edges))
 	for _, e := range edges {
 		scaffoldEdges = append(scaffoldEdges, scaffoldEdge{
@@ -533,7 +531,7 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			Configuration: e.Configuration,
 		})
 	}
-	if scaffoldWarnings := scaffoldScenarios(ctx, execCtx, aliasToNodeID, emitterByAlias, scaffoldEdges); len(scaffoldWarnings) > 0 {
+	if scaffoldWarnings := scaffoldScenarios(ctx, execCtx, aliasToNodeID, componentByAlias, scaffoldEdges); len(scaffoldWarnings) > 0 {
 		warnings = append(warnings, scaffoldWarnings...)
 	}
 

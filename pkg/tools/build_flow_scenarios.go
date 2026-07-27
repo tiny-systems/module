@@ -25,17 +25,17 @@ import (
 // All scenario operations are best-effort. Failures append to warnings
 // and never block the build.
 
-// configurableAnyEmitters maps component name → output port name for
-// components whose output schema is genuinely configurable-any: the
-// emitted shape depends on user data or user-supplied code, so the
-// validator has no concrete schema to chain-walk against. http_request
-// and similar HTTP clients are NOT in this list — their response has
-// a concrete struct, so the chain-walker already finds the right shape.
-var configurableAnyEmitters = map[string][]string{
-	"json_decode": {"message"},
-	"js_eval":     {"out"},
-	"template":    {"out"},
-}
+// Which edges deserve scaffolding is decided from the SOURCE port's
+// published schema, not a component whitelist: any output port with
+// `configurable:true` fields (context passthrough, js_eval outputData,
+// json_decode payloads, …) has shapes the validator can't chain-walk
+// without sample data. A hardcoded component list rots — new components
+// (and renamed ports) silently fall outside it, and their edges ship
+// with amber "cannot verify without a scenario" warnings the model then
+// has to resolve by hand. Fixed-typed fields on the same port are NOT
+// scaffolded — scenarios only matter for configurable fields (see
+// platform/docs/scenarios.md), and a string placeholder written into a
+// typed field could contradict the real schema.
 
 // expressionRe matches `{{...}}` expressions in edge configuration values.
 var expressionRe = regexp.MustCompile(`\{\{([^}]+)\}\}`)
@@ -55,7 +55,7 @@ func scaffoldScenarios(
 	ctx context.Context,
 	execCtx ExecutionContext,
 	createdNodes map[string]string, // alias → nodeID
-	emitterByAlias map[string]string, // alias → component name
+	componentByAlias map[string]*ComponentInfo, // alias → full component details
 	edges []scaffoldEdge,
 ) []string {
 	if execCtx.ScenarioManager == nil || execCtx.ProjectName == "" {
@@ -66,26 +66,17 @@ func scaffoldScenarios(
 	portData := map[string]map[string]interface{}{}
 
 	for _, e := range edges {
-		outPorts, isEmitter := configurableAnyEmitters[emitterByAlias[e.FromAlias]]
-		if !isEmitter {
-			continue
-		}
-		// Only scaffold for the canonical output ports of the emitter
-		matched := false
-		for _, p := range outPorts {
-			if p == e.FromPort {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		// Schema-driven gate: scaffold only when the source output port
+		// declares configurable fields, and only the paths rooted in one.
+		configurable := configurableFieldsIn(portSchemaBytes(componentByAlias[e.FromAlias], e.FromPort, false))
+		if len(configurable) == 0 {
 			continue
 		}
 		nodeID, ok := createdNodes[e.FromAlias]
 		if !ok || nodeID == "" {
 			continue
 		}
-		paths := extractPathsFromConfig(e.Configuration)
+		paths := pathsUnderFields(extractPathsFromConfig(e.Configuration), configurable)
 		if len(paths) == 0 {
 			continue
 		}
@@ -148,6 +139,31 @@ type scaffoldEdge struct {
 	FromAlias     string
 	FromPort      string
 	Configuration map[string]interface{}
+}
+
+// pathsUnderFields keeps only the paths whose first segment is one of the
+// given (configurable) fields — `context.who` passes when "context" is
+// configurable, `logs` doesn't when it's a fixed typed field. Array suffixes
+// on the first segment (`items[0].name`) are stripped before matching.
+func pathsUnderFields(paths []string, fields []string) []string {
+	allowed := make(map[string]struct{}, len(fields))
+	for _, f := range fields {
+		allowed[f] = struct{}{}
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		first := p
+		if i := strings.IndexByte(first, '.'); i >= 0 {
+			first = first[:i]
+		}
+		if m := segmentRe.FindStringSubmatch(first); m != nil {
+			first = m[1]
+		}
+		if _, ok := allowed[first]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // extractPathsFromConfig walks any value (map / slice / string) and
