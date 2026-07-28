@@ -62,6 +62,16 @@ var buildCmd = &cobra.Command{
 			return
 		}
 
+		// Conformance check: an error port must emit the canonical
+		// module.ErrorMessage shape ({context, error, retryable}) so the
+		// retry component and the platform understand it. Warn — don't
+		// block — so a mid-migration module still ships, but the author
+		// (first- or third-party) sees the gap at build time instead of a
+		// silent runtime no-op when someone wires the port into retry.
+		for _, w := range validateErrorPorts(componentsApi) {
+			_, _ = fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		}
+
 		if !semver.IsValid(version) {
 			_, _ = fmt.Fprintf(os.Stderr, "version is invalid semver v2 version\n")
 			os.Exit(1)
