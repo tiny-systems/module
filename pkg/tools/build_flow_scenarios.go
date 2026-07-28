@@ -141,18 +141,27 @@ func scaffoldScenarios(
 		}
 		// Once a scenario sample exists for a port, the validator resolves
 		// EVERY expression against it — so the sample must cover all
-		// referenced paths, not just the shapeless ones. Shapeless paths
-		// get "<leaf>" markers; fixed-typed paths get a placeholder of the
-		// schema's own type so the sample can't contradict it. A fixed
-		// path the schema doesn't actually declare is skipped — it should
-		// keep failing validation, that's a genuine config error.
+		// referenced paths, not just the shapeless ones. Fixed-typed paths
+		// get a placeholder of the source schema's own type; a fixed path
+		// the schema doesn't declare is skipped — it should keep failing
+		// validation, that's a genuine config error.
+		//
+		// Shapeless paths have no source type at all, but the EDGE knows
+		// where each lands: when a config leaf is exactly one expression,
+		// the target node's settings example at that config path tells us
+		// the expected shape ($.context.messages mapped into
+		// inputData.messages, whose example is an array → sample []).
+		// Falling back to a "<leaf>" string marker on a target that
+		// expects an array is what made the strict validator hard-reject
+		// scaffolded edges.
 		shapelessPaths := map[string]struct{}{}
 		for _, p := range pathsUnderFields(paths, shapeless) {
 			shapelessPaths[p] = struct{}{}
 		}
+		targetTypes := targetExampleTypes(e.Configuration, e.ToSettings)
 		for _, p := range paths {
 			if _, isShapeless := shapelessPaths[p]; isShapeless {
-				setPath(mock, p, placeholderFor(p))
+				setPath(mock, p, shapelessPlaceholder(p, targetTypes[p]))
 				continue
 			}
 			if v, ok := typedPlaceholder(schemaBytes, p); ok {
@@ -210,6 +219,82 @@ type scaffoldEdge struct {
 	FromAlias     string
 	FromPort      string
 	Configuration map[string]interface{}
+	// ToSettings is the target node's settings from the build spec —
+	// its examples (e.g. a js_eval inputData) type the shapeless
+	// placeholders that get mapped into them.
+	ToSettings map[string]interface{}
+}
+
+// targetExampleTypes maps each single-expression source path in the edge
+// configuration to the target's example value at the config position it's
+// mapped into. `{"inputData":{"messages":"{{$.context.messages}}"}}` with
+// target settings `{"inputData":{"messages":[...]}}` yields
+// "context.messages" → [...]. Only whole-string expressions count — a
+// concatenation produces a string at runtime regardless of operand types.
+func targetExampleTypes(config map[string]interface{}, toSettings map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{}
+	if toSettings == nil {
+		return out
+	}
+	var walk func(cfg, example interface{})
+	walk = func(cfg, example interface{}) {
+		switch c := cfg.(type) {
+		case map[string]interface{}:
+			ex, _ := example.(map[string]interface{})
+			for k, v := range c {
+				if ex == nil {
+					walk(v, nil)
+					continue
+				}
+				walk(v, ex[k])
+			}
+		case []interface{}:
+			exArr, _ := example.([]interface{})
+			for i, v := range c {
+				if len(exArr) > 0 {
+					walk(v, exArr[0])
+				} else {
+					walk(v, nil)
+				}
+				_ = i
+			}
+		case string:
+			if example == nil {
+				return
+			}
+			m := expressionRe.FindStringSubmatch(c)
+			// Whole-string single expression only.
+			if m == nil || m[0] != c {
+				return
+			}
+			for _, full := range jsonPathRe.FindAllString(m[1], -1) {
+				path := strings.TrimPrefix(full, "$.")
+				if path != "" && path != full {
+					out[path] = example
+				}
+			}
+		}
+	}
+	walk(config, toSettings)
+	return out
+}
+
+// shapelessPlaceholder picks a sample value for a shapeless source path:
+// shaped like the target example it's mapped into when one is known,
+// otherwise the "<leaf>" string marker.
+func shapelessPlaceholder(path string, targetExample interface{}) interface{} {
+	switch targetExample.(type) {
+	case []interface{}:
+		return []interface{}{}
+	case map[string]interface{}:
+		return map[string]interface{}{}
+	case float64, int, int64:
+		return 0
+	case bool:
+		return false
+	default:
+		return placeholderFor(path)
+	}
 }
 
 // typedPlaceholder resolves a dotted path against the port schema and returns

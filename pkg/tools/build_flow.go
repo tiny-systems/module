@@ -469,12 +469,17 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 	// build_flow_scenarios.go for what qualifies (shapeless source
 	// fields), driven by the source port's schema rather than a component
 	// whitelist.
+	settingsByAlias := map[string]map[string]interface{}{}
+	for _, n := range nodes {
+		settingsByAlias[n.Alias] = n.Settings
+	}
 	scaffoldEdges := make([]scaffoldEdge, 0, len(edges))
 	for _, e := range edges {
 		scaffoldEdges = append(scaffoldEdges, scaffoldEdge{
 			FromAlias:     e.FromAlias,
 			FromPort:      e.FromPort,
 			Configuration: e.Configuration,
+			ToSettings:    settingsByAlias[e.ToAlias],
 		})
 	}
 	if scaffoldWarnings := scaffoldScenarios(ctx, execCtx, aliasToNodeID, componentByAlias, scaffoldEdges); len(scaffoldWarnings) > 0 {
