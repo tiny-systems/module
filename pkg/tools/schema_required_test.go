@@ -8,17 +8,17 @@ import (
 
 func TestConfigurableFieldsIn(t *testing.T) {
 	cases := []struct {
-		name        string
-		schemaJSON  string
-		wantFields  []string
+		name       string
+		schemaJSON string
+		wantFields []string
 	}{
 		{
-			name:        "no $defs",
-			schemaJSON:  `{"type":"object"}`,
-			wantFields:  []string{},
+			name:       "no $defs",
+			schemaJSON: `{"type":"object"}`,
+			wantFields: []string{},
 		},
 		{
-			name: "single configurable def, capitalised",
+			name:       "single configurable def, capitalised",
 			schemaJSON: `{"$defs":{"Context":{"configurable":true,"type":"object","properties":{"token":{"type":"string"}}}},"$ref":"#/$defs/Settings"}`,
 			wantFields: []string{"context"},
 		},
@@ -33,7 +33,7 @@ func TestConfigurableFieldsIn(t *testing.T) {
 			wantFields: []string{"context", "inputData", "outputData"},
 		},
 		{
-			name: "non-configurable def ignored",
+			name:       "non-configurable def ignored",
 			schemaJSON: `{"$defs":{"Settings":{"type":"object","properties":{"delay":{"type":"integer"}}}}}`,
 			wantFields: []string{},
 		},
@@ -52,11 +52,11 @@ func TestConfigurableFieldsIn(t *testing.T) {
 
 func TestRequireSchemaForData(t *testing.T) {
 	cases := []struct {
-		name        string
-		data        map[string]interface{}
-		userSchema  map[string]interface{}
+		name         string
+		data         map[string]interface{}
+		userSchema   map[string]interface{}
 		configurable []string
-		wantMissing []string
+		wantMissing  []string
 	}{
 		{
 			name:         "data fills configurable field, no schema",

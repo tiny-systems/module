@@ -4,7 +4,6 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/util/homedir"
 	"path/filepath"
-	"runtime"
 )
 
 var (
@@ -21,8 +20,6 @@ func RegisterCommands(rootCmd *cobra.Command) {
 	applyToolsFlags(toolsCmd)
 	rootCmd.AddCommand(toolsCmd)
 
-	applyBuildFlags(buildCmd)
-	toolsCmd.AddCommand(buildCmd)
 	toolsCmd.AddCommand(infoCmd)
 	toolsCmd.AddCommand(rbacValuesCmd)
 
@@ -38,19 +35,6 @@ func applyCommonFlags(cmd *cobra.Command) {
 
 func applyToolsFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVarP(&devKey, "devkey", "d", "", "developer key")
-}
-
-func applyBuildFlags(cmd *cobra.Command) {
-
-	cmd.Flags().StringVarP(&pathToMain, "path", "p", "./cmd", "path to main package regarding to the root")
-	cmd.Flags().StringVarP(&version, "version", "v", "", "module version")
-	cmd.Flags().StringVarP(&name, "name", "n", "main", "Name of the module. Container image repo usually.")
-	cmd.Flags().StringVarP(&targetOs, "os", "o", "linux", "Target OS, change only if you are using custom Dockerfile with OS different than linux.")
-	cmd.Flags().StringVarP(&targetArch, "arch", "a", runtime.GOARCH, "Target architecture")
-
-	_ = cmd.MarkFlagRequired("devkey")
-	_ = cmd.MarkFlagRequired("version")
-	_ = cmd.MarkFlagRequired("name")
 }
 
 func applyHookFlags(cmd *cobra.Command) {
