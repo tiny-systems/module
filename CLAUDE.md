@@ -17,7 +17,7 @@
 
 **NEVER ignore the return value of handler() calls. ALWAYS return it.**
 
-TinySystems uses blocking I/O. HTTP Server blocks waiting for responses to flow back through the handler chain. If any component ignores the handler return, responses are lost and requests time out.
+Request-response subgraphs run blocking I/O: HTTP Server blocks waiting for responses to flow back through the handler chain. If any component ignores the handler return, responses are lost and requests time out. (Blocking vs durable delivery is derived per-subgraph from the `SyncRPC` capability — see below; the return-the-result rule applies in both modes, since in durable mode the `Result` drives ack/retry.)
 
 `module.Handler` and `Component.Handle` both return `module.Result`. Construct it via `module.Ok(value)` or `module.Fail(err)`. Chain handler calls back as the Handle return:
 
@@ -48,6 +48,23 @@ return module.Result{}
 - True fire-and-forget async operations launched from background goroutines (use `Base.Emit` and let the zero-Result no-op stand)
 
 When writing components, always ask: "Does this handler call need to return a response to an upstream blocker?" If yes (which is most cases), return the handler result.
+
+## Declaring a Blocking Component: the SyncRPC Capability
+
+If a component **blocks holding a live connection** — emits on a source port and synchronously waits for the downstream chain to deliver a result back within the same request — it MUST declare the `module.SyncRPC` capability:
+
+```go
+// http_server holds the live HTTP connection until the chain returns a
+// Response — declare it so the platform keeps its subgraph on blocking
+// request/reply delivery.
+func (c *Component) SyncRPC() module.SyncRPCInfo { return module.SyncRPCInfo{} }
+```
+
+One method, whole contract. `module build` auto-tags the component `sync_rpc`; the platform derives execution mode from it: the weakly-connected subgraph containing the component runs classic blocking request/reply, everything else runs durable (JetStream-persisted fire-and-forget). Nobody chooses modes — not users, not flows.
+
+**Forgetting this is fatal:** durable hops return nothing to their sender, so the response your blocked goroutine waits on never comes back — the connection times out even with perfect handler-return discipline. Canonical implementer: `http_server` (live socket). Components that merely sit in its subgraph — a Slack command handler, a router — declare nothing; they inherit classic delivery automatically.
+
+Same one-method pattern: `module.AgentTool` exposes a component as an MCP tool (`agent_tool` tag).
 
 ## Error Ports: the Recovery Boundary Pattern
 

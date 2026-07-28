@@ -876,7 +876,7 @@ func TestHello(t *testing.T) {
 
 **ALWAYS return the result of `handler()` calls. Never ignore the return value.**
 
-The Tiny Systems SDK uses blocking I/O for request-response patterns. When a component like HTTP Server sends a request, it **blocks** waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out.
+Request-response subgraphs run **blocking I/O**: when a component like HTTP Server sends a request, it **blocks** waiting for a response to flow back through the same handler chain. If any component in the chain ignores the handler return value, the response is lost and the original caller times out. (Which subgraphs run blocking vs durable is derived from component declarations — see the `SyncRPC` capability below. The return-the-result rule applies in both modes: in durable mode the returned `Result` is what drives ack/retry.)
 
 **BAD - Breaks blocking I/O:**
 ```go
@@ -916,6 +916,23 @@ If Slack Command does `_ = handler(...)` and returns `nil`, the Response is lost
 - Always `return handler(ctx, port, data)` for output ports
 - Exception: `_reconcile` and `_identity` port calls can ignore returns (internal system ports)
 - Exception: Fire-and-forget async operations where no response is expected
+
+#### Declaring a blocking component: the `SyncRPC` capability
+
+If your component **blocks holding a live connection** — it emits on a source port and synchronously waits for the downstream chain to deliver a result back to one of its target ports *within the same request* — you MUST declare it by implementing the `module.SyncRPC` capability:
+
+```go
+// http_server holds the live HTTP connection until the chain returns a
+// Response — declare it so the platform keeps its subgraph on blocking
+// request/reply delivery.
+func (c *Component) SyncRPC() module.SyncRPCInfo { return module.SyncRPCInfo{} }
+```
+
+That one method is the whole contract. `module build` auto-adds the `sync_rpc` tag to the published component, and the platform derives the execution mode from it: **the weakly-connected subgraph containing your component runs classic blocking request/reply**; trigger-driven subgraphs without such a component run durable (JetStream-persisted, fire-and-forget) delivery. Nobody configures modes by hand — not users, not flows.
+
+**Why forgetting this breaks you:** durable delivery is fire-and-forget — a persisted hop returns nothing to its sender. Without the declaration your subgraph may run durable, and the response your blocked goroutine is waiting on will *never* come back through the handler chain — the connection times out even though every component dutifully returns its handler results. Canonical implementer: `http_server` (live socket). Components that merely sit in its subgraph — a Slack command handler, a router — declare nothing; they inherit classic delivery automatically.
+
+Related capability, same one-method pattern: implement `module.AgentTool` to expose a component as an MCP tool an LLM can call directly (`module build` adds the `agent_tool` tag).
 
 #### Component Naming Convention
 
