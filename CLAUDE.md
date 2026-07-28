@@ -66,6 +66,16 @@ One method, whole contract. `module build` auto-tags the component `sync_rpc`; t
 
 Same one-method pattern: `module.AgentTool` exposes a component as an MCP tool (`agent_tool` tag).
 
+## Output Shape: Where the Passthrough Context Goes
+
+Two component roles, two shapes — keep them straight:
+
+- **Trigger / source** components (`signal`, `cron`, `ticker`) ORIGINATE the message: they emit the user-configured context AS the payload at ROOT. Downstream reads `$.field`.
+- **Passthrough / mid-chain** components (`router`, `llm_router`, `delay`, `modify`, `async`, `pod_logs_get`, `llm_tools`, ...) FORWARD a caller's context alongside their own output: they emit it NESTED under a `context` key. Downstream reads `$.context.field`, and the component's own results sit beside it (`$.logs`, `$.messages`, `$.item`).
+
+If your component forwards a context, wrap it — `handler(ctx, port, OutMessage{Context: in.Context, ...})` with `json:"context"` on the field. Emitting the bare `Context` value at root (the historical router bug) makes downstream edges read `$.field`, inconsistent with every other mid-chain node — and it validates green but resolves null the moment someone writes `$.context.field`.
+
+
 ## Error Ports: the Recovery Boundary Pattern
 
 Error ports are how flow authors define **self-healing zones**. They are the entire fault-tolerance story in TinySystems — there is no separate retry layer or durability primitive. A component author's job is to expose the right toggle and route failures consistently so the pattern composes across flows.
