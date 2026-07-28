@@ -345,9 +345,13 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 		}
 
 		if np.Configuration != nil {
-			// get real schema and config using reflection
-			schemaConf, err := schema.CreateSchema(np.Configuration)
-			if err != nil {
+			// A component may author its own schema when the port's shape is
+			// only known at runtime (a form received as data has no Go type to
+			// reflect). Publish those bytes verbatim; otherwise reflect the
+			// configuration value as usual.
+			if np.Schema != nil {
+				portStatus.Schema = np.Schema
+			} else if schemaConf, err := schema.CreateSchema(np.Configuration); err != nil {
 				c.log.Error(err, "ReadStatus: create schema error")
 			} else {
 				schemaData, _ := schemaConf.MarshalJSON()
