@@ -288,32 +288,35 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 	}
 
-	// Schema-strictness check. The platform no longer infers schemas
-	// from value shape: when the caller fills a configurable-any
-	// settings field or edge configuration field, they must declare
-	// its schema in settings_schema / edge.schema. Reject up front
-	// so the model sees the gap at authoring time, not as a red edge
-	// after the fact.
-	// Collect EVERY issue across all nodes and edges before failing, so a
-	// large build reports all its problems in one shot. Failing on the
-	// first bad element made the author fix-one / retry / fail-on-the-next
-	// over and over — a 20-node build could round-trip many times.
+	// Schema handling for filled configurable fields. Missing schemas are
+	// DERIVED, not rejected: settings are literal data (value types are
+	// ground truth), and edge configurations are typed by resolving each
+	// expression against the source port schema + source node example —
+	// unresolvable expressions stay `{}` (untyped, never wrong). This
+	// replaces the "declare a schema for context on every edge" reject,
+	// which was the single biggest annotation tax in flow authoring.
+	// User-provided schema entries always win over derived ones.
+	// unknownSettings still rejects — mis-named settings silently no-op.
 	var issues []string
-	for _, n := range nodes {
+	for i := range nodes {
+		n := &nodes[i]
 		comp := componentByAlias[n.Alias]
 		if comp == nil || len(n.Settings) == 0 {
 			continue
 		}
 		settingsSchema := portSchemaBytes(comp, "_settings", true)
 		configurable := configurableFieldsIn(settingsSchema)
-		if missing := requireSchemaForData(n.Settings, n.SettingsSchema, configurable); len(missing) > 0 {
-			issues = append(issues, schemaRequiredError("node", n.Alias, missing).Error())
-		}
+		n.SettingsSchema = fillMissingSchemas(n.Settings, n.SettingsSchema, configurable, nil)
 		if u := unknownSettings(n.Alias, n.Settings, settingsSchema); u != "" {
 			issues = append(issues, u)
 		}
 	}
-	for i, e := range edges {
+	srcSettings := map[string]map[string]interface{}{}
+	for _, n := range nodes {
+		srcSettings[n.Alias] = n.Settings
+	}
+	for i := range edges {
+		e := &edges[i]
 		target := componentByAlias[e.ToAlias]
 		if target == nil || len(e.Configuration) == 0 {
 			continue
@@ -322,9 +325,11 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		// component — look it up in InputPortDetails, not output.
 		targetSchema := portSchemaBytes(target, e.ToPort, true)
 		configurable := configurableFieldsIn(targetSchema)
-		if missing := requireSchemaForData(e.Configuration, e.Schema, configurable); len(missing) > 0 {
-			issues = append(issues, schemaRequiredError("edge", fmt.Sprintf("edges[%d] (%s → %s)", i, e.From, e.To), missing).Error())
-		}
+		resolve := exampleResolver(
+			portSchemaBytes(componentByAlias[e.FromAlias], e.FromPort, false),
+			srcSettings[e.FromAlias],
+		)
+		e.Schema = fillMissingSchemas(e.Configuration, e.Schema, configurable, resolve)
 	}
 	if len(issues) > 0 {
 		return ToolResult{

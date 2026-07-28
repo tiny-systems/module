@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -59,10 +58,11 @@ func projectWithEdge(edgeID, targetNodeID, targetPort, moduleName, componentName
 	}
 }
 
-// TestEditFlow_ConfigureNode_RejectsMissingSchemaForConfigurableField
-// pins the per-edit strict check: omitting schema for a configurable
-// settings field fails before NodeSettingsConfigurer is called.
-func TestEditFlow_ConfigureNode_RejectsMissingSchemaForConfigurableField(t *testing.T) {
+// TestEditFlow_ConfigureNode_DerivesMissingSchemaForConfigurableField:
+// omitting schema for a configurable settings field no longer rejects —
+// settings are literal data, so the schema is derived from value types
+// and handed to NodeSettingsConfigurer.
+func TestEditFlow_ConfigureNode_DerivesMissingSchemaForConfigurableField(t *testing.T) {
 	cfg := &captureNodeSettingsConfigurer{}
 	reader := &projectReaderStub{elements: projectWithNode("node-1", "tinysystems/test-module", "ticker")}
 	catalog := &mockModuleCatalog{components: map[string]ComponentInfo{
@@ -89,17 +89,19 @@ func TestEditFlow_ConfigureNode_RejectsMissingSchemaForConfigurableField(t *test
 		"settings": map[string]interface{}{
 			"context": map[string]interface{}{"token": "secret"},
 		},
-		// no "schema" — strictness MUST reject
+		// no "schema" — derived from literal value types
 	})
 
-	if res.Success {
-		t.Fatalf("expected rejection, got success")
+	if !res.Success {
+		t.Fatalf("expected success with derived schema, got: %s", res.Error)
 	}
-	if !strings.Contains(res.Error, "context") {
-		t.Errorf("error should name the missing field 'context'; got: %s", res.Error)
+	ctxSchema, _ := cfg.gotSchema["context"].(map[string]interface{})
+	if ctxSchema == nil {
+		t.Fatalf("configurer should receive a derived schema for context; got %v", cfg.gotSchema)
 	}
-	if cfg.gotSettings != nil {
-		t.Error("rejected edit must not call NodeSettingsConfigurer")
+	props, _ := ctxSchema["properties"].(map[string]interface{})
+	if got := props["token"].(map[string]interface{})["type"]; got != "string" {
+		t.Errorf("literal token should derive type string, got %v", got)
 	}
 }
 
@@ -175,10 +177,14 @@ func TestEditFlow_ConfigureNode_SkipsCheckWhenContextUnreachable(t *testing.T) {
 	}
 }
 
-// TestEditFlow_ConfigureEdge_RejectsMissingSchemaForConfigurableTargetField
-// is the edge-side mirror: filling a configurable target field
-// without an `edge.schema` entry must reject.
-func TestEditFlow_ConfigureEdge_RejectsMissingSchemaForConfigurableTargetField(t *testing.T) {
+// TestEditFlow_ConfigureEdge_DerivesMissingSchemaForConfigurableTargetField:
+// filling a configurable target field without an `edge.schema` entry no
+// longer rejects — the schema is DERIVED from the configuration (literals
+// keep their types, expressions stay untyped) and passed through to the
+// configurer. The "declare a schema for context on every edge" tax is gone;
+// what must never come back is the removed value-shape inference that typed
+// template strings as "string".
+func TestEditFlow_ConfigureEdge_DerivesMissingSchemaForConfigurableTargetField(t *testing.T) {
 	cfg := &captureEdgeConfigurer{}
 	reader := &projectReaderStub{
 		elements: projectWithEdge("edge-1", "node-target", "request", "tinysystems/test-module", "receiver"),
@@ -205,18 +211,31 @@ func TestEditFlow_ConfigureEdge_RejectsMissingSchemaForConfigurableTargetField(t
 		"action":  "configure_edge",
 		"edge_id": "edge-1",
 		"configuration": map[string]interface{}{
-			"context": map[string]interface{}{"apiKey": "k1"},
+			"context": map[string]interface{}{"apiKey": "k1", "n": float64(2), "tpl": "{{$.x}}"},
 		},
-		// no schema — strictness MUST reject
+		// no schema — derived instead of rejected
 	})
 
-	if res.Success {
-		t.Fatalf("expected rejection, got success")
+	if !res.Success {
+		t.Fatalf("expected success with derived schema, got: %s", res.Error)
 	}
-	if !strings.Contains(res.Error, "context") {
-		t.Errorf("error should name the missing field 'context'; got: %s", res.Error)
+	ctxSchema, ok := cfg.gotSchema["context"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("configurer should receive a derived schema for context; got: %v", cfg.gotSchema)
 	}
-	if cfg.gotConfig != nil {
-		t.Error("rejected edit must not call EdgeConfigurer")
+	props, _ := ctxSchema["properties"].(map[string]interface{})
+	if props == nil {
+		t.Fatalf("derived context schema has no properties: %v", ctxSchema)
+	}
+	if got := props["apiKey"].(map[string]interface{})["type"]; got != "string" {
+		t.Errorf("literal apiKey should derive type string, got %v", got)
+	}
+	if got := props["n"].(map[string]interface{})["type"]; got != "number" {
+		t.Errorf("literal n should derive type number, got %v", got)
+	}
+	// The template expression must NOT be typed as string (the removed
+	// value-shape inference's sin) — untyped {} is the contract.
+	if tpl, _ := props["tpl"].(map[string]interface{}); len(tpl) != 0 {
+		t.Errorf("unresolvable expression should stay untyped {}, got %v", tpl)
 	}
 }

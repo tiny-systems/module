@@ -122,12 +122,13 @@ func settingsSchemaPlain() json.RawMessage {
 
 // ----- tests -----
 
-// TestBuildFlow_RejectsMissingSettingsSchemaForConfigurableField pins
-// the load-bearing strict check: if a node fills a configurable
-// settings field, settings_schema must declare its shape — and the
-// rejection happens before any cluster mutation.
-func TestBuildFlow_RejectsMissingSettingsSchemaForConfigurableField(t *testing.T) {
+// TestBuildFlow_DerivesMissingSettingsSchemaForConfigurableField: a node
+// filling a configurable settings field without settings_schema is no
+// longer rejected — settings are literal data, so the schema is derived
+// from the value types and the build proceeds.
+func TestBuildFlow_DerivesMissingSettingsSchemaForConfigurableField(t *testing.T) {
 	adder := &countingNodeAdder{}
+	settingsCfg := &captureNodeSettingsConfigurer{}
 	catalog := &mockModuleCatalog{components: map[string]ComponentInfo{
 		"ticker": {
 			Name:        "ticker",
@@ -141,11 +142,12 @@ func TestBuildFlow_RejectsMissingSettingsSchemaForConfigurableField(t *testing.T
 	tool := NewBuildFlowTool()
 
 	res := tool.Execute(context.Background(), ExecutionContext{
-		ProjectName:   "p1",
-		FlowName:      "f1",
-		ModuleCatalog: catalog,
-		NodeAdder:     adder,
-		EdgeAdder:     &countingEdgeAdder{},
+		ProjectName:            "p1",
+		FlowName:               "f1",
+		ModuleCatalog:          catalog,
+		NodeAdder:              adder,
+		EdgeAdder:              &countingEdgeAdder{},
+		NodeSettingsConfigurer: settingsCfg,
 	}, map[string]interface{}{
 		"nodes": []interface{}{
 			map[string]interface{}{
@@ -155,19 +157,24 @@ func TestBuildFlow_RejectsMissingSettingsSchemaForConfigurableField(t *testing.T
 				"settings": map[string]interface{}{
 					"context": map[string]interface{}{"token": "secret"},
 				},
-				// no settings_schema — strictness MUST reject
+				// no settings_schema — derived from literal value types
 			},
 		},
 	})
 
-	if res.Success {
-		t.Fatalf("expected rejection, got success: %v", res.Output)
+	if !res.Success {
+		t.Fatalf("expected success with derived settings schema, got: %s", res.Error)
 	}
-	if !strings.Contains(res.Error, "context") {
-		t.Errorf("error should name the missing field 'context'; got: %s", res.Error)
+	if adder.calls != 1 {
+		t.Errorf("expected AddNode once, got %d", adder.calls)
 	}
-	if adder.calls != 0 {
-		t.Errorf("rejected build_flow must not call AddNode (called %d times)", adder.calls)
+	ctxSchema, _ := settingsCfg.gotSchema["context"].(map[string]interface{})
+	if ctxSchema == nil {
+		t.Fatalf("configurer should receive a derived schema for context; got %v", settingsCfg.gotSchema)
+	}
+	props, _ := ctxSchema["properties"].(map[string]interface{})
+	if got := props["token"].(map[string]interface{})["type"]; got != "string" {
+		t.Errorf("literal token should derive type string, got %v", got)
 	}
 }
 
@@ -222,10 +229,11 @@ func TestBuildFlow_AcceptsExplicitSchemaForConfigurableField(t *testing.T) {
 	}
 }
 
-// TestBuildFlow_RejectsMissingEdgeSchemaForConfigurableTargetField is
+// TestBuildFlow_DerivesMissingEdgeSchemaForConfigurableTargetField is
 // the edge-side mirror: filling a configurable target field in edge
-// configuration without an `edge.schema` entry must reject.
-func TestBuildFlow_RejectsMissingEdgeSchemaForConfigurableTargetField(t *testing.T) {
+// configuration without an `edge.schema` entry derives one (literals
+// typed, unresolvable expressions untyped) and the build proceeds.
+func TestBuildFlow_DerivesMissingEdgeSchemaForConfigurableTargetField(t *testing.T) {
 	nodeAdder := &countingNodeAdder{}
 	edgeAdder := &countingEdgeAdder{}
 	catalog := &mockModuleCatalog{components: map[string]ComponentInfo{
@@ -263,20 +271,16 @@ func TestBuildFlow_RejectsMissingEdgeSchemaForConfigurableTargetField(t *testing
 					"context": map[string]interface{}{"apiKey": "k1"},
 					"url":     "{{$.url}}",
 				},
-				// no schema — strictness MUST reject
+				// no schema — derived instead of rejected
 			},
 		},
 	})
 
-	if res.Success {
-		t.Fatalf("expected rejection, got success: %v", res.Output)
+	if !res.Success {
+		t.Fatalf("expected success with derived edge schema, got: %s", res.Error)
 	}
-	if !strings.Contains(res.Error, "context") {
-		t.Errorf("error should name the missing field 'context'; got: %s", res.Error)
-	}
-	if nodeAdder.calls != 0 || edgeAdder.calls != 0 {
-		t.Errorf("rejection must happen before any cluster mutation (nodes=%d, edges=%d)",
-			nodeAdder.calls, edgeAdder.calls)
+	if nodeAdder.calls != 2 || edgeAdder.calls != 1 {
+		t.Errorf("build should proceed (nodes=%d, edges=%d)", nodeAdder.calls, edgeAdder.calls)
 	}
 }
 

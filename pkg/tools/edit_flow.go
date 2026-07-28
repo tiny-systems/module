@@ -325,22 +325,17 @@ func editFlowConfigureEdge(ctx context.Context, execCtx ExecutionContext, input 
 		}
 	}
 
-	// Schema-strictness check: if the target's port has configurable
-	// fields and the caller filled them without a matching schema
-	// entry, reject up front. Mirrors the build_flow pre-flight. The
-	// lookup is best-effort — when project state or module catalog
-	// can't be reached, we skip the check rather than block edits.
+	// Derive schemas for filled configurable fields the caller didn't
+	// describe — mirrors the build_flow pass. Without the build spec in
+	// hand there is no source example to resolve expressions against, so
+	// expression-valued keys stay `{}` (untyped, never wrong) while
+	// literals keep their real types. Best-effort: when project state or
+	// module catalog can't be reached, the schema stays as supplied.
 	if len(config) > 0 {
 		if targetNodeID, targetPort, _ := findEdgeTarget(ctx, execCtx, edgeID); targetNodeID != "" {
 			if comp, _ := findNodeComponent(ctx, execCtx, targetNodeID); comp != nil {
 				targetSchema := portSchemaBytes(comp, targetPort, true)
-				missing := requireSchemaForData(config, edgeSchema, configurableFieldsIn(targetSchema))
-				if len(missing) > 0 {
-					return ToolResult{
-						Success: false,
-						Error:   schemaRequiredError("edge", edgeID, missing).Error(),
-					}
-				}
+				edgeSchema = fillMissingSchemas(config, edgeSchema, configurableFieldsIn(targetSchema), nil)
 			}
 		}
 	}
@@ -387,21 +382,15 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 		}
 	}
 
-	// Schema-strictness check: if the node's component has
-	// configurable fields in its _settings schema and the caller
-	// filled them without a matching schema entry, reject up front.
-	// Best-effort: when the cluster state can't be reached, skip the
-	// check rather than block edits.
+	// Derive schemas for filled configurable settings the caller didn't
+	// describe — settings are literal data, so value types are ground
+	// truth (this is NOT the removed template-string inference). User
+	// entries win. Best-effort: when the cluster state can't be reached,
+	// the schema stays as supplied.
 	if len(settings) > 0 {
 		if comp, _ := findNodeComponent(ctx, execCtx, nodeID); comp != nil {
 			schemaBytes := portSchemaBytes(comp, "_settings", true)
-			missing := requireSchemaForData(settings, settingsSchema, configurableFieldsIn(schemaBytes))
-			if len(missing) > 0 {
-				return ToolResult{
-					Success: false,
-					Error:   schemaRequiredError("node", nodeID, missing).Error(),
-				}
-			}
+			settingsSchema = fillMissingSchemas(settings, settingsSchema, configurableFieldsIn(schemaBytes), nil)
 		}
 	}
 
