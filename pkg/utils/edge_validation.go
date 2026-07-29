@@ -237,6 +237,14 @@ func ValidateEdgeSchema(portSchema *ajson.Node, incomingPortData interface{}, ed
 		return errors.New(msg)
 	}
 
+	// A credential is supplied at run time — from the trigger widget the user
+	// fills, not from the flow graph — so it is legitimately absent while
+	// simulating. Left as null it fails the target's `type: string` and reports
+	// a defect in a correct flow, which is the single most common false
+	// positive on these edges. Stand a placeholder in its place so the rest of
+	// the payload is still checked.
+	portDataConfig = placeholderForAbsentSecrets(portDataConfig)
+
 	// Validate against schema
 	err = sch.Validate(portDataConfig)
 	if err != nil {
