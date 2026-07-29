@@ -215,6 +215,24 @@ func editFlowDeleteNode(ctx context.Context, execCtx ExecutionContext, input map
 	return ToolResult{Success: true, Output: map[string]interface{}{"deleted": true, "node_id": nodeID}}
 }
 
+// nodeHasPublishedPorts reports whether a node has reconciled far enough to
+// have published its ports, which is what makes "this port does not exist"
+// provable rather than merely unobserved. Probed through the settings port
+// because every component publishes one and there is no list-ports call;
+// a node mid-reconcile answers for no port at all.
+//
+// Fails open: if the probe cannot confirm the node is published, callers skip
+// blocking. A missed wiring mistake is recoverable, refusing a correct edge is
+// not — build_flow creates nodes and edges in one call, and the nodes may still
+// be reconciling when the edges are wired.
+func nodeHasPublishedPorts(ctx context.Context, execCtx ExecutionContext, nodeID string) bool {
+	if execCtx.PortInspector == nil {
+		return false
+	}
+	_, err := execCtx.PortInspector.InspectPort(ctx, execCtx.ProjectName, nodeID, "_settings", "")
+	return err == nil
+}
+
 func editFlowAddEdge(ctx context.Context, execCtx ExecutionContext, input map[string]interface{}) ToolResult {
 	if execCtx.EdgeAdder == nil {
 		return ToolResult{Success: false, Error: "edge adder not configured"}
@@ -228,6 +246,37 @@ func editFlowAddEdge(ctx context.Context, execCtx ExecutionContext, input map[st
 	}
 	if toNode == "" || toPort == "" {
 		return ToolResult{Success: false, Error: "to_node and to_port are required for add_edge"}
+	}
+
+	// Refuse to wire a port that does not exist, BEFORE creating the edge. Such
+	// an edge is not merely invalid, it is dangling: it simulates to nothing, so
+	// validation reports a downstream type error that blames the mapping and
+	// never names the real cause, and at runtime a source node holding an edge
+	// on a port nobody emits from stalls the flow. Creating it and then
+	// reporting "invalid" left the wreckage behind.
+	//
+	// A node that has not reconciled yet publishes no ports at all; InspectPort
+	// fails for every port name then, so only block when the node HAS ports and
+	// this one is not among them.
+	if execCtx.PortInspector != nil {
+		for _, end := range []struct {
+			node, port, side, kind string
+		}{
+			{fromNode, fromPort, "source", "output"},
+			{toNode, toPort, "target", "input"},
+		} {
+			if _, err := execCtx.PortInspector.InspectPort(ctx, execCtx.ProjectName, end.node, end.port, ""); err == nil {
+				continue
+			}
+			if !nodeHasPublishedPorts(ctx, execCtx, end.node) {
+				continue // not reconciled — cannot prove the port absent
+			}
+			return ToolResult{
+				Success: false,
+				Error: fmt.Sprintf("%s port %q does not exist on node %s — confirm the component's %s ports with get_component_info",
+					end.side, end.port, end.node, end.kind),
+			}
+		}
 	}
 
 	result, err := execCtx.EdgeAdder.AddEdge(ctx, execCtx.ProjectName, execCtx.FlowName, fromNode, fromPort, toNode, toPort)
