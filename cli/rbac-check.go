@@ -24,7 +24,14 @@ on every self-hosted install.
 
 Run from the module's root, where the source is. Reports nothing for calls it
 cannot resolve (an interface it cannot follow, an unstructured object whose kind
-is only known at runtime): a guess would be worse than silence.`,
+is only known at runtime): a guess would be worse than silence.
+
+Two blind spots to check by hand. Calls the SDK makes on a module's behalf are
+not in the module's source and so are invisible here — pkg/resource.Manager
+updates Ingresses and Services for any component that exposes a port, which is
+why http-module needs ingresses/services update without any such call of its
+own. And a component reaching resources dynamically (unstructured, from settings)
+declares what it needs for reasons no static check can derive.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cwd, err := os.Getwd()
 		if err != nil {
