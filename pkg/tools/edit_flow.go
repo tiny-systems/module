@@ -46,15 +46,18 @@ Actions and their required fields:
   Optional: schema (JSON-Schema overrides), trace_id (validate against real data).
   Configures how data maps from source to target port.
 
-- action="configure_node": node_id, settings (object, the _settings port configuration)
+- action="configure_node": node_id, and settings and/or position
+  settings (object, the _settings port configuration) may add/remove output ports (e.g. router routes).
+  position ({x, y}) moves the node on the canvas — pass it alone to tidy a layout
+  without touching configuration. See the layout rules in the flow-building guide.
   Optional: schema (JSON-Schema overrides for configurable fields).
-  Configures node-level settings. May add/remove output ports (e.g., router routes).
 
 Examples:
   edit_flow(action: "add_node", component: "router", module: "tinysystems/common-module-v1")
   edit_flow(action: "delete_node", node_id: "router-abc123")
   edit_flow(action: "add_edge", from_node: "server-abc", from_port: "request", to_node: "logger-def", to_port: "input")
-  edit_flow(action: "configure_edge", edge_id: "edge-xyz", configuration: {"data": "{{$.body}}"})`
+  edit_flow(action: "configure_edge", edge_id: "edge-xyz", configuration: {"data": "{{$.body}}"})
+  edit_flow(action: "configure_node", node_id: "router-abc", position: {x: 940, y: 260})`
 }
 
 func (t *EditFlowTool) Schema() map[string]interface{} {
@@ -105,6 +108,10 @@ func (t *EditFlowTool) Schema() map[string]interface{} {
 			"settings": map[string]interface{}{
 				"type":        "object",
 				"description": "(configure_node) Settings object for the _settings port. Object or JSON string.",
+			},
+			"position": map[string]interface{}{
+				"type":        "object",
+				"description": "(configure_node) Canvas position {x, y} in pixels. Pass it alone to move a node without changing its configuration — use it to fix a cramped or misleading layout after a flow is built.",
 			},
 			"schema": map[string]interface{}{
 				"type":        "object",
@@ -420,14 +427,36 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 		return ToolResult{Success: false, Error: "node_id is required for configure_node"}
 	}
 
+	// Moving a node changes nothing about what the flow does, so a reposition
+	// stands on its own: requiring settings alongside it would force a caller
+	// tidying a layout to resend configuration it has no reason to touch.
+	x, y, hasPosition := positionFrom(input["position"])
+	if hasPosition {
+		if execCtx.NodeRepositioner == nil {
+			return ToolResult{Success: false, Error: "repositioning is not supported here"}
+		}
+		if err := execCtx.NodeRepositioner.RepositionNode(ctx, execCtx.ProjectName, execCtx.FlowName, nodeID, x, y); err != nil {
+			return ToolResult{Success: false, Error: fmt.Sprintf("failed to reposition node: %s", err.Error())}
+		}
+	}
+
 	settings, settingsOk := input["settings"].(map[string]interface{})
 	if !settingsOk {
 		if settingsStr, isString := input["settings"].(string); isString {
 			if err := json.Unmarshal([]byte(settingsStr), &settings); err != nil {
 				return ToolResult{Success: false, Error: fmt.Sprintf("settings string is not valid JSON: %v", err)}
 			}
+		} else if hasPosition {
+			// Position only — nothing left to configure.
+			return ToolResult{
+				Success: true,
+				Output: map[string]interface{}{
+					"node_id":  nodeID,
+					"position": map[string]interface{}{"x": x, "y": y},
+				},
+			}
 		} else {
-			return ToolResult{Success: false, Error: "settings is required for configure_node and must be a JSON object or JSON string"}
+			return ToolResult{Success: false, Error: "configure_node needs settings, a position, or both"}
 		}
 	}
 
@@ -471,3 +500,47 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 }
 
 var _ Tool = (*EditFlowTool)(nil)
+
+// positionFrom reads a {x, y} position from tool input, accepting either an
+// object or a JSON string — the same latitude the other inputs allow, since a
+// caller that serialises one field tends to serialise them all.
+//
+// Both coordinates must be present: a half-given position would move a node
+// somewhere nobody asked for, which is harder to notice than a rejection.
+func positionFrom(raw interface{}) (int, int, bool) {
+	if raw == nil {
+		return 0, 0, false
+	}
+	pos, ok := raw.(map[string]interface{})
+	if !ok {
+		s, isString := raw.(string)
+		if !isString {
+			return 0, 0, false
+		}
+		if err := json.Unmarshal([]byte(s), &pos); err != nil {
+			return 0, 0, false
+		}
+	}
+	x, xOk := numberFrom(pos["x"])
+	y, yOk := numberFrom(pos["y"])
+	if !xOk || !yOk {
+		return 0, 0, false
+	}
+	return x, y, true
+}
+
+// numberFrom accepts the shapes JSON decoding produces for an integer.
+func numberFrom(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	}
+	return 0, false
+}

@@ -426,6 +426,16 @@ type ConfigureEdgeResult struct {
 	Hint  string `json:"hint,omitempty"`
 }
 
+// NodeRepositioner moves a node on the canvas.
+//
+// Separate from NodeSettingsConfigurer because a position is not configuration:
+// it changes nothing about what the flow does, only whether a human can read it.
+// Without this the layout chosen when a flow was built could never be corrected,
+// which is the single most common thing someone asks for after seeing a graph.
+type NodeRepositioner interface {
+	RepositionNode(ctx context.Context, projectName, flowName, nodeID string, x, y int) error
+}
+
 // NodeSettingsConfigurer is an interface for configuring node settings
 type NodeSettingsConfigurer interface {
 	// ConfigureNodeSettings sets node settings (the _settings port configuration)
@@ -609,6 +619,7 @@ type ExecutionContext struct {
 	EdgeAdder              EdgeAdder
 	EdgeConfigurer         EdgeConfigurer
 	NodeSettingsConfigurer NodeSettingsConfigurer
+	NodeRepositioner       NodeRepositioner
 	FlowCreator            FlowCreator
 	FlowDeleter            FlowDeleter
 
