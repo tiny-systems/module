@@ -134,6 +134,13 @@ const (
 	FromSignal = wire.FromSignal
 )
 
+// defaultMaxAttempts bounds automatic re-dispatch of an edge whose failure the
+// component marked retryable. Three is enough for the transient case this
+// serves — a 5xx, a 429, a dropped connection — without turning one hop into a
+// long stall, and the tail is bounded because retries compound down a chain.
+// A flow needing more (or fewer) sets edge.RetryPolicy.MaxAttempts.
+const defaultMaxAttempts = 3
+
 // secretResolveTTL bounds how often byte-identical settings carrying a
 // [[secret:...]] placeholder are re-delivered so OnSettings re-resolves them.
 // Well under the 5-minute reconcile requeue, so re-resolution effectively
@@ -1037,8 +1044,14 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 	}
 
 	policy := edge.RetryPolicy
-	maxAttempts := 1
-	if policy != nil && policy.MaxAttempts > 1 {
+	// Retry transient failures without the flow author configuring anything.
+	// This is safe only because the loop below re-attempts a failure ONLY when
+	// the component marked it retryable (module.ShouldRetry) — an unmarked
+	// error still gets a single shot, so a hop whose side effect may already
+	// have landed is never repeated. That marking, not a per-edge form, is what
+	// makes retry correct; the policy remains for tuning and overrides.
+	maxAttempts := defaultMaxAttempts
+	if policy != nil && policy.MaxAttempts > 0 {
 		maxAttempts = policy.MaxAttempts
 	}
 	// Per-attempt timeout — derives a tighter ctx around each
@@ -1096,15 +1109,17 @@ func (c *Runner) sendToEdgeWithRetry(ctx context.Context, edge v1alpha1.TinyNode
 		}
 		lastErr = err
 
-		// A module-marked permanent error is authoritative: the component
-		// already declared it non-retryable (errors.NonRetryable / a
-		// PermanentError — e.g. an LLM "unauthorized" or "quota_exceeded"),
-		// so never retry it, regardless of MaxAttempts and without the flow
-		// author having to re-list its code. This is the common case; the
-		// policy's NonRetryableErrorCodes below stays only as an advanced
-		// override for codes a module did NOT mark permanent.
-		if perrors.IsPermanent(err) {
-			c.log.Info("send to edge: short-circuit on module-marked permanent error",
+		// The component's own marking decides. module.ShouldRetry is the single
+		// predicate both retry layers consult — it honours pkg/errors'
+		// permanent markers and module.Retryable alike, so a component declares
+		// retryability once and the scheduler and the retry component agree.
+		//
+		// Default-deny is the point: only a failure the component marked
+		// transient is re-attempted. Anything else — a validation error, an
+		// unauthorized call, or a plain unmarked error from a hop that may
+		// already have had its effect — stops here however high MaxAttempts is.
+		if !m.ShouldRetry(err) {
+			c.log.Info("send to edge: not retryable, single shot",
 				"to", edgeTo, "edgeID", edge.ID, "code", perrors.ErrorCode(err),
 			)
 			return nil, err

@@ -1,6 +1,10 @@
 package module
 
-import "errors"
+import (
+	"errors"
+
+	perrors "github.com/tiny-systems/module/pkg/errors"
+)
 
 // This file defines the SDK-level error contract so retryability and the
 // error-port shape are TYPES, not a per-component convention. Before this, the
@@ -70,6 +74,33 @@ func IsRetryable(err error) bool {
 		return re.Retryable()
 	}
 	return false
+}
+
+// ShouldRetry is the single answer to "may this failure be re-attempted?", used
+// by every layer that retries: the scheduler's edge dispatch and the retry
+// component alike. One predicate so a component declares retryability once and
+// both layers agree — before this the scheduler knew only pkg/errors and had
+// never heard of IsRetryable, so a component that correctly marked a 500
+// retryable got nothing at the edge.
+//
+// Unmarked errors return false. That default is deliberate: re-attempting a hop
+// whose side effect already landed duplicates it — a restart restarts twice, an
+// INSERT inserts twice, a paid completion bills twice. Retrying everything by
+// default is exactly the behaviour removed in May 2026 after it burned money on
+// a storm of unauthorized LLM calls. A component opts its transient failures in
+// with Retryable; everything else is left alone.
+//
+// pkg/errors is honoured for compatibility — a permanent error marked there wins
+// over any retryable marking, since a caller went out of its way to forbid the
+// retry.
+func ShouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+	if perrors.IsPermanent(err) {
+		return false
+	}
+	return IsRetryable(err)
 }
 
 // ErrorMessage is the canonical payload every component's error port should

@@ -2,6 +2,12 @@ package errors
 
 import "errors"
 
+// Deprecated vocabulary. New code marks retryability with module.Retryable /
+// module.Permanent and reads it with module.ShouldRetry, which is the single
+// predicate every retry layer consults. This package predates that contract and
+// is still honoured by ShouldRetry so existing modules keep working; the coded
+// variants remain useful only for an edge policy's NonRetryableErrorCodes list.
+//
 // PermanentError wraps an error to indicate it should not be retried.
 // Components can return this to signal that an operation has failed permanently
 // (e.g., validation error, business logic error) and should not be retried.
