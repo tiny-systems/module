@@ -22,6 +22,8 @@ func RegisterCommands(rootCmd *cobra.Command) {
 
 	toolsCmd.AddCommand(infoCmd)
 	toolsCmd.AddCommand(rbacValuesCmd)
+	rbacCheckCmd.Flags().BoolVar(&rbacCheckStrict, "strict", false, "exit non-zero when a call is not covered")
+	toolsCmd.AddCommand(rbacCheckCmd)
 
 	applyHookFlags(preInstallCmd)
 	rootCmd.AddCommand(preInstallCmd)
