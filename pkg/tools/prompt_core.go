@@ -53,11 +53,14 @@ build_flow(
 
 Every node carries a canvas ` + "`position: {x, y}`" + ` (pixels). **If you omit it, nodes stack on top of each other at the origin — an unreadable pile.** A human will open this flow; lay it out like you'd draw it.
 
-- **Left-to-right in dataflow order.** Trigger on the left, each downstream node further right. Space nodes ~320px apart horizontally (` + "`x`" + `: 40, 360, 680, 1000, …).
-- **Stagger branches vertically** ~180–220px apart (` + "`y`" + `). Two trigger/entry nodes feeding one node: put them at different ` + "`y`" + ` and the shared node between them.
+- **Left-to-right in dataflow order.** Trigger on the left, each downstream node further right. Space nodes **~450px** apart horizontally (` + "`x`" + `: 40, 490, 940, 1390, …). A node is ~220px wide and carries port labels on BOTH sides, so a tighter gap leaves two labels overlapping in the space between them — the most common reason a correct flow looks broken.
+- **Stagger branches vertically** ~220px apart (` + "`y`" + `). Two trigger/entry nodes feeding one node: put them at different ` + "`y`" + ` and the shared node between them.
+- **Fan-out is a column, not a row.** When one node feeds several — a router's branches, ` + "`llm_tools`" + `' ` + "`out_<tool>`" + ` ports — give the targets the SAME ` + "`x`" + ` and different ` + "`y`" + `. Chaining them rightwards makes parallel branches read as sequential steps.
+- **Give tall nodes room.** A node grows with its port count, so one with many dynamic ports (` + "`llm_tools`" + `, a multi-route router) needs ~300px of vertical clearance before anything below it.
+- **Draw a loop as a loop.** When a branch returns to an earlier node — a ReAct loop folding back into ` + "`llm_tools`" + ` — put the return path on a LOWER row instead of continuing rightwards. Laid out in one straight line, a loop is indistinguishable from a pipeline.
 - **Keep edges flowing one direction** where possible; avoid crossing.
 
-The position lives on the node element — ` + "`position: {x: 360, y: 120}`" + ` alongside its component/module/settings. Provide it for every node, every time.
+The position lives on the node element — ` + "`position: {x: 490, y: 120}`" + ` alongside its component/module/settings. Provide it for every node, every time.
 
 ## Expression Syntax
 
