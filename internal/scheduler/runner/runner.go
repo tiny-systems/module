@@ -351,18 +351,22 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 			Source:   np.Source,
 		}
 
+		// An authored schema stands on its own. A component whose port shape is
+		// only known at runtime may have a schema and no configuration to
+		// reflect — the documented control-port form does exactly that — so
+		// gating this on Configuration would silently publish no schema at all.
+		if np.Schema != nil {
+			portStatus.Schema = np.Schema
+		}
+
 		if np.Configuration != nil {
-			// A component may author its own schema when the port's shape is
-			// only known at runtime (a form received as data has no Go type to
-			// reflect). Publish those bytes verbatim; otherwise reflect the
-			// configuration value as usual.
-			if np.Schema != nil {
-				portStatus.Schema = np.Schema
-			} else if schemaConf, err := schema.CreateSchema(np.Configuration); err != nil {
-				c.log.Error(err, "ReadStatus: create schema error")
-			} else {
-				schemaData, _ := schemaConf.MarshalJSON()
-				portStatus.Schema = schemaData
+			if np.Schema == nil {
+				if schemaConf, err := schema.CreateSchema(np.Configuration); err != nil {
+					c.log.Error(err, "ReadStatus: create schema error")
+				} else {
+					schemaData, _ := schemaConf.MarshalJSON()
+					portStatus.Schema = schemaData
+				}
 			}
 			// real port data
 			confData, err := json.Marshal(np.Configuration)
@@ -370,7 +374,7 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 				c.log.Error(err, "ReadStatus: encode port configuration error")
 			}
 			portStatus.Configuration = confData
-		} else {
+		} else if np.Schema == nil {
 			c.log.Info("ReadStatus: port configuration is nil", "port", np.Name, "node", c.name)
 		}
 

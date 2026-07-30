@@ -42,8 +42,12 @@ type Port struct {
 	// ControlRunning/ControlStopped) also keeps working — this is only for the
 	// case where no Go type exists at all.
 	//
-	// Raw bytes rather than a decoded map on purpose: the destination field is
-	// already []byte, so the schema passes through unparsed and key order —
-	// which drives rendered field order — survives.
+	// Raw bytes rather than a decoded map so the schema passes through
+	// unparsed, and because the destination field is already []byte.
+	//
+	// Do NOT rely on key order to order the rendered fields: a configurable
+	// overlay re-encodes the node and sorts its keys, so the order written here
+	// is not the order displayed. Set `propertyOrder` on each field — that is
+	// what the editor sorts on.
 	Schema json.RawMessage
 }
