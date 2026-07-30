@@ -554,6 +554,28 @@ func (t *JetStream) handleIncoming(parentCtx context.Context, handler runner.Han
 				)
 			}
 		}
+		// A failure the component marked transient is worth redelivering, and
+		// the broker is the only thing that can redeliver a durable hop: the
+		// publisher returned as soon as the message was stored, so the sender's
+		// retry loop never sees this error. Without this, marking a failure
+		// retryable did nothing on a durable edge while working on a classic
+		// one — the same split the single predicate exists to remove.
+		//
+		// Fire-and-forget hops only. When a caller is waiting on a reply it has
+		// just been handed the error and will decide for itself; redelivering
+		// behind its back would run the handler again with nobody to receive
+		// the result.
+		//
+		// Bounded by the consumer's MaxDeliver, so a hop that keeps failing is
+		// dropped rather than looping.
+		if replySubject == "" && module2.ShouldRetry(handlerErr) {
+			if nakErr := m.Nak(); nakErr != nil {
+				t.log.Info("jetstream transport: nak failed",
+					"err", nakErr.Error(),
+				)
+			}
+			return
+		}
 		if termErr := m.Term(); termErr != nil {
 			t.log.Info("jetstream transport: term failed",
 				"err", termErr.Error(),
