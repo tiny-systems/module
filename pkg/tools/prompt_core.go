@@ -141,6 +141,50 @@ Provide schemas via:
 
 Properties available on schema fields: ` + "`title`" + `, ` + "`description`" + `, ` + "`format`" + ` (` + "`\"textarea\"`" + `, ` + "`\"code\"`" + `, ` + "`\"password\"`" + `), ` + "`secret: true`" + ` (mask as password), ` + "`colSpan`" + ` (` + "`\"col-span-6\"`" + ` half, ` + "`\"col-span-12\"`" + ` full), ` + "`propertyOrder`" + `.
 
+## Form Schemas — What Renders in the UI
+
+A JSON Schema is not only validation here: it is what the editor draws. Wherever
+a schema reaches a person — a node's settings, a control port, a component that
+publishes a form at runtime — these attributes decide what they see. Getting
+them right is the difference between a usable form and a wall of untitled text
+boxes.
+
+**On any field:** ` + "`title`" + ` (the label — always set it), ` + "`description`" + ` (help text
+under the field), ` + "`default`" + `, ` + "`readonly`" + ` (display, not input),
+` + "`propertyOrder`" + ` (integer; fields sort by it — without it order is arbitrary),
+` + "`colSpan`" + ` (` + "`col-span-6`" + ` puts two fields on one row of a 12-column grid),
+` + "`tab`" + ` (groups fields into tabs), ` + "`secret`" + ` (value is masked and not echoed
+back).
+
+**Strings** — ` + "`format`" + `: ` + "`textarea`" + `, ` + "`code`" + ` (with ` + "`language`" + `, e.g. ` + "`json`" + `),
+` + "`password`" + `, ` + "`email`" + `, ` + "`uri`" + `, ` + "`date`" + `, ` + "`date-time`" + `, ` + "`time`" + `, ` + "`color`" + `,
+` + "`base64`" + `, ` + "`radiobox`" + `. With ` + "`enum`" + ` you get a dropdown; add ` + "`enumTitles`" + `
+for human labels in the same order. Also ` + "`minLength`" + `, ` + "`maxLength`" + `, ` + "`pattern`" + `.
+
+**Numbers** — ` + "`minimum`" + `/` + "`maximum`" + `, ` + "`multipleOf`" + `, ` + "`step`" + `, and
+` + "`format: select|radiobox`" + ` with ` + "`enum`" + `/` + "`enumTitles`" + `.
+
+**Booleans** — ` + "`format`" + `: ` + "`checkbox`" + ` (default), ` + "`select`" + `, or **` + "`button`" + `**.
+A ` + "`button`" + ` renders as a clickable action rather than a field, and submitting
+the form is what fires it. This is how a schema asks a person to DECIDE
+something: give each choice its own boolean with ` + "`format: button`" + ` and read
+back which one came true.
+
+**Arrays** — ` + "`items`" + ` describes one element (arrays are homogeneous; there is no
+way to give each element its own schema), plus ` + "`minItems`" + `, ` + "`uniqueItems`" + `,
+` + "`tableMode`" + ` for a compact grid.
+
+**Objects** — ` + "`properties`" + `, ` + "`required`" + `, and ` + "`additionalProperties`" + ` (an open
+map: keys are not known ahead of time, and edge validation accepts any key).
+
+**Conditional fields** — ` + "`requiredWhen`" + ` / ` + "`optionalWhen`" + ` make a field required
+or optional based on another field's value, so a form can reveal what matters.
+
+A form is just a schema, so a component that builds one at runtime uses exactly
+this vocabulary. When you author one, set ` + "`title`" + ` on every field and
+` + "`propertyOrder`" + ` on all of them, mark anything the person should not edit
+` + "`readonly`" + `, and give them a ` + "`button`" + ` to act on.
+
 ## System Ports
 
 Components may expose underscore-prefixed system ports. **Do not wire edges to them.** They are:
