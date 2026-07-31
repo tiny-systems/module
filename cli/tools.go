@@ -4,9 +4,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	devKey string
-)
 var toolsCmd = &cobra.Command{
 	Use:   "tools",
 	Short: "Developer tools",

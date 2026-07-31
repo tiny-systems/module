@@ -6,18 +6,16 @@ import (
 	"path/filepath"
 )
 
-var (
-	platformApiURL string
-)
-
 func RegisterCommands(rootCmd *cobra.Command) {
 
-	applyCommonFlags(rootCmd)
+	// No --platform-api-url or --devkey: both existed only to authenticate the
+	// `publish` command against the platform's /v1/devtools endpoints, which are
+	// retired. A module is published by its own CI and discovered from a repo's
+	// index.yaml, so a module binary never calls the platform API.
 
 	applyRunFlags(runCmd)
 	rootCmd.AddCommand(runCmd)
 
-	applyToolsFlags(toolsCmd)
 	rootCmd.AddCommand(toolsCmd)
 
 	toolsCmd.AddCommand(infoCmd)
@@ -29,14 +27,6 @@ func RegisterCommands(rootCmd *cobra.Command) {
 	rootCmd.AddCommand(preInstallCmd)
 	applyHookFlags(preDeleteCmd)
 	rootCmd.AddCommand(preDeleteCmd)
-}
-
-func applyCommonFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVarP(&platformApiURL, "platform-api-url", "", "https://api.tinysystems.io", "Platform API URL")
-}
-
-func applyToolsFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVarP(&devKey, "devkey", "d", "", "developer key")
 }
 
 func applyHookFlags(cmd *cobra.Command) {
