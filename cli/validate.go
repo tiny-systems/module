@@ -2,8 +2,6 @@ package cli
 
 import (
 	"fmt"
-
-	api "github.com/tiny-systems/platform-api"
 )
 
 // errorPortName is the conventional name for a component's error output port.
@@ -16,7 +14,7 @@ const errorPortName = "error"
 // the published JSON schema for property names rather than reflecting the Go
 // type, so it validates exactly what a consumer (the retry component) sees.
 // Returns human-readable warnings; empty when everything conforms.
-func validateErrorPorts(components []api.PublishComponent) []string {
+func validateErrorPorts(components []componentShape) []string {
 	var warnings []string
 	for _, c := range components {
 		if c.Ports == nil {

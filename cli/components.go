@@ -6,7 +6,6 @@ import (
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/registry"
-	api "github.com/tiny-systems/platform-api"
 )
 
 // AgentToolTag is the tag the platform's MCP layer looks for to
@@ -24,10 +23,10 @@ const AgentToolTag = "agent_tool"
 const SyncRPCTag = "sync_rpc"
 
 // collectComponentsApi introspects the registered components into the
-// api.PublishComponent shape — the same shape a consumer (the platform,
+// componentShape shape — the same shape a consumer (the platform,
 // the conformance check) sees. Pure introspection, no docker/publish.
-func collectComponentsApi() []api.PublishComponent {
-	out := make([]api.PublishComponent, 0)
+func collectComponentsApi() []componentShape {
+	out := make([]componentShape, 0)
 	for _, c := range registry.Get() {
 		out = append(out, getComponentApi(c))
 	}
@@ -53,7 +52,7 @@ func filterNullValues(m map[string]interface{}) map[string]interface{} {
 	return result
 }
 
-func getComponentApi(c module.Component) api.PublishComponent {
+func getComponentApi(c module.Component) componentShape {
 	componentInfo := c.GetInfo()
 
 	// Opt-in MCP tool exposure: if the component implements
@@ -96,9 +95,9 @@ func getComponentApi(c module.Component) api.PublishComponent {
 	}
 
 	// Build ports with schemas
-	ports := make([]api.PublishComponentPort, 0)
+	ports := make([]componentPortShape, 0)
 	for _, p := range c.Ports() {
-		port := api.PublishComponentPort{
+		port := componentPortShape{
 			Name:   p.Name,
 			Source: p.Source,
 		}
@@ -136,7 +135,7 @@ func getComponentApi(c module.Component) api.PublishComponent {
 		ports = append(ports, port)
 	}
 
-	return api.PublishComponent{
+	return componentShape{
 		Name:        componentInfo.Name,
 		Description: componentInfo.Description,
 		Info:        &componentInfo.Info,
