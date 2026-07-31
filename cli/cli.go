@@ -18,6 +18,7 @@ func RegisterCommands(rootCmd *cobra.Command) {
 
 	rootCmd.AddCommand(toolsCmd)
 
+	infoCmd.Flags().BoolVar(&componentsInfoJSON, "json", false, "emit the discovery shape for a repo index's components.yaml")
 	toolsCmd.AddCommand(infoCmd)
 	toolsCmd.AddCommand(rbacValuesCmd)
 	rbacCheckCmd.Flags().BoolVar(&rbacCheckStrict, "strict", false, "exit non-zero when a call is not covered")
