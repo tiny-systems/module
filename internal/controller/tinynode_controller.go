@@ -73,7 +73,13 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil // Don't requeue invalid names
 	}
 
-	if m != r.Module.GetNameSanitised() {
+	// Tolerant on purpose: a publisher prefix is optional in both directions.
+	// The node's name carries the module it needs, and that used to be written
+	// with the publishing workspace's slug — so the same module referenced from
+	// elsewhere, or from a workspace since renamed, produced a name this
+	// reconciler would silently skip. Publisher lives in the catalog now, and
+	// references are written bare, but everything already deployed keeps working.
+	if !module.NameMatches(m, r.Module.GetNameSanitised()) {
 		return ctrl.Result{}, nil
 	}
 
@@ -193,7 +199,7 @@ func (r *TinyNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				var requests []ctrl.Request
 				for _, node := range nodes.Items {
 					m, _, err := module.ParseFullName(node.Name)
-					if err != nil || m != r.Module.GetNameSanitised() {
+					if err != nil || !module.NameMatches(m, r.Module.GetNameSanitised()) {
 						continue
 					}
 					requests = append(requests, ctrl.Request{
