@@ -19,10 +19,38 @@ Package v1alpha1 contains API Schema definitions for the operator v1alpha1 API g
 - [TinyProjectList](#tinyprojectlist)
 - [TinyScenario](#tinyscenario)
 - [TinyScenarioList](#tinyscenariolist)
-- [TinySignal](#tinysignal)
-- [TinySignalList](#tinysignallist)
 - [TinyWidgetPage](#tinywidgetpage)
 - [TinyWidgetPageList](#tinywidgetpagelist)
+
+
+
+#### EdgeRetryPolicy
+
+
+
+EdgeRetryPolicy controls how the scheduler re-dispatches a single
+edge on handler failure. Matches Temporal-style ActivityOptions in
+spirit, scoped to one edge in a TinyFlow.
+
+
+On error, the scheduler:
+ 1. checks if the error's code is in NonRetryableErrorCodes — if so,
+    surface immediately, no retry.
+ 2. otherwise increments the attempt counter and re-dispatches after
+    the policy's backoff, up to MaxAttempts total tries.
+
+_Appears in:_
+- [TinyNodeEdge](#tinynodeedge)
+
+| Field | Description |
+| --- | --- |
+| `maxAttempts` _integer_ | Max total dispatch attempts (1 = no retry, the default). |
+| `initialDelayMs` _integer_ | Initial backoff between attempts. Default 1s. |
+| `backoffCoefficient` _string_ | Multiplier applied to the delay each attempt. Default 2.0<br /><br />(exponential backoff). |
+| `maxDelayMs` _integer_ | Cap on a single attempt's delay. Default 30s. |
+| `nonRetryableErrorCodes` _string array_ | Error codes that skip retry. Components signal these via<br /><br />module.NonRetryable(code, err) — typically "quota_exceeded",<br /><br />"unauthorized", "content_filter", "validation". The transport<br /><br />stamps `x-error-code` on the reply; the scheduler reads it and<br /><br />short-circuits the retry loop when matched. |
+| `timeoutMs` _integer_ | Per-attempt handler timeout in milliseconds. Caps how long a<br /><br />single dispatch attempt can run before the scheduler cancels<br /><br />its context and (if MaxAttempts permits) retries the next one.<br /><br />0 = use the transport's default (currently 5 minutes for the<br /><br />NATS transports). Bump this on edges that legitimately need<br /><br />long-running handlers — agent planning loops, batch LLM calls,<br /><br />or HTTP probes against slow upstreams. |
+
 
 
 
@@ -35,6 +63,7 @@ _Underlying type:_ _integer_
 
 
 _Appears in:_
+- [TinyModuleComponentPort](#tinymodulecomponentport)
 - [TinyNodePortStatus](#tinynodeportstatus)
 
 
@@ -134,6 +163,27 @@ _Appears in:_
 | `status` _[TinyModuleStatus](#tinymodulestatus)_ |  |
 
 
+#### TinyModuleComponentPort
+
+
+
+TinyModuleComponentPort describes a single port on a component as
+published by the module operator in TinyModule status. This is the
+static, component-level view (independent of any placed TinyNode)
+that lets MCP/LLM tooling inspect port schemas before building flows.
+
+_Appears in:_
+- [TinyModuleComponentStatus](#tinymodulecomponentstatus)
+
+| Field | Description |
+| --- | --- |
+| `name` _string_ | Name is the port identifier (e.g. "request", "response", "out"). |
+| `label` _string_ | Label is the human-readable port name. |
+| `source` _boolean_ | Source is true for output ports, false for input ports. |
+| `position` _[Position](#position)_ | Position is the visual port placement hint (Top/Right/Bottom/Left). |
+| `schema` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Schema is the JSON schema describing the port's data structure. |
+
+
 #### TinyModuleComponentStatus
 
 
@@ -149,6 +199,7 @@ _Appears in:_
 | `description` _string_ |  |
 | `info` _string_ |  |
 | `tags` _string array_ |  |
+| `ports` _[TinyModuleComponentPort](#tinymodulecomponentport) array_ | Ports carries component-level port metadata (name, direction,<br /><br />JSON schema) so tooling can discover what a component looks like<br /><br />without placing a TinyNode first. |
 
 
 #### TinyModuleList
@@ -252,6 +303,7 @@ _Appears in:_
 | `port` _string_ | Current node's port name<br /><br />Source port |
 | `to` _string_ | Other node's full port name |
 | `flowID` _string_ |  |
+| `retryPolicy` _[EdgeRetryPolicy](#edgeretrypolicy)_ | Retry policy for this edge. Default (MaxAttempts == 0 or 1) =<br /><br />single-shot: the scheduler dispatches once, surface the error.<br /><br />Authors opt into retry per-edge for transient-failure-safe<br /><br />targets (webhooks, idempotent writes). The runtime never silently<br /><br />retries against paid LLM APIs by default — see<br /><br />feedback_no_implicit_retries.md. |
 
 
 #### TinyNodeList
@@ -486,72 +538,6 @@ TinyScenarioStatus defines the observed state of TinyScenario
 
 _Appears in:_
 - [TinyScenario](#tinyscenario)
-
-
-
-#### TinySignal
-
-
-
-TinySignal is the Schema for the tinysignals API
-
-_Appears in:_
-- [TinySignalList](#tinysignallist)
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinySignal`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `spec` _[TinySignalSpec](#tinysignalspec)_ |  |
-| `status` _[TinySignalStatus](#tinysignalstatus)_ |  |
-
-
-#### TinySignalList
-
-
-
-TinySignalList contains a list of TinySignal
-
-
-
-| Field | Description |
-| --- | --- |
-| `apiVersion` _string_ | `operator.tinysystems.io/v1alpha1`
-| `kind` _string_ | `TinySignalList`
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br /><br />Servers may infer this from the endpoint the client submits requests to.<br /><br />Cannot be updated.<br /><br />In CamelCase.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br /><br />Servers should convert recognized schemas to the latest internal value, and<br /><br />may reject unrecognized values.<br /><br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |
-| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |
-| `items` _[TinySignal](#tinysignal) array_ |  |
-
-
-#### TinySignalSpec
-
-
-
-TinySignalSpec defines the desired state of TinySignal
-
-_Appears in:_
-- [TinySignal](#tinysignal)
-
-| Field | Description |
-| --- | --- |
-| `node` _string_ | Node is the name of the TinyNode to signal |
-| `port` _string_ | Port is the port on the node to send the signal to |
-| `data` _[byte](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#byte-v1-meta) array_ | Data is the payload to send with the signal |
-| `traceID` _string_ | TraceID is an optional trace ID to use for the signal's execution trace.<br /><br />If set, the delivery span will use this as the parent trace ID,<br /><br />allowing callers to look up the trace by a known ID. |
-
-
-#### TinySignalStatus
-
-
-
-TinySignalStatus defines the observed state of TinySignal
-
-_Appears in:_
-- [TinySignal](#tinysignal)
 
 
 
