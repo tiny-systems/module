@@ -66,3 +66,38 @@ func TestRedactGraphElements(t *testing.T) {
 		t.Errorf("expression value must survive: %v", edgeCfg["value"])
 	}
 }
+
+// TestRedactGraphElementsRawMessage pins the publish-path shape:
+// NodesToGraph keeps configuration/schema as json.RawMessage, which the
+// first version of the redactor silently passed through unredacted.
+func TestRedactGraphElementsRawMessage(t *testing.T) {
+	elements := []map[string]interface{}{{
+		"id": "n1",
+		"data": map[string]interface{}{
+			"component": "debug",
+			"handles": []interface{}{map[string]interface{}{
+				"id":            "_settings",
+				"configuration": json.RawMessage(`{"context":{"apiKey":"sk-live-999"}}`),
+				"schema":        json.RawMessage(`{"properties":{"apiKey":{"type":"string","default":"sk-live-999"}}}`),
+			}},
+		},
+	}}
+
+	RedactGraphElements(elements)
+
+	b, _ := json.Marshal(elements)
+	if strings.Contains(string(b), "sk-live-999") {
+		t.Fatalf("RawMessage secret survived: %s", b)
+	}
+	// json.Marshal escapes "<" so match the bare word, not RedactedValue
+	if !strings.Contains(string(b), "redacted") {
+		t.Fatalf("nothing was redacted: %s", b)
+	}
+}
+
+// TestRedactAnyUndecodable: bytes we cannot inspect must not ship.
+func TestRedactAnyUndecodable(t *testing.T) {
+	if got := redactAny([]byte(`{broken`), RedactSecrets); got != nil {
+		t.Fatalf("undecodable bytes must be dropped, got %v", got)
+	}
+}

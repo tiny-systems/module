@@ -1,5 +1,7 @@
 package tools
 
+import "encoding/json"
+
 // Graph-element redaction — the publish-path counterpart of the scenario
 // redaction above. A solution export renders nodes with full port
 // configuration AND schema; components whose settings absorb runtime data
@@ -35,11 +37,37 @@ func RedactGraphElements(elements []map[string]interface{}) {
 
 func redactConfigSchema(m map[string]interface{}) {
 	if cfg, ok := m["configuration"]; ok && cfg != nil {
-		m["configuration"] = RedactSecrets(cfg)
+		m["configuration"] = redactAny(cfg, RedactSecrets)
 	}
 	if sch, ok := m["schema"]; ok && sch != nil {
-		m["schema"] = RedactSchemaSecrets(sch)
+		m["schema"] = redactAny(sch, RedactSchemaSecrets)
 	}
+}
+
+// redactAny applies the given redactor to a value that is either already a
+// decoded JSON tree (import path) or still raw bytes (NodesToGraph keeps
+// configuration/schema as json.RawMessage). Raw bytes are decoded, redacted
+// and re-encoded; undecodable bytes are DROPPED, not passed through — a
+// value we cannot inspect must not ship.
+func redactAny(v interface{}, redact func(interface{}) interface{}) interface{} {
+	var raw []byte
+	switch x := v.(type) {
+	case json.RawMessage:
+		raw = x
+	case []byte:
+		raw = x
+	default:
+		return redact(v)
+	}
+	var decoded interface{}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil
+	}
+	out, err := json.Marshal(redact(decoded))
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(out)
 }
 
 // RedactSchemaSecrets walks a decoded JSON Schema and redacts the
