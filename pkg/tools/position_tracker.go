@@ -51,7 +51,9 @@ func (t *InMemoryPositionTracker) GetNextY(flowName string, targetX int, columnW
 	defer t.mu.RUnlock()
 
 	baseY := 150
-	ySpacing := 180
+	// Node cards with many ports render ~330px tall; 180 stacked them into
+	// each other. Matches the editor's rendered card sizes, not a guess.
+	ySpacing := 360
 
 	// Count nodes in the same X column (within columnWidth tolerance)
 	nodesInColumn := 0
