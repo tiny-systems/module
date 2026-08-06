@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"github.com/tiny-systems/module/api/v1alpha1"
 	"time"
 )
 
@@ -530,6 +531,33 @@ type SignalSender interface {
 }
 
 // FlowCreator creates new flows within a project
+// SolutionExportFetcher fetches the canonical export JSON of a solution
+// (the same artifact `tiny publish` produces), by slug or UUID. Used by
+// clone_solution to reconstruct a solution as a faithful project.
+type SolutionExportFetcher interface {
+	FetchSolutionExport(ctx context.Context, idOrSlug string) ([]byte, error)
+}
+
+// TinyNodeCRManager manipulates TinyNode custom resources directly —
+// the full-fidelity path clone_solution uses (mirroring the hosted
+// installer) instead of the piecewise add/configure editing tools.
+type TinyNodeCRManager interface {
+	// CreateNodeCR creates the node (typically via GenerateName) and
+	// returns the assigned resource name.
+	CreateNodeCR(ctx context.Context, node *v1alpha1.TinyNode) (string, error)
+	GetNodeCR(ctx context.Context, name string) (*v1alpha1.TinyNode, error)
+	UpdateNodeCR(ctx context.Context, node *v1alpha1.TinyNode) error
+	// IsConflict reports whether err is an optimistic-concurrency
+	// conflict worth retrying with fresh data.
+	IsConflict(err error) bool
+}
+
+// ScenarioApplier writes a scenario with pre-built port samples —
+// clone_solution applies the solution's shipped scenarios through it.
+type ScenarioApplier interface {
+	ApplyScenario(ctx context.Context, projectName, name string, ports []v1alpha1.ScenarioPortData) error
+}
+
 type FlowCreator interface {
 	CreateFlow(ctx context.Context, projectName, flowName string) (string, error)
 }
@@ -621,6 +649,9 @@ type ExecutionContext struct {
 	NodeSettingsConfigurer NodeSettingsConfigurer
 	NodeRepositioner       NodeRepositioner
 	FlowCreator            FlowCreator
+	SolutionExportFetcher  SolutionExportFetcher
+	TinyNodeCRManager      TinyNodeCRManager
+	ScenarioApplier        ScenarioApplier
 	FlowDeleter            FlowDeleter
 
 	// Execution and observability
