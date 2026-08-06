@@ -115,3 +115,23 @@ func redactSchemaValue(key string, v interface{}) interface{} {
 		return v
 	}
 }
+
+// RedactConfigurationBytes and RedactSchemaBytes are the byte-level
+// counterparts of RedactGraphElements for callers that hold port data as
+// raw JSON (TinyNode CRs at solution import). nil in, nil out; undecodable
+// bytes are dropped — a value we cannot inspect must not persist.
+func RedactConfigurationBytes(b []byte) []byte {
+	return redactBytes(b, RedactSecrets)
+}
+
+func RedactSchemaBytes(b []byte) []byte {
+	return redactBytes(b, RedactSchemaSecrets)
+}
+
+func redactBytes(b []byte, redact func(interface{}) interface{}) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	out, _ := redactAny(json.RawMessage(b), redact).(json.RawMessage)
+	return []byte(out)
+}

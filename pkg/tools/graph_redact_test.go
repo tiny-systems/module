@@ -101,3 +101,17 @@ func TestRedactAnyUndecodable(t *testing.T) {
 		t.Fatalf("undecodable bytes must be dropped, got %v", got)
 	}
 }
+
+func TestRedactBytes(t *testing.T) {
+	got := RedactConfigurationBytes([]byte(`{"apiKey":"sk-1","q":"hi"}`))
+	if strings.Contains(string(got), "sk-1") || !strings.Contains(string(got), `"q":"hi"`) {
+		t.Fatalf("config bytes: %s", got)
+	}
+	got = RedactSchemaBytes([]byte(`{"properties":{"token":{"default":"sk-2"}}}`))
+	if strings.Contains(string(got), "sk-2") {
+		t.Fatalf("schema bytes: %s", got)
+	}
+	if RedactConfigurationBytes(nil) != nil || RedactConfigurationBytes([]byte("{oops")) != nil {
+		t.Fatal("nil/undecodable must return nil")
+	}
+}
