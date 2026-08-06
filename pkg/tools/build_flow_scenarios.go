@@ -179,7 +179,7 @@ func scaffoldScenarios(
 
 	// Find or create the auto-scaffold scenario for this project. We
 	// avoid duplicates: list first, reuse if present.
-	scenarioName := "auto-scaffold"
+	scenarioName := ScaffoldScenarioName
 	scenarios, listErr := execCtx.ScenarioManager.ListScenarios(ctx, execCtx.ProjectName)
 	if listErr != nil {
 		warnings = append(warnings, fmt.Sprintf("scaffold: list scenarios failed (%s) — skipping auto-scaffold", listErr.Error()))
@@ -534,3 +534,11 @@ func placeholderFor(path string) string {
 	}
 	return fmt.Sprintf("<%s>", leaf)
 }
+
+// ScaffoldScenarioName is the shared auto-scaffold scenario every build_flow
+// tops up with shapeless-port samples. Consumers that merge scenario data
+// (canvas validation, publish gates, edge configuration) must treat it as a
+// FALLBACK: it routinely holds empty scaffolds (messages: []) for ports a
+// user-pinned scenario carries real samples for, and letting it win paints
+// false-red edges against data the author actually verified.
+const ScaffoldScenarioName = "auto-scaffold"
