@@ -164,7 +164,22 @@ func (t *CloneSolutionTool) Execute(ctx context.Context, execCtx ExecutionContex
 		nodeCopy.Name = ""
 		nodeCopy.GenerateName = moduleutils.GetNodeGenerateName(execCtx.ProjectName, newFlow, nodeCopy.Spec.Module, nodeCopy.Spec.Component)
 		nodeCopy.Spec.Edges = nil
-		nodeCopy.Spec.Ports = nil
+		// Keep the port configs that reference nothing — settings, and any
+		// default input config. Only From-qualified configs name another
+		// node, so only those must wait for the remapping in phase 2.
+		//
+		// Stripping settings too meant every component booted on its
+		// DEFAULTS in the gap between the phases: conversation's default
+		// path is /data/conversation.db, which its container cannot create,
+		// so a freshly installed solution reported failed runs before the
+		// user had touched it.
+		var selfContained []v1alpha1.TinyNodePortConfig
+		for _, pc := range nodeCopy.Spec.Ports {
+			if pc.From == "" {
+				selfContained = append(selfContained, pc)
+			}
+		}
+		nodeCopy.Spec.Ports = selfContained
 		nodeCopy.Labels[v1alpha1.ProjectNameLabel] = execCtx.ProjectName
 		nodeCopy.Labels[v1alpha1.FlowNameLabel] = newFlow
 
