@@ -72,7 +72,10 @@ func redactValue(key string, v interface{}) interface{} {
 		}
 		return out
 	case string:
-		if key != "" && secretKeyRe.MatchString(key) {
+		// An empty value has nothing to hide, and marking it turns a blank
+		// form field into one pre-filled with a marker string that users
+		// then submit as a credential. Redaction is for values, not slots.
+		if x != "" && key != "" && secretKeyRe.MatchString(key) {
 			return RedactedValue
 		}
 		return x

@@ -71,3 +71,15 @@ func TestRedactSecrets(t *testing.T) {
 		t.Fatal("input mutated")
 	}
 }
+
+// TestRedactSkipsEmpty: an empty credential slot must stay empty — marking it
+// turns a blank form field into one pre-filled with a marker users submit.
+func TestRedactSkipsEmpty(t *testing.T) {
+	out := RedactSecrets(map[string]interface{}{"apiKey": "", "token": "abc"}).(map[string]interface{})
+	if out["apiKey"] != "" {
+		t.Errorf("empty apiKey = %q, want empty", out["apiKey"])
+	}
+	if out["token"] != RedactedValue {
+		t.Errorf("non-empty token = %q, want redacted", out["token"])
+	}
+}
