@@ -95,7 +95,7 @@ func redactSchemaValue(key string, v interface{}) interface{} {
 		}
 		if key != "" && secretKeyRe.MatchString(key) {
 			for _, f := range []string{"default", "const"} {
-				if s, ok := out[f].(string); ok && s != "" {
+				if s, ok := out[f].(string); ok && s != "" && !isExpression(s) {
 					out[f] = PublishedSecretValue
 				}
 			}

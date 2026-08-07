@@ -115,3 +115,31 @@ func TestRedactBytes(t *testing.T) {
 		t.Fatal("nil/undecodable must return nil")
 	}
 }
+
+// TestRedactPreservesExpressions pins the failure that shipped a broken
+// solution: an edge feeding a runtime key as {{$.context.apiKey}} had the
+// expression rewritten to a literal marker, so the component received the
+// marker as its credential and every call failed with invalid x-api-key.
+func TestRedactPreservesExpressions(t *testing.T) {
+	elements := []map[string]interface{}{{
+		"id":     "e1",
+		"source": "n1",
+		"data": map[string]interface{}{
+			"configuration": json.RawMessage(`{"apiKey":"{{$.context.apiKey}}","token":"sk-literal-secret","context":"{{$.context}}"}`),
+		},
+	}}
+
+	RedactGraphElements(elements)
+
+	cfg := elements[0]["data"].(map[string]interface{})["configuration"]
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(cfg.(json.RawMessage), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["apiKey"] != "{{$.context.apiKey}}" {
+		t.Errorf("expression rewritten to %q — the edge no longer reads the runtime key", decoded["apiKey"])
+	}
+	if decoded["token"] == "sk-literal-secret" {
+		t.Error("literal secret survived redaction")
+	}
+}

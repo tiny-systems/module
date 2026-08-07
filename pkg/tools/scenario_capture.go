@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"regexp"
+	"strings"
 )
 
 // Scenario capture — shared helpers for pinning a trace as a scenario
@@ -49,6 +50,12 @@ func ExtractScenarioPorts(spans []TraceSpanInfo) map[string]map[string]interface
 	return out
 }
 
+// isExpression reports whether a value is a template reference rather than
+// literal data.
+func isExpression(s string) bool {
+	return strings.Contains(s, "{{")
+}
+
 // RedactSecrets walks a decoded JSON value and replaces string values whose
 // key looks credential-shaped with RedactedValue. Containers are recursed
 // regardless of their own key, so context.apiKey and headers[0].authorization
@@ -75,7 +82,13 @@ func redactValue(key string, v interface{}) interface{} {
 		// An empty value has nothing to hide, and marking it turns a blank
 		// form field into one pre-filled with a marker string that users
 		// then submit as a credential. Redaction is for values, not slots.
-		if x != "" && key != "" && secretKeyRe.MatchString(key) {
+		//
+		// An EXPRESSION is likewise not a secret — it is a reference to one.
+		// "{{$.context.apiKey}}" is how an edge feeds a runtime-supplied key
+		// into a component; rewriting it to a literal does not hide anything
+		// and silently severs the wiring, so the component receives the
+		// marker itself as its credential.
+		if x != "" && !isExpression(x) && key != "" && secretKeyRe.MatchString(key) {
 			return RedactedValue
 		}
 		return x
