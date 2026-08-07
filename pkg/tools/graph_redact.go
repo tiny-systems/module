@@ -35,12 +35,19 @@ func RedactGraphElements(elements []map[string]interface{}) {
 	}
 }
 
+// PublishedSecretValue is what a credential-shaped value becomes in a
+// published export. Empty, not "<redacted>": these values land in the
+// installer's widget as the field's DEFAULT, and a form pre-filled with a
+// marker string is a field the user may well submit as-is — which reaches
+// the provider as a bogus credential. Blank says "fill me in".
+const PublishedSecretValue = ""
+
 func redactConfigSchema(m map[string]interface{}) {
 	if cfg, ok := m["configuration"]; ok && cfg != nil {
-		m["configuration"] = redactAny(cfg, RedactSecrets)
+		m["configuration"] = redactAny(cfg, blankSecrets)
 	}
 	if sch, ok := m["schema"]; ok && sch != nil {
-		m["schema"] = redactAny(sch, RedactSchemaSecrets)
+		m["schema"] = redactAny(sch, blankSchemaSecrets)
 	}
 }
 
@@ -134,4 +141,36 @@ func redactBytes(b []byte, redact func(interface{}) interface{}) []byte {
 	}
 	out, _ := redactAny(json.RawMessage(b), redact).(json.RawMessage)
 	return []byte(out)
+}
+
+// blankSecrets and blankSchemaSecrets are the publish-path redactors: same
+// key-name heuristic, but the surviving value is empty rather than a marker.
+func blankSecrets(v interface{}) interface{} {
+	return replaceRedacted(RedactSecrets(v))
+}
+
+func blankSchemaSecrets(v interface{}) interface{} {
+	return replaceRedacted(RedactSchemaSecrets(v))
+}
+
+func replaceRedacted(v interface{}) interface{} {
+	switch x := v.(type) {
+	case map[string]interface{}:
+		for k, val := range x {
+			x[k] = replaceRedacted(val)
+		}
+		return x
+	case []interface{}:
+		for i, val := range x {
+			x[i] = replaceRedacted(val)
+		}
+		return x
+	case string:
+		if x == RedactedValue {
+			return PublishedSecretValue
+		}
+		return x
+	default:
+		return v
+	}
 }

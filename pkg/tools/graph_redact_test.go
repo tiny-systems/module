@@ -38,8 +38,8 @@ func TestRedactGraphElements(t *testing.T) {
 	handle := elements[0]["data"].(map[string]interface{})["handles"].([]interface{})[0].(map[string]interface{})
 	cfg := handle["configuration"].(map[string]interface{})
 	inner := cfg["context"].(map[string]interface{})["context"].(map[string]interface{})
-	if inner["apiKey"] != RedactedValue {
-		t.Errorf("config apiKey = %v, want redacted", inner["apiKey"])
+	if inner["apiKey"] != PublishedSecretValue {
+		t.Errorf("config apiKey = %q, want blank", inner["apiKey"])
 	}
 	if inner["question"] != "hi" {
 		t.Errorf("non-secret config value over-redacted: %v", inner["question"])
@@ -47,8 +47,8 @@ func TestRedactGraphElements(t *testing.T) {
 
 	props := handle["schema"].(map[string]interface{})["$defs"].(map[string]interface{})["Context"].(map[string]interface{})["properties"].(map[string]interface{})["context"].(map[string]interface{})["properties"].(map[string]interface{})
 	apiKeySchema := props["apiKey"].(map[string]interface{})
-	if apiKeySchema["default"] != RedactedValue {
-		t.Errorf("schema apiKey default = %v, want redacted", apiKeySchema["default"])
+	if apiKeySchema["default"] != PublishedSecretValue {
+		t.Errorf("schema apiKey default = %q, want blank — a pre-filled marker gets submitted as a credential", apiKeySchema["default"])
 	}
 	if apiKeySchema["type"] != "string" {
 		t.Errorf("schema structure mangled: %v", apiKeySchema)
@@ -59,8 +59,8 @@ func TestRedactGraphElements(t *testing.T) {
 	}
 
 	edgeCfg := elements[1]["data"].(map[string]interface{})["configuration"].(map[string]interface{})
-	if edgeCfg["token"] != RedactedValue {
-		t.Errorf("edge token = %v, want redacted", edgeCfg["token"])
+	if edgeCfg["token"] != PublishedSecretValue {
+		t.Errorf("edge token = %q, want blank", edgeCfg["token"])
 	}
 	if edgeCfg["value"] != "{{$.x}}" {
 		t.Errorf("expression value must survive: %v", edgeCfg["value"])
@@ -90,8 +90,8 @@ func TestRedactGraphElementsRawMessage(t *testing.T) {
 		t.Fatalf("RawMessage secret survived: %s", b)
 	}
 	// json.Marshal escapes "<" so match the bare word, not RedactedValue
-	if !strings.Contains(string(b), "redacted") {
-		t.Fatalf("nothing was redacted: %s", b)
+	if strings.Contains(string(b), "sk-live") {
+		t.Fatalf("secret survived: %s", b)
 	}
 }
 
