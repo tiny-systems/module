@@ -38,3 +38,39 @@ func TestTargetConstrainedValuesConst(t *testing.T) {
 		t.Errorf("const field: got %v, want POST", got["context.method"])
 	}
 }
+
+// TestShapelessInlineProperty pins llm_tools' out_<tool> shape: `input` is an
+// inline property of the root def with no type and no properties (its shape
+// is whatever the tool declared), not a $defs entry of its own.
+func TestShapelessInlineProperty(t *testing.T) {
+	schema := []byte(`{"$ref":"#/$defs/Toolcall","$defs":{
+	 "Context":{"path":"$.context","configurable":true},
+	 "Toolcall":{"path":"$","type":"object","properties":{
+	   "context":{"$ref":"#/$defs/Context"},
+	   "input":{"title":"Input","description":"Structured arguments per the tool's inputSchema."},
+	   "messages":{"type":"array","items":{"$ref":"#/$defs/Message"}},
+	   "toolUseId":{"type":"string"}}}}}`)
+
+	got := shapelessFieldsIn(schema)
+
+	var hasInput, hasContext, hasToolUseID bool
+	for _, f := range got {
+		switch f {
+		case "input":
+			hasInput = true
+		case "context":
+			hasContext = true
+		case "toolUseId":
+			hasToolUseID = true
+		}
+	}
+	if !hasInput {
+		t.Errorf("inline shapeless property `input` not detected, got %v", got)
+	}
+	if !hasContext {
+		t.Errorf("configurable def `context` lost, got %v", got)
+	}
+	if hasToolUseID {
+		t.Errorf("typed scalar `toolUseId` must not be scaffolded, got %v", got)
+	}
+}

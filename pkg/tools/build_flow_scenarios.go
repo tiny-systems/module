@@ -84,7 +84,52 @@ func shapelessFieldsIn(schemaBytes []byte) []string {
 		}
 		out = append(out, field)
 	}
+
+	// Shapeless fields also arrive as INLINE properties of the root def
+	// (path "$") rather than as $defs entries of their own — llm_tools'
+	// out_<tool> ports declare `input` ("structured arguments per the
+	// tool's inputSchema") that way, with no type and no properties,
+	// because its shape is whatever the tool declared. Same rule, one
+	// level in; without it those edges validate amber forever.
+	for _, raw := range defs {
+		def, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if path, _ := def["path"].(string); path != "$" {
+			continue
+		}
+		props, ok := def["properties"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for field, rawProp := range props {
+			prop, ok := rawProp.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if prop["$ref"] != nil || prop["properties"] != nil || prop["items"] != nil ||
+				prop["additionalProperties"] != nil || prop["enum"] != nil {
+				continue // has shape (or its own def) — verifiable
+			}
+			if t, _ := prop["type"].(string); t != "" && t != "object" {
+				continue // scalar-typed — verifiable
+			}
+			if !containsStr(out, field) {
+				out = append(out, field)
+			}
+		}
+	}
 	return out
+}
+
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // expressionRe matches `{{...}}` expressions in edge configuration values.
