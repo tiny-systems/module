@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/tiny-systems/module/api/v1alpha1"
 	moduleutils "github.com/tiny-systems/module/pkg/utils"
@@ -103,7 +104,12 @@ func ScaffoldLiveScenarios(ctx context.Context, execCtx ExecutionContext) (int, 
 				shapelessPaths[p] = struct{}{}
 			}
 			targetTypes := targetExampleTypes(config, settingsByNode[targetName])
+			constrained := targetConstrainedValues(config, schemaByPort[edge.To])
 			for _, p := range paths {
+				if v, ok := constrained[p]; ok {
+					setPath(mock, p, v)
+					continue
+				}
 				if _, isShapeless := shapelessPaths[p]; isShapeless {
 					setPath(mock, p, shapelessPlaceholder(p, targetTypes[p]))
 					continue
@@ -159,4 +165,92 @@ func ScaffoldLiveScenarios(ctx context.Context, execCtx ExecutionContext) (int, 
 		written++
 	}
 	return written, warnings
+}
+
+// targetConstrainedValues maps a source JSONPath to a value the TARGET port
+// schema will actually accept, for the constraints a generic placeholder
+// cannot satisfy by luck: enums (and const). Without it a scaffolded sample
+// writes "<kind>" into a field declared as one of
+// Deployment/StatefulSet/DaemonSet and the edge fails validation — the
+// scaffold's own placeholder becoming the error.
+//
+// Only whole-string single expressions are resolvable: "{{$.context.kind}}"
+// tells us $.context.kind lands in `kind`, while "ns-{{$.x}}" does not
+// identify a target field.
+func targetConstrainedValues(config map[string]interface{}, targetSchema []byte) map[string]interface{} {
+	out := map[string]interface{}{}
+	if len(targetSchema) == 0 {
+		return out
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(targetSchema, &root); err != nil {
+		return out
+	}
+
+	var walk func(cfg interface{}, schema map[string]interface{})
+	walk = func(cfg interface{}, schema map[string]interface{}) {
+		schema = resolveSchemaNode(root, schema)
+		switch c := cfg.(type) {
+		case map[string]interface{}:
+			props, _ := schema["properties"].(map[string]interface{})
+			for k, v := range c {
+				var child map[string]interface{}
+				if props != nil {
+					child, _ = props[k].(map[string]interface{})
+				}
+				walk(v, child)
+			}
+		case []interface{}:
+			items, _ := schema["items"].(map[string]interface{})
+			for _, v := range c {
+				walk(v, items)
+			}
+		case string:
+			if schema == nil {
+				return
+			}
+			allowed, ok := schema["enum"].([]interface{})
+			if !ok || len(allowed) == 0 {
+				if cv, has := schema["const"]; has {
+					allowed = []interface{}{cv}
+				} else {
+					return
+				}
+			}
+			m := expressionRe.FindStringSubmatch(c)
+			if m == nil || m[0] != c {
+				return
+			}
+			for _, full := range jsonPathRe.FindAllString(m[1], -1) {
+				path := strings.TrimPrefix(full, "$.")
+				if path != "" && path != full {
+					out[path] = allowed[0]
+				}
+			}
+		}
+	}
+	walk(config, root)
+	return out
+}
+
+// resolveSchemaNode follows a single $ref into the document's $defs so
+// property walking survives the ref indirection component schemas use.
+func resolveSchemaNode(root, node map[string]interface{}) map[string]interface{} {
+	if node == nil {
+		return nil
+	}
+	ref, _ := node["$ref"].(string)
+	const prefix = "#/$defs/"
+	if !strings.HasPrefix(ref, prefix) {
+		return node
+	}
+	defs, _ := root["$defs"].(map[string]interface{})
+	if defs == nil {
+		return node
+	}
+	target, _ := defs[strings.TrimPrefix(ref, prefix)].(map[string]interface{})
+	if target == nil {
+		return node
+	}
+	return target
 }
