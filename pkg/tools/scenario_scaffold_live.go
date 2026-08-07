@@ -169,7 +169,7 @@ func ScaffoldLiveScenarios(ctx context.Context, execCtx ExecutionContext) (int, 
 
 // targetConstrainedValues maps a source JSONPath to a value the TARGET port
 // schema will actually accept, for the constraints a generic placeholder
-// cannot satisfy by luck: enums (and const). Without it a scaffolded sample
+// cannot satisfy by luck: enums, const, and non-string scalar types. Without it a scaffolded sample
 // writes "<kind>" into a field declared as one of
 // Deployment/StatefulSet/DaemonSet and the edge fails validation — the
 // scaffold's own placeholder becoming the error.
@@ -209,11 +209,23 @@ func targetConstrainedValues(config map[string]interface{}, targetSchema []byte)
 			if schema == nil {
 				return
 			}
-			allowed, ok := schema["enum"].([]interface{})
-			if !ok || len(allowed) == 0 {
-				if cv, has := schema["const"]; has {
-					allowed = []interface{}{cv}
-				} else {
+			var value interface{}
+			switch {
+			case len(asSlice(schema["enum"])) > 0:
+				value = asSlice(schema["enum"])[0]
+			case schema["const"] != nil:
+				value = schema["const"]
+			default:
+				// A non-string scalar target rejects the "<leaf>" marker
+				// outright ("/lines: expected integer, but got string"), so
+				// the declared type picks the value. Strings keep the marker:
+				// it is valid there and says where it came from.
+				switch t, _ := schema["type"].(string); t {
+				case "integer", "number":
+					value = 0
+				case "boolean":
+					value = false
+				default:
 					return
 				}
 			}
@@ -224,13 +236,18 @@ func targetConstrainedValues(config map[string]interface{}, targetSchema []byte)
 			for _, full := range jsonPathRe.FindAllString(m[1], -1) {
 				path := strings.TrimPrefix(full, "$.")
 				if path != "" && path != full {
-					out[path] = allowed[0]
+					out[path] = value
 				}
 			}
 		}
 	}
 	walk(config, root)
 	return out
+}
+
+func asSlice(v interface{}) []interface{} {
+	s, _ := v.([]interface{})
+	return s
 }
 
 // resolveSchemaNode follows a single $ref into the document's $defs so

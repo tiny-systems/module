@@ -74,3 +74,28 @@ func TestShapelessInlineProperty(t *testing.T) {
 		t.Errorf("typed scalar `toolUseId` must not be scaffolded, got %v", got)
 	}
 }
+
+// TestTargetConstrainedScalarTypes: a "<leaf>" marker in an integer field is
+// itself a validation failure, so the declared type picks the value.
+func TestTargetConstrainedScalarTypes(t *testing.T) {
+	got := targetConstrainedValues(
+		map[string]interface{}{
+			"lines":  "{{$.input.lines}}",
+			"follow": "{{$.input.follow}}",
+			"name":   "{{$.input.name}}",
+		},
+		[]byte(`{"properties":{
+		  "lines":{"type":"integer"},
+		  "follow":{"type":"boolean"},
+		  "name":{"type":"string"}}}`))
+
+	if got["input.lines"] != 0 {
+		t.Errorf("integer field: got %#v, want 0", got["input.lines"])
+	}
+	if got["input.follow"] != false {
+		t.Errorf("boolean field: got %#v, want false", got["input.follow"])
+	}
+	if _, pinned := got["input.name"]; pinned {
+		t.Error("string field must keep its descriptive placeholder")
+	}
+}
