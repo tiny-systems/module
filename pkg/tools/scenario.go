@@ -37,6 +37,7 @@ Actions and their required fields:
   Sets sample data for a specific port within an existing scenario.
   Port name is the full port identifier (e.g., "flowid.module.component-suffix:portname").
 
+- action="scaffold": (no fields) — writes placeholder samples for every edge reading an open-typed port, using the flow AS IT IS NOW. Run this when edges validate amber ("cannot be verified without a scenario"), which happens for ports that appear only after a component is configured (llm_tools out_<tool>, router routes). Prefer a real trace via action="create" when the flow can actually run.
 - action="delete": resource_name
   Removes the scenario by its resource_name (from list).
 
@@ -44,6 +45,7 @@ Examples:
   scenarios(action: "list")
   scenarios(action: "create", name: "Happy path", trace_id: "abc123")
   scenarios(action: "update", resource_name: "trace-abc", port: "flow.module.comp-1:request", data: {"method":"POST"})
+  scenarios(action: "scaffold")
   scenarios(action: "delete", resource_name: "trace-abc")`
 }
 
@@ -93,12 +95,14 @@ func (t *ScenariosTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		return scenariosCreate(ctx, execCtx, input)
 	case "update":
 		return scenariosUpdate(ctx, execCtx, input)
+	case "scaffold":
+		return t.scaffold(ctx, execCtx)
 	case "delete":
 		return scenariosDelete(ctx, execCtx, input)
 	default:
 		return ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("unknown action %q; expected list, create, update, delete", action),
+			Error:   fmt.Sprintf("unknown action %q; expected list, create, scaffold, update, delete", action),
 		}
 	}
 }
@@ -188,3 +192,23 @@ func scenariosDelete(ctx context.Context, execCtx ExecutionContext, input map[st
 }
 
 var _ Tool = (*ScenariosTool)(nil)
+
+// scaffold tops up the auto-scaffold scenario from the live project — the
+// escape hatch for edges that validate amber because their source port only
+// materialised after the component was configured.
+func (t *ScenariosTool) scaffold(ctx context.Context, execCtx ExecutionContext) ToolResult {
+	written, warnings := ScaffoldLiveScenarios(ctx, execCtx)
+	out := map[string]interface{}{
+		"scenario":      ScaffoldScenarioName,
+		"ports_written": written,
+	}
+	if len(warnings) > 0 {
+		out["warnings"] = warnings
+	}
+	if written == 0 {
+		out["hint"] = "Nothing to scaffold: every edge either verifies from its schemas alone or already has sample data."
+	} else {
+		out["hint"] = "Placeholder samples written. They prove the SHAPE, not the values — pin a real trace with scenarios(action=create, trace_id=...) once the flow runs."
+	}
+	return ToolResult{Success: true, Output: out}
+}
