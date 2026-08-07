@@ -542,6 +542,11 @@ type SolutionExportFetcher interface {
 // the full-fidelity path clone_solution uses (mirroring the hosted
 // installer) instead of the piecewise add/configure editing tools.
 type TinyNodeCRManager interface {
+	// ListProjectNodeCRs returns the project's nodes as the cluster holds
+	// them — Status.Ports carry the schemas the runtime actually publishes,
+	// the only place dynamically-created ports (llm_tools out_<tool>,
+	// router routes) appear at all.
+	ListProjectNodeCRs(ctx context.Context, projectName string) ([]v1alpha1.TinyNode, error)
 	// CreateNodeCR creates the node (typically via GenerateName) and
 	// returns the assigned resource name.
 	CreateNodeCR(ctx context.Context, node *v1alpha1.TinyNode) (string, error)

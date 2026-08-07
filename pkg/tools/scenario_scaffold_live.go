@@ -29,15 +29,21 @@ import (
 // Returns the number of ports written plus warnings. Best-effort throughout:
 // scaffolding never blocks its caller.
 func ScaffoldLiveScenarios(ctx context.Context, execCtx ExecutionContext) (int, []string) {
-	if execCtx.ScenarioManager == nil || execCtx.ProjectReader == nil || execCtx.ProjectName == "" {
-		return 0, []string{"scaffold: project reader or scenario manager not configured"}
+	if execCtx.ScenarioManager == nil || execCtx.TinyNodeCRManager == nil || execCtx.ProjectName == "" {
+		return 0, []string{"scaffold: node reader or scenario manager not configured"}
 	}
 
-	elements, err := execCtx.ProjectReader.ReadProjectElements(ctx, execCtx.ProjectName)
-	if err != nil || elements == nil {
-		return 0, []string{fmt.Sprintf("scaffold: read project failed (%v)", err)}
+	// Straight from the cluster, deliberately: the agent-facing project
+	// elements carry a compact port list with no schemas, and the schema is
+	// the whole input to the shapeless-field decision.
+	nodeList, err := execCtx.TinyNodeCRManager.ListProjectNodeCRs(ctx, execCtx.ProjectName)
+	if err != nil {
+		return 0, []string{fmt.Sprintf("scaffold: list nodes failed (%v)", err)}
 	}
-	nodes, _, _ := moduleutils.NodesFromGraphElements(elements.Elements)
+	nodes := make(map[string]*v1alpha1.TinyNode, len(nodeList))
+	for i := range nodeList {
+		nodes[nodeList[i].Name] = &nodeList[i]
+	}
 	if len(nodes) == 0 {
 		return 0, nil
 	}
