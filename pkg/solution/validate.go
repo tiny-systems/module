@@ -40,7 +40,7 @@ func CheckWidgetShape(nodesMap map[string]v1alpha1.TinyNode) error {
 		// exactly where it belongs. Auditing the live catalog against an
 		// earlier version of this rule flagged seven such solutions, all of
 		// them correct — the distinction is the whole rule, not a detail.
-		if isPerRunTrigger(node) {
+		if isPerRunTrigger(node) && !feedsPersistedConfig(node) {
 			if fields := settingsContextFields(node); len(fields) > 1 {
 				for _, f := range fields {
 					if redact.IsSecretKey(f) {
@@ -121,6 +121,28 @@ func shortNodeName(name string) string {
 		return name[i+1:]
 	}
 	return name
+}
+
+// feedsPersistedConfig reports whether a widget's output goes to a port that
+// STORES it rather than acting on it — the `config` port of an inject-style
+// component, which persists what it is given and attaches it to later
+// messages.
+//
+// Such a widget is a settings form no matter what its own control port looks
+// like: a fire-once trigger is exactly how you submit configuration once. The
+// rule below is about forms a user fills on every run, and this is the
+// opposite of that. Missing this blocked the very shape the rule recommends.
+func feedsPersistedConfig(node v1alpha1.TinyNode) bool {
+	if len(node.Spec.Edges) == 0 {
+		return false
+	}
+	for _, e := range node.Spec.Edges {
+		parts := strings.SplitN(e.To, ":", 2)
+		if len(parts) != 2 || parts[1] != "config" {
+			return false
+		}
+	}
+	return true
 }
 
 // isPerRunTrigger reports whether a widget is the form a user submits on

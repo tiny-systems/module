@@ -125,3 +125,30 @@ func TestAllowsCredentialOnScheduledTrigger(t *testing.T) {
 		t.Errorf("scheduled trigger's settings form was rejected: %v", err)
 	}
 }
+
+// A widget whose output feeds a persisted `config` port is a settings form —
+// submitted once — regardless of its control port offering `send`. This is
+// the very shape the credential rule recommends, and an earlier version of
+// the rule rejected it.
+func TestAllowsCredentialOnConfigFeedingWidget(t *testing.T) {
+	n := widgetNode("f.mod.signal-cfg",
+		`{"context":{"apiKey":"","conversationId":"default"}}`, nil)
+	n.Spec.Edges = []v1alpha1.TinyNodeEdge{{
+		ID:   "e1",
+		Port: "out",
+		To:   "f.mod.inject-1:config",
+	}}
+	if err := CheckWidgetShape(map[string]v1alpha1.TinyNode{n.Name: n}); err != nil {
+		t.Errorf("settings widget feeding inject.config was rejected: %v", err)
+	}
+}
+
+// The same widget wired straight into the flow is a per-run form again.
+func TestRejectsCredentialWhenWidgetFeedsFlow(t *testing.T) {
+	n := widgetNode("f.mod.signal-ask",
+		`{"context":{"apiKey":"","question":"why?"}}`, nil)
+	n.Spec.Edges = []v1alpha1.TinyNodeEdge{{ID: "e1", Port: "out", To: "f.mod.js-1:request"}}
+	if err := CheckWidgetShape(map[string]v1alpha1.TinyNode{n.Name: n}); err == nil {
+		t.Error("credential on a form wired into the flow was accepted")
+	}
+}
