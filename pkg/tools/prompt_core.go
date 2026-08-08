@@ -226,6 +226,17 @@ edge: encoded: "{{$.encoded}}"              ← typed as string → no scenario 
 
 **From traces:** after a successful execution, save real port data with ` + "`scenarios(action: create, name, trace_id)`" + `. Real data beats hand-crafted samples.
 
+**Ports that only appear once a component is configured** — a tool-caller publishes one output per declared tool, a router one per route — do not exist when the flow is first built, so nothing scaffolds them and their edges validate amber forever. ` + "`scenarios(action: scaffold)`" + ` reads the flow as it stands now and fills in placeholder shapes for exactly those. Run it whenever edges report "cannot be verified without a scenario", then pin a real trace over it when the flow can actually run.
+
+## Publishing a Solution
+
+A published solution is installed by strangers into empty clusters. Everything that made it work on YOUR cluster — a warm conversation store, a key you typed once, a node you fixed by hand — is absent there. Before publishing:
+
+1. **Every credential travels as an expression, never a literal.** The consuming edge reads ` + "`apiKey: \"{{$.context.apiKey}}\"`" + `; the trigger's settings ship the field EMPTY for the installer to fill. A literal key would be published to the world, and a literal placeholder is worse than useless — it becomes the value the component actually sends, so every call fails authentication while the flow looks correctly wired.
+2. **Simulate the fresh install, not your cluster.** Edges that pass only because a store already holds data will fail for the installer. ` + "`tiny publish`" + ` enforces this: samples that contradict their port schema, edges that fail, and edges that cannot be verified at all are each reported separately.
+3. **Ship the scenarios.** They travel with the solution and are what makes the installed canvas verify green instead of amber on first open.
+4. **Ship the widgets.** A solution with no dashboard is a graph the installer cannot run.
+
 ## Flow Lifecycle — Starting, Stopping, Monitoring
 
 Trigger nodes sit idle after a flow is built. They start when you send to the ` + "`_control`" + ` port:
@@ -255,6 +266,17 @@ A node's ` + "`_control`" + ` form becomes a dashboard widget via the dashboard 
 
 Do NOT widget-ify intermediate plumbing (routers, transforms, HTTP calls) — only the nodes the user interacts with. Always prefer a widget over asking for values in chat.
 
+**A result widget must receive the ANSWER, not the state.** Wiring ` + "`context: \"{{$}}\"`" + ` into a sink puts the whole message — conversation history, credentials, tool scaffolding — on the dashboard, rendered as a wall of nested form fields. The user cannot find the answer in it, and it grows with every run. Map one named, human-readable field:
+
+` + "```" + `
+// wrong — dumps everything the pipeline is carrying
+{context: "{{$}}"}
+// right — the one thing the user asked for
+{answer: "{{$.outputData.messages[0].content}}"}
+` + "```" + `
+
+Same rule for any panel: pick the fields a person reads, name them plainly, and leave the plumbing out. If the value is long prose, declare ` + "`format: \"textarea\"`" + ` on it so it renders readably instead of a one-line box; use ` + "`format: \"password\"`" + ` for anything secret. The schema drives the rendering — ` + "`format`" + `, ` + "`readonly`" + `, ` + "`colSpan`" + `, ` + "`propertyOrder`" + ` and ` + "`title`" + ` are all honored, so a widget reads well only if you say how it should look.
+
 **A widget renders as a form only if the node's ` + "`settings.context`" + ` has a matching configurable schema.** Without it the widget shows "Object is empty". The schema must use the ` + "`$defs`" + ` / ` + "`$ref`" + ` shape with ` + "`configurable: true`" + ` on the Context def:
 
 ` + "```" + `
@@ -283,6 +305,10 @@ Match ` + "`config`" + ` (slow/persisted) to what's set once, ` + "`message`" + 
 ## Error Handling
 
 Components may have an ` + "`error`" + ` output port. Unconnected error ports silently drop errors — always wire them to recovery: another node that handles the error, or back to a response port for HTTP-style chains. See the user-facing docs for the recovery-boundary pattern (every enabled error port is a try/catch on the canvas).
+
+## Leave No Port Dangling
+
+Before you call a flow done, walk every node's ports. A port left unwired is unreadable to whoever opens the canvas next: they cannot tell whether the branch was forgotten or deliberately unused, and an unwired OUTPUT means data leaves the graph with nowhere to go. Either wire it to something real (a sink counts, when a branch legitimately has no consumer) or restructure so that surface isn't there — pick a component whose ports you actually use, or drop the node. Treat a leftover port exactly like a red edge: a blocker, not cosmetics.
 
 ## Building Agents — Tool-Using Loops (ReAct)
 
