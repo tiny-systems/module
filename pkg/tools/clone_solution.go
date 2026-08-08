@@ -64,7 +64,27 @@ type exportEnvelope struct {
 	Title     string                   `json:"title"`
 	TinyFlows []exportEnvelopeFlow     `json:"tinyFlows"`
 	Elements  []map[string]interface{} `json:"elements"`
+	Pages     []exportEnvelopePage     `json:"pages"`
 	Scenarios []exportEnvelopeScenario `json:"scenarios"`
+}
+
+// exportEnvelopePage mirrors the publish contract's page: a page owns its
+// widgets, and each widget carries where it sits.
+type exportEnvelopePage struct {
+	Name    string                 `json:"name"`
+	Title   string                 `json:"title"`
+	SortIdx int                    `json:"sortIdx"`
+	Widgets []exportEnvelopeWidget `json:"widgets"`
+}
+
+type exportEnvelopeWidget struct {
+	Port        string `json:"port"`
+	Name        string `json:"name"`
+	GridX       int    `json:"gridX"`
+	GridY       int    `json:"gridY"`
+	GridW       int    `json:"gridW"`
+	GridH       int    `json:"gridH"`
+	SchemaPatch []byte `json:"schemaPatch,omitempty"`
 }
 
 type exportEnvelopeFlow struct {
@@ -242,6 +262,46 @@ func (t *CloneSolutionTool) Execute(ctx context.Context, execCtx ExecutionContex
 		}
 	}
 
+	// Phase 2.5 — dashboard pages. A page's widget entries address nodes by
+	// port, so they need the same remapping the edges did; without this the
+	// layout the author arranged is dropped and every widget lands on the
+	// default page at a default size.
+	pagesApplied := 0
+	if execCtx.DashboardPageApplier != nil {
+		for _, page := range export.Pages {
+			title := page.Title
+			if title == "" {
+				title = page.Name
+			}
+			widgets := make([]v1alpha1.TinyWidget, 0, len(page.Widgets))
+			for _, w := range page.Widgets {
+				port := remapNodeRef(w.Port, nameMapping)
+				if port == w.Port && !strings.Contains(w.Port, ":") {
+					continue // not a port reference we understand
+				}
+				widgets = append(widgets, v1alpha1.TinyWidget{
+					Port:        port,
+					Name:        w.Name,
+					GridX:       w.GridX,
+					GridY:       w.GridY,
+					GridW:       w.GridW,
+					GridH:       w.GridH,
+					SchemaPatch: w.SchemaPatch,
+				})
+			}
+			if len(widgets) == 0 {
+				continue
+			}
+			if err := execCtx.DashboardPageApplier.ApplyDashboardPage(ctx, execCtx.ProjectName, title, page.SortIdx, widgets); err != nil {
+				warnings = append(warnings, fmt.Sprintf("dashboard page %q not applied: %s", title, err.Error()))
+				continue
+			}
+			pagesApplied++
+		}
+	} else if len(export.Pages) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d dashboard page(s) were not applied (no page applier configured)", len(export.Pages)))
+	}
+
 	// Phase 3 — scenarios, with node references inside port names remapped.
 	scenariosApplied := 0
 	if execCtx.ScenarioApplier != nil {
@@ -289,6 +349,7 @@ func (t *CloneSolutionTool) Execute(ctx context.Context, execCtx ExecutionContex
 		"nodes_created":     len(nameMapping),
 		"scenarios_applied": scenariosApplied,
 		"dashboard_widgets": widgetCount,
+		"dashboard_pages":   pagesApplied,
 	}
 	if len(missingModules) > 0 {
 		output["missing_modules"] = missingModules

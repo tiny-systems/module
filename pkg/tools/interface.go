@@ -559,6 +559,14 @@ type TinyNodeCRManager interface {
 
 // ScenarioApplier writes a scenario with pre-built port samples —
 // clone_solution applies the solution's shipped scenarios through it.
+// DashboardPageApplier writes a solution's dashboard pages. A page owns its
+// widget entries, and each entry carries the grid placement, so without this
+// an installed solution loses its layout entirely and every widget falls back
+// to a default size in the order the nodes happen to load.
+type DashboardPageApplier interface {
+	ApplyDashboardPage(ctx context.Context, projectName, pageTitle string, sortIdx int, widgets []v1alpha1.TinyWidget) error
+}
+
 type ScenarioApplier interface {
 	ApplyScenario(ctx context.Context, projectName, name string, ports []v1alpha1.ScenarioPortData) error
 }
@@ -657,6 +665,7 @@ type ExecutionContext struct {
 	SolutionExportFetcher  SolutionExportFetcher
 	TinyNodeCRManager      TinyNodeCRManager
 	ScenarioApplier        ScenarioApplier
+	DashboardPageApplier   DashboardPageApplier
 	FlowDeleter            FlowDeleter
 
 	// Execution and observability
