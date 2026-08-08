@@ -22,7 +22,9 @@ func TestGraphRoundTrip(t *testing.T) {
 				v1alpha1.FlowNameLabel:  flow,
 				v1alpha1.DashboardLabel: "true",
 			},
-			Annotations: map[string]string{},
+			Annotations: map[string]string{
+				v1alpha1.DashboardPageAnnotation: "Setup",
+			},
 		},
 		Spec: v1alpha1.TinyNodeSpec{
 			Component: "comp_a",
