@@ -5,6 +5,11 @@ const (
 	ReconcilePort = "_reconcile"
 	//ControlPort dashboard
 	ControlPort = "_control"
+	// DashboardPageAnnotation names the dashboard tab a node's widget appears
+	// on. Without it every widget shares one page, so a solution cannot separate
+	// what you configure once from what you use every day.
+	DashboardPageAnnotation = "tinysystems.io/dashboard-page"
+
 	// SettingsPort settings page
 	SettingsPort = "_settings"
 

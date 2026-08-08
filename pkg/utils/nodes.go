@@ -134,6 +134,9 @@ func ApiNodeToMap(node v1alpha1.TinyNode, data map[string]interface{}, minimal b
 	}
 
 	label := node.Status.Component.Description
+	if node.Annotations[v1alpha1.DashboardPageAnnotation] != "" {
+		data["dashboard_page"] = node.Annotations[v1alpha1.DashboardPageAnnotation]
+	}
 	if node.Annotations[v1alpha1.NodeLabelAnnotation] != "" {
 		label = node.Annotations[v1alpha1.NodeLabelAnnotation]
 	}
@@ -305,7 +308,6 @@ func MergeConfigurableDefinitions(targetDefs, sourceDefs map[string]*ajson.Node)
 	}
 	return targetDefs
 }
-
 
 func checkSliceStr(str string, sl []string) bool {
 	for _, s := range sl {
@@ -868,6 +870,9 @@ func ApiNodeToMapMinimal(node v1alpha1.TinyNode, data map[string]interface{}) ma
 	}
 
 	label := node.Status.Component.Description
+	if node.Annotations[v1alpha1.DashboardPageAnnotation] != "" {
+		data["dashboard_page"] = node.Annotations[v1alpha1.DashboardPageAnnotation]
+	}
 	if node.Annotations[v1alpha1.NodeLabelAnnotation] != "" {
 		label = node.Annotations[v1alpha1.NodeLabelAnnotation]
 	}

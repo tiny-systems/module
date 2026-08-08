@@ -100,6 +100,11 @@ func TestGraphRoundTrip(t *testing.T) {
 	if rsrc.Labels[v1alpha1.DashboardLabel] != "true" {
 		t.Error("dashboard label lost")
 	}
+	// The tab a widget sits on is part of the solution's design: losing it
+	// collapses a deliberate setup/use split back into one page.
+	if got := rsrc.Annotations[v1alpha1.DashboardPageAnnotation]; got != "Setup" {
+		t.Errorf("dashboard page = %q, want Setup", got)
+	}
 	if len(rsrc.Spec.Edges) != 1 || rsrc.Spec.Edges[0].To != tgt.Name+":in" {
 		t.Errorf("edge lost or wrong: %+v", rsrc.Spec.Edges)
 	}

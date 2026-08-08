@@ -102,6 +102,9 @@ func NodesFromGraphElements(elements []map[string]interface{}) (map[string]*v1al
 		if comment := GetStr(elem["comment"]); comment != "" {
 			node.Annotations[v1alpha1.NodeCommentAnnotation] = comment
 		}
+		if page := GetStr(data["dashboard_page"]); page != "" {
+			node.Annotations[v1alpha1.DashboardPageAnnotation] = page
+		}
 		if shared := GetStr(data["shared_with_flows"]); shared != "" {
 			node.Annotations[v1alpha1.SharedWithFlowsAnnotation] = shared
 		}
