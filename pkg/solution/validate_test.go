@@ -8,7 +8,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// perRunControl is the control-port schema a fire-once trigger publishes.
+const perRunControl = `{"$defs":{"Control":{"type":"object","properties":{"send":{"type":"boolean"},"context":{"type":"object"}}}},"$ref":"#/$defs/Control"}`
+
+// scheduledControl is what a ticker/cron publishes: it runs itself.
+const scheduledControl = `{"$defs":{"Control":{"type":"object","properties":{"start":{"type":"boolean"},"stop":{"type":"boolean"}}}},"$ref":"#/$defs/Control"}`
+
 func widgetNode(name string, settings string, incoming map[string]string) v1alpha1.TinyNode {
+	n := withControl(name, settings, incoming, perRunControl)
+	return n
+}
+
+func withControl(name string, settings string, incoming map[string]string, control string) v1alpha1.TinyNode {
 	n := v1alpha1.TinyNode{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
@@ -28,6 +39,11 @@ func widgetNode(name string, settings string, incoming map[string]string) v1alph
 			Configuration: []byte(cfg),
 		})
 	}
+	n.Status.Ports = append(n.Status.Ports, v1alpha1.TinyNodePortStatus{
+		Name:   v1alpha1.ControlPort,
+		Source: true,
+		Schema: []byte(control),
+	})
 	return n
 }
 
@@ -93,5 +109,19 @@ func TestAcceptsNamedAnswerField(t *testing.T) {
 	}
 	if err := CheckWidgetShape(nodes); err != nil {
 		t.Errorf("named answer field was rejected: %v", err)
+	}
+}
+
+// A scheduled trigger's widget IS the settings form — the user fills it once
+// and the flow runs itself, so a credential belongs there. Seven live
+// solutions were wrongly flagged before this distinction existed.
+func TestAllowsCredentialOnScheduledTrigger(t *testing.T) {
+	nodes := map[string]v1alpha1.TinyNode{
+		"f.mod.ticker-1": withControl("f.mod.ticker-1",
+			`{"context":{"slackToken":"","labelSelector":"app=web","slackChannelId":"C123"}}`,
+			nil, scheduledControl),
+	}
+	if err := CheckWidgetShape(nodes); err != nil {
+		t.Errorf("scheduled trigger's settings form was rejected: %v", err)
 	}
 }

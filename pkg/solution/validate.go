@@ -33,13 +33,22 @@ func CheckWidgetShape(nodesMap map[string]v1alpha1.TinyNode) error {
 		// them makes the user paste a key on every single run, and puts a
 		// secret in the payload of every message. The fix is a dedicated
 		// config widget feeding inject's persisted `config` port.
-		if fields := settingsContextFields(node); len(fields) > 1 {
-			for _, f := range fields {
-				if redact.IsSecretKey(f) {
-					problems = append(problems, fmt.Sprintf(
-						"%s: widget form carries the credential %q alongside per-run inputs %v — send the credential once into inject.config from its own widget, and keep this form to what changes per run",
-						short, f, without(fields, f)))
-					break
+		//
+		// Only PER-RUN forms are affected. A scheduled trigger's widget
+		// (ticker, cron — start/stop semantics) IS the settings form: the
+		// user fills it once and the flow runs itself, so a credential is
+		// exactly where it belongs. Auditing the live catalog against an
+		// earlier version of this rule flagged seven such solutions, all of
+		// them correct — the distinction is the whole rule, not a detail.
+		if isPerRunTrigger(node) {
+			if fields := settingsContextFields(node); len(fields) > 1 {
+				for _, f := range fields {
+					if redact.IsSecretKey(f) {
+						problems = append(problems, fmt.Sprintf(
+							"%s: widget form carries the credential %q alongside per-run inputs %v — send the credential once into inject.config from its own widget, and keep this form to what changes per run",
+							short, f, without(fields, f)))
+						break
+					}
 				}
 			}
 		}
@@ -112,4 +121,50 @@ func shortNodeName(name string) string {
 		return name[i+1:]
 	}
 	return name
+}
+
+// isPerRunTrigger reports whether a widget is the form a user submits on
+// every run, as opposed to configuration they fill once.
+//
+// The distinction comes from the control port the component publishes: a
+// fire-once trigger offers `send`, while a scheduled one offers start/stop
+// and runs itself. Read from the schema rather than a list of component
+// names, which would rot the moment someone writes a new trigger.
+func isPerRunTrigger(node v1alpha1.TinyNode) bool {
+	for _, ps := range node.Status.Ports {
+		if ps.Name != v1alpha1.ControlPort || len(ps.Schema) == 0 {
+			continue
+		}
+		var schema map[string]interface{}
+		if json.Unmarshal(ps.Schema, &schema) != nil {
+			return false
+		}
+		return schemaHasProperty(schema, "send")
+	}
+	return false
+}
+
+// schemaHasProperty looks for a named property anywhere in a schema
+// document, including inside $defs.
+func schemaHasProperty(node interface{}, want string) bool {
+	switch x := node.(type) {
+	case map[string]interface{}:
+		if props, ok := x["properties"].(map[string]interface{}); ok {
+			if _, found := props[want]; found {
+				return true
+			}
+		}
+		for _, v := range x {
+			if schemaHasProperty(v, want) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, v := range x {
+			if schemaHasProperty(v, want) {
+				return true
+			}
+		}
+	}
+	return false
 }
