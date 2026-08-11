@@ -156,7 +156,10 @@ under the field), ` + "`default`" + `, ` + "`readonly`" + ` (display, not input)
 ` + "`tab`" + ` (groups fields into tabs), ` + "`secret`" + ` (value is masked and not echoed
 back).
 
-**Strings** — ` + "`format`" + `: ` + "`textarea`" + `, ` + "`code`" + ` (with ` + "`language`" + `, e.g. ` + "`json`" + `),
+**Strings** — ` + "`format`" + `: ` + "`markdown`" + ` (RENDERS the value as prose instead
+of putting it in an input — use it for anything a flow produced for a person to
+read; a paragraph of model output in a one-line field is unreadable and implies
+it can be edited), ` + "`textarea`" + `, ` + "`code`" + ` (with ` + "`language`" + `, e.g. ` + "`json`" + `),
 ` + "`password`" + `, ` + "`email`" + `, ` + "`uri`" + `, ` + "`date`" + `, ` + "`date-time`" + `, ` + "`time`" + `, ` + "`color`" + `,
 ` + "`base64`" + `, ` + "`radiobox`" + `. With ` + "`enum`" + ` you get a dropdown; add ` + "`enumTitles`" + `
 for human labels in the same order. Also ` + "`minLength`" + `, ` + "`maxLength`" + `, ` + "`pattern`" + `.
@@ -179,6 +182,17 @@ map: keys are not known ahead of time, and edge validation accepts any key).
 
 **Conditional fields** — ` + "`requiredWhen`" + ` / ` + "`optionalWhen`" + ` make a field required
 or optional based on another field's value, so a form can reveal what matters.
+Each takes ` + "`[siblingField, operator, value]`" + ` with operator ` + "`===`" + ` (or
+` + "`equal`" + `), ` + "`in`" + ` (value is an array), or ` + "`isUndefined`" + ` (no value). A
+condition that does NOT hold **hides** the field, which is how a form shows
+only what currently applies — an approval form with no pending question hides
+its buttons and shows a notice instead of offering answers to nothing.
+
+**Displaying a result** — a value a person reads is not a form field. Either
+mark it ` + "`readonly`" + ` with ` + "`format: markdown`" + `, or use a component built for
+it (` + "`display`" + ` in the first-party set takes one ` + "`text`" + ` field and renders
+it). Do not point a widget at a whole message: pick the field that answers the
+question and name it.
 
 A form is just a schema, so a component that builds one at runtime uses exactly
 this vocabulary. When you author one, set ` + "`title`" + ` on every field and
