@@ -134,11 +134,11 @@ func (t *EditFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, in
 	case "delete_node":
 		return editFlowDeleteNode(ctx, execCtx, input)
 	case "add_edge":
-		return editFlowAddEdge(ctx, execCtx, input)
+		return scaffoldAfterEdgeChange(ctx, execCtx, editFlowAddEdge(ctx, execCtx, input))
 	case "delete_edge":
 		return editFlowDeleteEdge(ctx, execCtx, input)
 	case "configure_edge":
-		return editFlowConfigureEdge(ctx, execCtx, input)
+		return scaffoldAfterEdgeChange(ctx, execCtx, editFlowConfigureEdge(ctx, execCtx, input))
 	case "configure_node":
 		return editFlowConfigureNode(ctx, execCtx, input)
 	default:
@@ -407,7 +407,11 @@ func editFlowConfigureEdge(ctx context.Context, execCtx ExecutionContext, input 
 		}
 		return ToolResult{Success: false, Error: result.Error, Output: output}
 	}
-	out := map[string]interface{}{"valid": true, "edge_id": edgeID}
+	// verified says whether the expressions were actually RESOLVED against
+	// sample data. valid:true with a hint means they never were — the edge is
+	// unfinished work, not a pass. Scenarios are the fix: scaffold
+	// placeholders first, then pin a real trace.
+	out := map[string]interface{}{"valid": true, "edge_id": edgeID, "verified": result.Hint == ""}
 	if result.Hint != "" {
 		// A valid edge can still carry an advisory (e.g. it maps a field the
 		// target port doesn't declare, which persists but is dropped at runtime).
@@ -543,4 +547,36 @@ func numberFrom(v interface{}) (int, bool) {
 		return int(i), err == nil
 	}
 	return 0, false
+}
+
+// scaffoldAfterEdgeChange tops up the auto-scaffold scenario after an edge is
+// added or reconfigured, the way build_flow already does at the end of a
+// build. Without it only build_flow-created edges ever got sample data, so a
+// flow an agent rewired incrementally — the normal case after the first
+// build — validated against nothing and shipped red.
+//
+// Best-effort by the same rule as the build path: a scaffold failure appends
+// a warning and never turns a successful edit into an error. Placeholders are
+// only written where a port has no sample yet, so a real trace-derived
+// scenario is never overwritten.
+func scaffoldAfterEdgeChange(ctx context.Context, execCtx ExecutionContext, res ToolResult) ToolResult {
+	if !res.Success || execCtx.ScenarioManager == nil || execCtx.TinyNodeCRManager == nil {
+		return res
+	}
+	written, warnings := ScaffoldLiveScenarios(ctx, execCtx)
+	if written == 0 && len(warnings) == 0 {
+		return res
+	}
+	out, ok := res.Output.(map[string]interface{})
+	if !ok {
+		return res
+	}
+	if written > 0 {
+		out["scenario_ports_scaffolded"] = written
+	}
+	if len(warnings) > 0 {
+		out["scenario_warnings"] = warnings
+	}
+	res.Output = out
+	return res
 }

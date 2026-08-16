@@ -55,7 +55,7 @@ func (t *ScenariosTool) Schema() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"enum":        []string{"list", "create", "update", "delete"},
+				"enum":        []string{"list", "create", "update", "scaffold", "delete"},
 				"description": "Operation to perform. Other fields depend on this value — see tool description.",
 			},
 			"name": map[string]interface{}{

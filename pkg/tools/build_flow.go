@@ -485,6 +485,7 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			FromPort:      e.FromPort,
 			Configuration: e.Configuration,
 			ToSettings:    settingsByAlias[e.ToAlias],
+			ToSchema:      portSchemaBytes(componentByAlias[e.ToAlias], e.ToPort, true),
 		})
 	}
 	if scaffoldWarnings := scaffoldScenarios(ctx, execCtx, aliasToNodeID, componentByAlias, scaffoldEdges); len(scaffoldWarnings) > 0 {
@@ -520,6 +521,11 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 
 		edgesOutput[j]["config_valid"] = result.Valid
+		// verified says whether the edge's expressions were actually RESOLVED
+		// against sample data. config_valid:true with a hint means they never
+		// were — the edge is unfinished work, not a pass. Scenarios are the
+		// fix: scaffold placeholders first, then pin a real trace.
+		edgesOutput[j]["verified"] = result.Valid && result.Hint == ""
 		if result.Valid && result.Hint != "" {
 			// Surface advisories on valid edges (a field the target doesn't
 			// declare, or an expression that can't be verified without a

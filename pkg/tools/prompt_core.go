@@ -240,6 +240,11 @@ edge: encoded: "{{$.encoded}}"              ← typed as string → no scenario 
 
 **From traces:** after a successful execution, save real port data with ` + "`scenarios(action: create, name, trace_id)`" + `. Real data beats hand-crafted samples.
 
+**When edges come back unverified:** an edge with ` + "`verified: false`" + ` had its expressions left unresolved — the validator never proved anything about it, so it is unfinished work, not a pass. Do this without being asked:
+1. Call ` + "`scenarios(action: scaffold)`" + ` — it reads the flow as it stands and fills placeholder shapes for the ports those expressions read. Re-configure the edge to re-check.
+2. Still unverified? Run the flow for real (` + "`send_signal`" + ` on its trigger), find the run with ` + "`get_traces`" + `, then pin it: ` + "`scenarios(action: create, name, trace_id)`" + `.
+3. Never report a flow as finished while edges remain unverified. Name the edges and say why.
+
 **Ports that only appear once a component is configured** — a tool-caller publishes one output per declared tool, a router one per route — do not exist when the flow is first built, so nothing scaffolds them and their edges validate amber forever. ` + "`scenarios(action: scaffold)`" + ` reads the flow as it stands now and fills in placeholder shapes for exactly those. Run it whenever edges report "cannot be verified without a scenario", then pin a real trace over it when the flow can actually run.
 
 ## Publishing a Solution

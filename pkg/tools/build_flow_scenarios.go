@@ -204,8 +204,16 @@ func scaffoldScenarios(
 			shapelessPaths[p] = struct{}{}
 		}
 		targetTypes := targetExampleTypes(e.Configuration, e.ToSettings)
+		declared := targetSchemaPlaceholders(e.Configuration, e.ToSchema)
 		for _, p := range paths {
 			if _, isShapeless := shapelessPaths[p]; isShapeless {
+				// The target PORT schema outranks the settings example: it
+				// declares fields the example never mentions, and those are
+				// the ones a settings-derived placeholder contradicts.
+				if v, ok := declared[p]; ok {
+					setPath(mock, p, v)
+					continue
+				}
 				setPath(mock, p, shapelessPlaceholder(p, targetTypes[p]))
 				continue
 			}
@@ -268,6 +276,9 @@ type scaffoldEdge struct {
 	// its examples (e.g. a js_eval inputData) type the shapeless
 	// placeholders that get mapped into them.
 	ToSettings map[string]interface{}
+	// ToSchema is the target INPUT port's schema — the authority on the
+	// declared type of every field the example doesn't mention.
+	ToSchema []byte
 }
 
 // targetExampleTypes maps each single-expression source path in the edge
@@ -340,6 +351,146 @@ func shapelessPlaceholder(path string, targetExample interface{}) interface{} {
 	default:
 		return placeholderFor(path)
 	}
+}
+
+// targetSchemaPlaceholders maps a source JSONPath to a placeholder of the
+// type the TARGET port schema declares at the config position that path is
+// mapped into. A placeholder must never contradict the target's declared
+// type: "<messages>" written into a field declared `array` makes the
+// scaffold — whose only job is clearing validation — a guaranteed
+// validation failure ("/messages: expected array, but got string"), and
+// re-running scaffold can never fix it.
+//
+// The target node's settings example (targetExampleTypes) only knows fields
+// the author filled in; fields declared on the PORT alone are invisible to
+// it, which is exactly where the contradiction came from. Same
+// whole-string-expression rule as targetConstrainedValues — a concatenation
+// produces a string at runtime whatever its operands are.
+func targetSchemaPlaceholders(config map[string]interface{}, targetSchema []byte) map[string]interface{} {
+	out := map[string]interface{}{}
+	if len(targetSchema) == 0 {
+		return out
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(targetSchema, &root); err != nil {
+		return out
+	}
+
+	var walk func(cfg interface{}, schema map[string]interface{})
+	walk = func(cfg interface{}, schema map[string]interface{}) {
+		schema = resolveSchemaNode(root, schema)
+		switch c := cfg.(type) {
+		case map[string]interface{}:
+			props, _ := schema["properties"].(map[string]interface{})
+			for k, v := range c {
+				var child map[string]interface{}
+				if props != nil {
+					child, _ = props[k].(map[string]interface{})
+				}
+				walk(v, child)
+			}
+		case []interface{}:
+			items, _ := schema["items"].(map[string]interface{})
+			for _, v := range c {
+				walk(v, items)
+			}
+		case string:
+			if schema == nil {
+				return
+			}
+			m := expressionRe.FindStringSubmatch(c)
+			if m == nil || m[0] != c {
+				return
+			}
+			for _, full := range jsonPathRe.FindAllString(m[1], -1) {
+				path := strings.TrimPrefix(full, "$.")
+				if path == "" || path == full {
+					continue
+				}
+				if v, ok := placeholderForSchema(root, schema, placeholderFor(path), 0); ok {
+					out[path] = v
+				}
+			}
+		}
+	}
+	walk(config, root)
+	return out
+}
+
+// placeholderForSchema builds a sample value of a schema node's declared
+// type, using the same conventions as typedPlaceholder. `marker` is the
+// "<leaf>" string a string-typed node gets, so the sample still says where
+// it came from. Returns ok=false when the node declares no type at all —
+// an undeclared field has nothing to contradict, so the caller falls back.
+func placeholderForSchema(root, node map[string]interface{}, marker string, depth int) (interface{}, bool) {
+	node = resolveSchemaNode(root, node)
+	if node == nil || depth > 5 {
+		return nil, false
+	}
+	if enum := asSlice(node["enum"]); len(enum) > 0 {
+		return enum[0], true
+	}
+	if node["const"] != nil {
+		return node["const"], true
+	}
+	t, _ := node["type"].(string)
+	if t == "" {
+		switch {
+		case node["items"] != nil:
+			t = "array"
+		case node["properties"] != nil:
+			t = "object"
+		}
+	}
+	switch t {
+	case "string":
+		return marker, true
+	case "integer", "number":
+		return 0, true
+	case "boolean":
+		return false, true
+	case "array":
+		// An array placeholder always carries ONE element: an empty array
+		// fails `minItems: 1`, which is the same class of self-inflicted
+		// failure this whole function exists to prevent.
+		items, _ := node["items"].(map[string]interface{})
+		elem, ok := placeholderForSchema(root, items, marker, depth+1)
+		if !ok {
+			elem = map[string]interface{}{}
+		}
+		return []interface{}{elem}, true
+	case "object":
+		return objectPlaceholder(root, node, depth), true
+	}
+	return nil, false
+}
+
+// objectPlaceholder fills an object's declared SCALAR leaves. Nested
+// containers are left out — a sample has to type-check, not be complete.
+func objectPlaceholder(root, node map[string]interface{}, depth int) map[string]interface{} {
+	out := map[string]interface{}{}
+	props, _ := node["properties"].(map[string]interface{})
+	for k, raw := range props {
+		child, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		child = resolveSchemaNode(root, child)
+		if child == nil {
+			continue
+		}
+		if len(asSlice(child["enum"])) == 0 && child["const"] == nil {
+			switch t, _ := child["type"].(string); t {
+			case "string", "integer", "number", "boolean":
+			default:
+				continue
+			}
+		}
+		if v, ok := placeholderForSchema(root, child, fmt.Sprintf("<%s>", k), depth+1); ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // typedPlaceholder resolves a dotted path against the port schema and returns

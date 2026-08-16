@@ -105,12 +105,21 @@ func ScaffoldLiveScenarios(ctx context.Context, execCtx ExecutionContext) (int, 
 			}
 			targetTypes := targetExampleTypes(config, settingsByNode[targetName])
 			constrained := targetConstrainedValues(config, schemaByPort[edge.To])
+			declared := targetSchemaPlaceholders(config, schemaByPort[edge.To])
 			for _, p := range paths {
 				if v, ok := constrained[p]; ok {
 					setPath(mock, p, v)
 					continue
 				}
 				if _, isShapeless := shapelessPaths[p]; isShapeless {
+					// The target PORT schema outranks the target node's
+					// settings example: it declares fields the example never
+					// mentions, and those are the ones a settings-derived
+					// placeholder silently contradicts.
+					if v, ok := declared[p]; ok {
+						setPath(mock, p, v)
+						continue
+					}
 					setPath(mock, p, shapelessPlaceholder(p, targetTypes[p]))
 					continue
 				}
