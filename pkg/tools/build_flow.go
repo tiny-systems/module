@@ -551,6 +551,17 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		}
 	}
 
+	// Structural faults the per-edge checks cannot see: a node wired to
+	// nothing, a broken expression, an enabled error port with no edge —
+	// the last one drops every failure the component reports, so a flow
+	// ships green and then does nothing in silence. read_project has
+	// always reported these; a model that follows the documented loop
+	// (build, read the response, fix) never called it and so never saw
+	// them.
+	if issues := flowIssues(ctx, execCtx); len(issues) > 0 {
+		warnings = append(warnings, issues...)
+	}
+
 	// Build output
 	output := map[string]interface{}{
 		"nodes_created": nodesCreated,

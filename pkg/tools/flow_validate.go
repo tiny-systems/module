@@ -1,6 +1,9 @@
 package tools
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // FlowIssues returns human-readable structural faults in a flow graph:
 // broken edges (invalid expressions), fully-dangling nodes (no edges at
@@ -130,4 +133,23 @@ func elemOutPorts(el map[string]interface{}) []string {
 		return out
 	}
 	return nil
+}
+
+// flowIssues re-reads the project and reports its structural faults. Used by
+// the build tools so a model that follows the documented loop — build, read
+// the response, fix what it says — is told about a dangling node or an
+// unwired error port at the moment it creates one, instead of only when
+// something later calls read_project.
+//
+// Best-effort: without a ProjectReader (or if the read fails) the build is
+// reported exactly as before rather than failing over a diagnostic.
+func flowIssues(ctx context.Context, execCtx ExecutionContext) []string {
+	if execCtx.ProjectReader == nil || execCtx.ProjectName == "" {
+		return nil
+	}
+	data, err := execCtx.ProjectReader.ReadProjectElements(ctx, execCtx.ProjectName)
+	if err != nil || data == nil {
+		return nil
+	}
+	return FlowIssues(data.Elements)
 }
