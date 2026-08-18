@@ -13,6 +13,14 @@ const (
 	// SettingsPort settings page
 	SettingsPort = "_settings"
 
+	// ErrorPort is the conventional source port a component emits on when it
+	// catches a failure instead of returning module.Fail — the "catch" half of
+	// the error-port recovery pattern. Unlike the ports above it is not a system
+	// port: it carries business data and is wired on the canvas like any other
+	// output. The SDK knows the name only so an emission on it can be recorded
+	// as an error rather than counted as a plain success.
+	ErrorPort = "error"
+
 	//ClientPort receives a client wrapper to work with cluster resources
 	ClientPort = "_client"
 	// IdentityPort receives node identity information (name, namespace, flow, project)

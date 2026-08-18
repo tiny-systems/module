@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	stdjson "encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/evaluator"
 	"github.com/tiny-systems/module/pkg/metrics"
+	"github.com/tiny-systems/module/pkg/redact"
 	"github.com/tiny-systems/module/pkg/resource"
 	"github.com/tiny-systems/module/pkg/secret"
 	"github.com/tiny-systems/module/pkg/schema"
@@ -373,7 +375,14 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 			if err != nil {
 				c.log.Error(err, "ReadStatus: encode port configuration error")
 			}
-			portStatus.Configuration = confData
+			// Ports() is free to return the component's live settings struct —
+			// several components do — so whatever the component currently holds
+			// lands in the CR status, readable by anyone with get on the node.
+			// For a component whose settings carry credentials that means the
+			// resolved cleartext, including values pulled from a Secret via a
+			// [[secret:...]] placeholder. Mask here rather than in each
+			// component: this is the one path all of them share.
+			portStatus.Configuration = redactPortConfiguration(confData)
 		} else if np.Schema == nil {
 			c.log.Info("ReadStatus: port configuration is nil", "port", np.Name, "node", c.name)
 		}
@@ -389,6 +398,50 @@ func (c *Runner) ReadStatus(status *v1alpha1.TinyNodeStatus) error {
 		Tags:        cmpInfo.Tags,
 	}
 	return nil
+}
+
+// redactPortConfiguration masks credential-shaped values in a marshalled port
+// configuration before it is published to the node status.
+//
+// Masking, not blanking: the editor renders a port's current values from this
+// status. A _control port is Source, so its form and every dashboard widget
+// read their values from here and nowhere else, and an unsaved _settings port
+// falls back to here for the component's declared defaults. Dropping the keys
+// would empty those forms; replacing only the value keeps the shape — the field
+// still renders, showing that a credential is set without disclosing it.
+//
+// A payload with nothing credential-shaped is returned as the exact bytes that
+// came in, so ordinary configuration round-trips byte for byte and only
+// credential-bearing payloads are ever re-encoded.
+func redactPortConfiguration(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+
+	// UseNumber keeps numeric literals as their original text, so re-encoding a
+	// payload that does hold a credential cannot shift an int64 or a float
+	// through float64.
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+
+	var decoded interface{}
+	if err := dec.Decode(&decoded); err != nil {
+		// json.Marshal produced these bytes, so this should not happen. If it
+		// somehow does we cannot tell what is inside, and publishing an
+		// unexamined payload is the failure this function exists to prevent.
+		return nil
+	}
+
+	redacted := redact.Secrets(decoded)
+	if reflect.DeepEqual(decoded, redacted) {
+		return data
+	}
+
+	out, err := json.Marshal(redacted)
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 func (c *Runner) getPortConfig(from string, port string) *v1alpha1.TinyNodePortConfig {
@@ -896,6 +949,16 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 		outputDataBytes, _ := json.Marshal(outputData)
 		c.addSpanPortData(outputSpan, string(outputDataBytes))
 
+		// An error-port emission is a caught failure, not a success. The span
+		// otherwise carries a `data` event and nothing else, and error counting
+		// keys solely off `error`/`exception` span events — so a component with
+		// its error port enabled would report zero errors where the same
+		// component with the port off returns module.Fail and gets counted.
+		// Enabling the recovery boundary must not hide the failure it caught.
+		if outputPort == v1alpha1.ErrorPort {
+			c.addSpanHandledError(outputSpan, utils.GetPortFullName(c.name, outputPort), outputDataBytes)
+		}
+
 		// Pass span context to downstream for trace propagation
 		res, err := c.outputHandler(trace.ContextWithSpanContext(outputCtx, trace.SpanContextFromContext(spanCtx)), outputPort, outputData, outputHandler)
 		if err != nil {
@@ -1301,6 +1364,39 @@ func (c *Runner) addSpanError(span trace.Span, err error) {
 func (c *Runner) addSpanPortData(span trace.Span, data string) {
 	span.AddEvent("data",
 		trace.WithAttributes(attribute.String("payload", data)))
+}
+
+// addSpanHandledError records an error-port emission as a countable error.
+//
+// The event name and `exception.message` attribute match what span.RecordError
+// produces for an uncaught failure, so every consumer that already understands
+// an `exception` event understands this one without changes. `handled` is what
+// separates the two: true means a component caught the failure and routed it
+// down its error port, false-or-absent means the failure escaped. Consumers can
+// use that to show a caught error differently from a crash.
+func (c *Runner) addSpanHandledError(span trace.Span, portFullName string, payload []byte) {
+	span.AddEvent("error", trace.WithAttributes(
+		attribute.String("exception.message", errorPayloadMessage(payload)),
+		attribute.String("port", portFullName),
+		attribute.Bool("handled", true),
+	))
+}
+
+// errorPayloadMessage pulls the human-readable failure out of an already
+// marshalled error-port payload. Every error struct in the ecosystem — the
+// canonical module.ErrorMessage and each hand-rolled copy — names the message
+// field `error`, so a shallow decode covers them all. The payload is arbitrary
+// component data, so an unexpected shape must degrade to a generic message
+// rather than fail: a wrong message still counts as an error, a panic here
+// would take down the emit path.
+func errorPayloadMessage(payload []byte) string {
+	var shape struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(payload, &shape); err == nil && shape.Error != "" {
+		return shape.Error
+	}
+	return "component emitted on its error port"
 }
 
 func (c *Runner) ensureEdgeGauge() {
