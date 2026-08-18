@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // EditFlowTool is the single entry point for incremental flow edits.
@@ -46,6 +47,12 @@ Actions and their required fields:
   Optional: schema (JSON-Schema overrides), trace_id (validate against real data).
   Configures how data maps from source to target port.
 
+- action="share_node": node_id, flows (array of flow names)
+  Shares the node into those flows of the same project, so their canvases can wire to
+  it. Flows are layers of one picture; a node still belongs to the flow that owns it,
+  keeps one position, and stays read-only elsewhere. The list REPLACES the current
+  one — pass [] to un-share.
+
 - action="configure_node": node_id, and settings and/or position
   settings (object, the _settings port configuration) may add/remove output ports (e.g. router routes).
   position ({x, y}) moves the node on the canvas — pass it alone to tidy a layout
@@ -57,7 +64,8 @@ Examples:
   edit_flow(action: "delete_node", node_id: "router-abc123")
   edit_flow(action: "add_edge", from_node: "server-abc", from_port: "request", to_node: "logger-def", to_port: "input")
   edit_flow(action: "configure_edge", edge_id: "edge-xyz", configuration: {"data": "{{$.body}}"})
-  edit_flow(action: "configure_node", node_id: "router-abc", position: {x: 940, y: 260})`
+  edit_flow(action: "configure_node", node_id: "router-abc", position: {x: 940, y: 260})
+  edit_flow(action: "share_node", node_id: "kv-abc", flows: ["watch", "setup"])`
 }
 
 func (t *EditFlowTool) Schema() map[string]interface{} {
@@ -66,7 +74,7 @@ func (t *EditFlowTool) Schema() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"enum":        []string{"add_node", "delete_node", "add_edge", "delete_edge", "configure_edge", "configure_node"},
+				"enum":        []string{"add_node", "delete_node", "add_edge", "delete_edge", "configure_edge", "configure_node", "share_node"},
 				"description": "Operation to perform. Other fields depend on this value — see tool description.",
 			},
 			"component": map[string]interface{}{
@@ -79,7 +87,12 @@ func (t *EditFlowTool) Schema() map[string]interface{} {
 			},
 			"node_id": map[string]interface{}{
 				"type":        "string",
-				"description": "(delete_node, configure_node) Target node id.",
+				"description": "(delete_node, configure_node, share_node) Target node id.",
+			},
+			"flows": map[string]interface{}{
+				"type":        "array",
+				"items":       map[string]interface{}{"type": "string"},
+				"description": "(share_node) Flow names to share this node into. Replaces the current set; [] un-shares.",
 			},
 			"edge_id": map[string]interface{}{
 				"type":        "string",
@@ -141,10 +154,12 @@ func (t *EditFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, in
 		return scaffoldAfterEdgeChange(ctx, execCtx, editFlowConfigureEdge(ctx, execCtx, input))
 	case "configure_node":
 		return editFlowConfigureNode(ctx, execCtx, input)
+	case "share_node":
+		return editFlowShareNode(ctx, execCtx, input)
 	default:
 		return ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("unknown action %q; expected add_node, delete_node, add_edge, delete_edge, configure_edge, configure_node", action),
+			Error:   fmt.Sprintf("unknown action %q; expected add_node, delete_node, add_edge, delete_edge, configure_edge, configure_node, share_node", action),
 		}
 	}
 }
@@ -579,4 +594,72 @@ func scaffoldAfterEdgeChange(ctx context.Context, execCtx ExecutionContext, res 
 	}
 	res.Output = out
 	return res
+}
+
+// editFlowShareNode shares a node into other layers of the same project.
+func editFlowShareNode(ctx context.Context, execCtx ExecutionContext, input map[string]interface{}) ToolResult {
+	if execCtx.NodeSharer == nil {
+		return ToolResult{Success: false, Error: "sharing a node is not supported here"}
+	}
+	nodeID, _ := input["node_id"].(string)
+	if nodeID == "" {
+		return ToolResult{Success: false, Error: "node_id is required for share_node"}
+	}
+	flows, ok := stringsFrom(input["flows"])
+	if !ok {
+		return ToolResult{Success: false, Error: "flows must be an array of flow names for share_node (pass [] to un-share)"}
+	}
+	result, err := execCtx.NodeSharer.ShareNode(ctx, execCtx.ProjectName, execCtx.FlowName, nodeID, flows)
+	if err != nil {
+		return ToolResult{Success: false, Error: fmt.Sprintf("failed to share node: %s", err.Error())}
+	}
+	out := map[string]interface{}{"node_id": nodeID, "flows": result.Flows}
+	if len(result.Flows) == 0 {
+		out["hint"] = "Node is no longer shared; only its own flow can see it."
+	} else {
+		out["hint"] = "Those flows can now wire to this node. It stays read-only there — it moves and configures only in the flow that owns it."
+	}
+	return ToolResult{Success: true, Output: out}
+}
+
+// stringsFrom accepts an array of strings, a JSON array in a string, or a
+// comma-separated string. An explicit empty array is valid input — it is how
+// a node is un-shared — so absence and emptiness are answered differently:
+// a missing key is not a list at all.
+func stringsFrom(raw interface{}) ([]string, bool) {
+	switch v := raw.(type) {
+	case []string:
+		return v, true
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return []string{}, true
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			var out []string
+			if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+				return nil, false
+			}
+			return out, true
+		}
+		parts := strings.Split(trimmed, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out, true
+	}
+	return nil, false
 }

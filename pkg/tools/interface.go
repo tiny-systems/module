@@ -437,6 +437,28 @@ type NodeRepositioner interface {
 	RepositionNode(ctx context.Context, projectName, flowName, nodeID string, x, y int) error
 }
 
+// NodeSharer shares a node into other flows of the same project.
+//
+// Flows are layers of one picture: a node has exactly one home flow, but the
+// layers it is shared into can see it and wire to it. Position is stored once
+// on the node, so a shared node sits at the same coordinates everywhere and
+// only its home flow may move or configure it.
+//
+// flows REPLACES the current set rather than adding to it — an empty slice
+// un-shares the node. An explicit list is what an agent can reason about; a
+// merge would make the result depend on history it cannot see.
+type NodeSharer interface {
+	ShareNode(ctx context.Context, projectName, flowName, nodeID string, flows []string) (*ShareNodeResult, error)
+}
+
+// ShareNodeResult reports the set a node ended up shared with, which is not
+// always the set that was asked for: the node's own flow is dropped (it is
+// already there) and duplicates collapse.
+type ShareNodeResult struct {
+	NodeID string   `json:"node_id"`
+	Flows  []string `json:"flows"`
+}
+
 // NodeSettingsConfigurer is an interface for configuring node settings
 type NodeSettingsConfigurer interface {
 	// ConfigureNodeSettings sets node settings (the _settings port configuration)
@@ -661,6 +683,7 @@ type ExecutionContext struct {
 	EdgeConfigurer         EdgeConfigurer
 	NodeSettingsConfigurer NodeSettingsConfigurer
 	NodeRepositioner       NodeRepositioner
+	NodeSharer             NodeSharer
 	FlowCreator            FlowCreator
 	SolutionExportFetcher  SolutionExportFetcher
 	TinyNodeCRManager      TinyNodeCRManager
