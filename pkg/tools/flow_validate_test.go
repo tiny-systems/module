@@ -118,3 +118,29 @@ func TestFlowIssues_BrokenEdge(t *testing.T) {
 		t.Fatalf("expected one broken-edge issue, got %v", got)
 	}
 }
+
+// A ProjectReader builds the ports map in-process as map[string][]string; it
+// only becomes map[string]interface{} after a JSON round-trip. Asserting just
+// the JSON shape left every port-based check dead on live data while these
+// tests kept passing, so pin the concrete type explicitly.
+func TestFlowIssuesReadsNativePortsMap(t *testing.T) {
+	els := []map[string]interface{}{
+		{"id": "n1", "type": "tinyNode", "data": map[string]interface{}{
+			"component": "llm_complete",
+			"ports":     map[string][]string{"in": {"request"}, "out": {"error", "response"}},
+		}},
+		{"id": "n2", "type": "tinyNode", "data": map[string]interface{}{
+			"component": "display",
+			"ports":     map[string][]string{"in": {"in"}, "out": nil},
+		}},
+		{"id": "e1", "type": "tinyEdge", "source": "n1", "target": "n2",
+			"sourceHandle": "response", "targetHandle": "in"},
+	}
+	got := FlowIssues(els)
+	if len(got) != 1 {
+		t.Fatalf("issues = %v, want exactly one (the unwired error port)", got)
+	}
+	if !strings.Contains(got[0], "UNCONNECTED ERROR PORT") {
+		t.Fatalf("issue = %q, want the unwired error port reported", got[0])
+	}
+}

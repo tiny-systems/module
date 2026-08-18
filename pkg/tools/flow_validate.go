@@ -116,11 +116,21 @@ func elemOutPorts(el map[string]interface{}) []string {
 	if data == nil {
 		return nil
 	}
-	ports, _ := data["ports"].(map[string]interface{})
-	if ports == nil {
+	// The ports map arrives as map[string][]string when a ProjectReader
+	// builds it in-process, and as map[string]interface{} once it has been
+	// through JSON. Asserting only the latter made every check below dead on
+	// live data while the unit tests — which construct JSON-shaped literals —
+	// kept passing.
+	var raw interface{}
+	switch ports := data["ports"].(type) {
+	case map[string][]string:
+		return ports["out"]
+	case map[string]interface{}:
+		raw = ports["out"]
+	default:
 		return nil
 	}
-	switch v := ports["out"].(type) {
+	switch v := raw.(type) {
 	case []string:
 		return v
 	case []interface{}:
