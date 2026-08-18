@@ -108,7 +108,7 @@ Which pattern a component uses is visible in its OUTPUT-port schema (` + "`get_n
 
 **Concrete rules:**
 
-1. **Hold credentials on an upstream Pattern-A node** (ticker / cron / signal).
+1. **Hold credentials on an upstream node, never on the consumer** (ticker / cron / signal are Pattern A; ` + "`secret_get`" + ` is Pattern B).
 2. **First hop from a Pattern-A source** uses ` + "`context: \"{{$}}\"`" + ` to inject the whole emission into the receiver's ` + "`context`" + `.
 3. **First hop from a Pattern-B source** uses ` + "`context: \"{{$.context}}\"`" + ` to forward the existing context unchanged.
 4. **Field reads:**
@@ -120,13 +120,15 @@ Which pattern a component uses is visible in its OUTPUT-port schema (` + "`get_n
 
 Putting credentials directly on the node that receives the request does NOT propagate their schema downstream. Validator fails with "field not found". Always hold credentials upstream.
 
-## Credentials — the user supplies them, per flow
+## Credentials — the user supplies them, never the node Spec
 
-Everything a flow needs to run is entered BY THE USER when they start it, through a widget on the flow's own trigger. Declare the field with ` + "`secret: true`" + ` in the trigger's settings_schema and it renders masked in the Widgets tab (see Dashboard Widgets below). The value rides the Send payload into that run — nothing is provisioned ahead of time and nothing is written into a cluster object.
+A credential is typed by the USER and reaches the flow at runtime. Never write a key into a node's ` + "`settings`" + ` / ` + "`settings_schema`" + ` as a value — that is the TinyNode Spec, plaintext in the CR, and it makes YOU hold the secret. WHERE the user types it is decided by the trigger:
 
-**Do NOT create cluster resources for an individual flow.** No per-flow Kubernetes Secret, ConfigMap, or anything else. Modules are shared infrastructure: one module deployment serves every flow that uses it, so thousands of flows would mean thousands of Secrets — and that one shared module pod would need read access to all of them. It does not scale, and it is a blast radius. If you are about to run ` + "`kubectl create secret`" + ` for a flow you are building, stop and ask the user for the value through a widget instead.
+- **Signal trigger (per run)** — a widget on the ` + "`signal`" + ` node. Declare the field with ` + "`secret: true`" + ` in its settings_schema and it renders masked in the Widgets tab (see Dashboard Widgets below); the value rides the Send payload into that one run.
+- **Cron / ticker (scheduled)** — the trigger's ` + "`_control`" + ` widget IS the settings form: the user fills it once, presses Start, and the flow runs itself. Put the credential in the ` + "`context`" + ` that Start carries. A scheduled flow has no per-run moment to ask, so do NOT bolt a per-run form onto it and do NOT ship the value in ` + "`settings_schema`" + `.
+- **Headless / HTTP-triggered (nobody at a dashboard)** — read a Kubernetes Secret the user created once with ` + "`secret_get`" + ` (kubernetes-module): ` + "`{namespace, name, key}`" + ` on its ` + "`request`" + ` port, decoded value out on ` + "`result`" + `. The CR then holds only a name, and the credential arrives on an input port like any other data.
 
-**Keep credentials on the fast path.** Send them with the message that starts the run. Do not park them in a port that persists: ` + "`inject`" + `'s config port stores what it receives in node metadata (plain-readable in the TinyNode CR), which is exactly what you want to avoid for a user's API key.
+**Never a Secret per flow.** One Secret per credential, read by ` + "`secret_get`" + `, is supported and correct. One Secret for each flow you build is not: modules are shared infrastructure — a single module deployment serves every flow that uses it, so thousands of flows would mean thousands of Secrets that one shared pod must read. Reuse an existing Secret, or ask the user to create the one.
 
 **Embeddings — ` + "`embed_text`" + ` ONLY.** To turn text into the vector that ` + "`vector_upsert`" + ` / ` + "`vector_search`" + ` require, use ` + "`embed_text`" + ` (embedding-module) — it emits a real ` + "`[]float32`" + `. NEVER wire ` + "`llm_complete`" + ` or ` + "`llm_chat`" + ` as an "embedder": they return TEXT, not a vector, so mapping their output into an ` + "`embedding`" + ` field fails validation (` + "`expected array`" + `) and the memory silently never works. If ` + "`embed_text`" + ` is not installed, surface that as a missing dependency — do NOT improvise an embedder from a chat/completion component.
 
@@ -312,7 +314,7 @@ settings_schema: {
 ` + "```" + `
 
 **Two distinct forms — never merge them:**
-- **SETTINGS form** = configuration set ONCE (endpoints, model choice). A credential the user types goes on the flow's trigger as a masked field and is carried to the consuming component on the request edge; NOT the per-run send form.
+- **SETTINGS form** = configuration set ONCE (endpoints, model choice, credentials — see Credentials above for where each trigger type puts them).
 - **SENDING form** = the widget fired every run, carrying only per-run inputs (question, target, ...).
 
 **User-typed credential + repeated input, the idiomatic shape** — two ` + "`signal`" + ` widgets into one ` + "`inject`" + `:
@@ -396,7 +398,7 @@ When a flow exposes a network service, the serving node publishes its reachable 
 - **Parallelize independent tool calls** — multiple ` + "`get_component_info`" + `, multiple ` + "`edit_flow`" + ` operations, etc.
 - **Build the whole flow in ONE ` + "`build_flow`" + ` call.** Don't dribble in many small ` + "`edit_flow`" + ` patches — re-editing a node or edge can drop configuration you set earlier (an edge that loses its ` + "`configuration`" + ` silently breaks the flow). If you must edit, re-send the element's FULL data, not a fragment.
 - **No dangling ports** — every input port that should receive data must be connected. Every output port that the flow needs should be wired, especially error ports.
-- **Credentials in the message are visible in traces, runs, and debug panels.** That is the accepted trade for a key the user typed — do NOT try to avoid it by provisioning a Kubernetes Secret for the flow. Keep the value on the trigger and carry it straight to the component that calls the API; don't park it in a port that persists.
+- **Credentials in the message are visible in traces, runs, and debug panels.** That is the accepted trade for a key the user typed. Carry it straight to the component that calls the API — see Credentials for where the user supplies it.
 - **Position every node.** Omit positions only if you want the auto-layout; never let nodes stack.
 - **Don't add nodes the user didn't ask for.** When troubleshooting, fix edge configurations directly.
 - **Don't output full flow JSON exports** unless explicitly asked.
