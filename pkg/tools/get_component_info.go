@@ -24,13 +24,17 @@ func (t *GetComponentInfoTool) Description() string {
 Returns the full schema for each port so you know exactly what fields to map in edge configurations.
 Always call this BEFORE using build_flow to understand what fields each port expects.
 
-Example: get_component_info(module_name: "tinysystems/common-module", component: "ticker")`
+Example: get_component_info(component: "ticker", module: "tinysystems/common-module")`
 }
 
 func (t *GetComponentInfoTool) Schema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
+			"module": map[string]interface{}{
+				"type":        "string",
+				"description": "Module name from list_modules. Narrows the search; omit to look in every installed module.",
+			},
 			"module_name": map[string]interface{}{
 				"type":        "string",
 				"description": "The module name (e.g., 'tinysystems/common-module' or 'common-module')",
@@ -52,7 +56,14 @@ func (t *GetComponentInfoTool) Execute(ctx context.Context, execCtx ExecutionCon
 		}
 	}
 
-	moduleName, _ := input["module_name"].(string)
+	// `module` is what the guide, the catalog's own hint and every caller
+	// actually write; `module_name` was what the schema declared, so the two
+	// disagreed and a call naming the module searched all of them instead.
+	// Both are accepted, and `module` is the one advertised.
+	moduleName, _ := input["module"].(string)
+	if moduleName == "" {
+		moduleName, _ = input["module_name"].(string)
+	}
 	componentName, _ := input["component"].(string)
 
 	if componentName == "" {
