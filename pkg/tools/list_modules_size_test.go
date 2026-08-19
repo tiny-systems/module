@@ -71,3 +71,75 @@ func TestWireablePorts_KeepsOrdinaryPortsIntact(t *testing.T) {
 		}
 	}
 }
+
+// The case this exists for. An agent picked pod_status_get off a catalog line
+// reading "get status of pods matching a label selector" — which sounds like a
+// capability and is in fact an obligation, making the component unusable for
+// "all pods in a namespace". The constraint lives on the request port.
+func TestRequiredInputs_NamesAMandatoryPortField(t *testing.T) {
+	c := ComponentInfo{
+		InputPortDetails: []PortDetail{{
+			Name: "request",
+			Schema: []byte(`{"$ref":"#/$defs/Request","$defs":{"Request":{
+				"properties":{"labelSelector":{"type":"string","minLength":3},"namespace":{"type":"string"}},
+				"required":["labelSelector"]}}}`),
+		}},
+	}
+	got := requiredInputs(c)
+	if len(got) != 1 || got[0] != "request.labelSelector" {
+		t.Fatalf("got %v, want [request.labelSelector]", got)
+	}
+}
+
+// A boolean toggle is never the thing that blocks you — false is a usable
+// value — and listing it buries the field that does.
+func TestRequiredInputs_SkipsTogglesAndDefaultedFields(t *testing.T) {
+	c := ComponentInfo{
+		SettingsSchema: []byte(`{"properties":{
+			"enableErrorPort":{"type":"boolean"},
+			"timeout":{"type":"integer","default":30},
+			"provider":{"type":"string"}},
+			"required":["enableErrorPort","timeout","provider"]}`),
+	}
+	got := requiredInputs(c)
+	if len(got) != 1 || got[0] != "settings.provider" {
+		t.Fatalf("got %v, want [settings.provider]", got)
+	}
+}
+
+// Settings and ports are both places a caller must supply something, and the
+// path says which.
+func TestRequiredInputs_CoversSettingsAndPortsTogether(t *testing.T) {
+	c := ComponentInfo{
+		SettingsSchema: []byte(`{"properties":{"document":{"type":"object"}},"required":["document"]}`),
+		InputPortDetails: []PortDetail{
+			{Name: "_settings", Schema: []byte(`{"properties":{"hidden":{"type":"string"}},"required":["hidden"]}`)},
+			{Name: "query", Schema: []byte(`{"properties":{"query":{"type":"string"}},"required":["query"]}`)},
+		},
+	}
+	got := requiredInputs(c)
+	if len(got) != 2 || got[0] != "settings.document" || got[1] != "query.query" {
+		t.Fatalf("got %v, want [settings.document query.query]", got)
+	}
+}
+
+// A component with nothing mandatory says nothing, rather than an empty list
+// the reader has to interpret.
+func TestRequiredInputs_SilentWhenNothingIsMandatory(t *testing.T) {
+	c := ComponentInfo{
+		InputPortDetails: []PortDetail{{Name: "in", Schema: []byte(`{"properties":{"text":{"type":"string"}}}`)}},
+	}
+	if got := requiredInputs(c); got != nil {
+		t.Fatalf("got %v, want nothing", got)
+	}
+}
+
+func TestRequiredInputs_SurvivesUnparseableSchemas(t *testing.T) {
+	c := ComponentInfo{
+		SettingsSchema:   []byte(`not json`),
+		InputPortDetails: []PortDetail{{Name: "in", Schema: []byte(`{"$ref":"#/$defs/Missing","$defs":{}}`)}},
+	}
+	if got := requiredInputs(c); got != nil {
+		t.Fatalf("got %v, want nothing", got)
+	}
+}

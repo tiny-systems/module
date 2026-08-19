@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -86,6 +87,15 @@ func (t *ListModulesTool) Execute(ctx context.Context, execCtx ExecutionContext,
 			if out := wireablePorts(c.OutputPorts); len(out) > 0 {
 				compInfo["output_ports"] = out
 			}
+			// A mandatory setting is the difference between a component that
+			// fits and one that cannot be used at all, and prose routinely
+			// omits it: "get status of pods matching a label selector" reads
+			// as a capability, not as a selector you are obliged to supply.
+			// Derived from the schema rather than written by hand, so it
+			// cannot drift from the component.
+			if req := requiredInputs(c); len(req) > 0 {
+				compInfo["requires"] = req
+			}
 			components = append(components, compInfo)
 		}
 		moduleInfo["components"] = components
@@ -153,4 +163,97 @@ func firstSentence(info string) string {
 		return info[:i+1]
 	}
 	return info
+}
+
+// requiredInputs names what a component cannot run without, as dotted paths
+// into its settings and its input ports.
+//
+// This is the fact that decides whether a component FITS, and prose routinely
+// omits it: "get status of pods matching a label selector" reads as a
+// capability, when the selector is in truth mandatory — which makes that
+// component unusable for "all pods in a namespace". Derived from the schemas
+// rather than written by hand, so it cannot drift from the component.
+func requiredInputs(c ComponentInfo) []string {
+	out := make([]string, 0, 4)
+	for _, name := range requiredFieldsIn(c.SettingsSchema) {
+		out = append(out, "settings."+name)
+	}
+	for _, d := range c.InputPortDetails {
+		if len(wireablePorts([]string{d.Name})) == 0 {
+			continue // system port: not something a caller supplies on an edge
+		}
+		for _, name := range requiredFieldsIn(d.Schema) {
+			out = append(out, d.Name+"."+name)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// requiredFieldsIn lists a schema's required fields, skipping those a caller
+// does not actually have to supply: a field with a default is already
+// answered, and a boolean toggle always has a usable value in false. Listing
+// those would bury the one field that genuinely blocks you.
+func requiredFieldsIn(schema json.RawMessage) []string {
+	if len(schema) == 0 {
+		return nil
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(schema, &root); err != nil {
+		return nil
+	}
+
+	required, properties := requiredAndProperties(root)
+
+	out := make([]string, 0, len(required))
+	for _, item := range required {
+		name, ok := item.(string)
+		if !ok || name == "" {
+			continue
+		}
+		if prop, ok := properties[name].(map[string]interface{}); ok {
+			if _, hasDefault := prop["default"]; hasDefault {
+				continue
+			}
+			if prop["type"] == "boolean" {
+				continue
+			}
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// requiredAndProperties reads a schema's required list and properties, whether
+// they sit at the root or behind a $ref into the schema's own $defs.
+func requiredAndProperties(root map[string]interface{}) ([]interface{}, map[string]interface{}) {
+	if required, ok := root["required"].([]interface{}); ok {
+		props, _ := root["properties"].(map[string]interface{})
+		return required, props
+	}
+
+	ref, ok := root["$ref"].(string)
+	if !ok {
+		return nil, nil
+	}
+	const prefix = "#/$defs/"
+	if !strings.HasPrefix(ref, prefix) {
+		return nil, nil
+	}
+	defs, ok := root["$defs"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+	def, ok := defs[strings.TrimPrefix(ref, prefix)].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+	required, _ := def["required"].([]interface{})
+	props, _ := def["properties"].(map[string]interface{})
+	return required, props
 }
