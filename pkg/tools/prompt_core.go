@@ -94,9 +94,9 @@ User credentials and config flow through the graph via a ` + "`context`" + ` fie
 
 ` + "**Pattern A — context is the root**" + ` (` + "`$` IS the context):" + `
 - ticker / cron / signal
-- router (` + "`out_*` and `default` both emit `in.Context` as root)" + `
 
 ` + "**Pattern B — context is a field**" + ` (` + "`$.context` is the context, `$` is a wrapper):" + `
+- router (each ` + "`out_<route>`" + ` emits the routed message UNDER ` + "`context`" + ` — read ` + "`$.context.<field>`" + `)
 - array_split emits ` + "`{context, item}`" + `
 - http_request emits ` + "`{context, response}`" + `
 - http_server emits ` + "`{context, body, headers, method, ...}`" + `
@@ -116,7 +116,7 @@ Which pattern a component uses is visible in its OUTPUT-port schema (` + "`get_n
    - After a Pattern-B source: ` + "`{{$.context.fieldName}}`" + `
 5. **Never** use ` + "`{{$}}`" + ` to forward context after a Pattern-B source — paths will double-wrap (` + "`$.context.context.fieldName`" + `).
 
-**Common gotcha — after a router:** router is Pattern A. If you used ` + "`{{$.context.x}}`" + ` upstream of the router, you must switch to ` + "`{{$.x}}`" + ` on the edge leaving the router.
+**Common gotcha — after a router:** router is Pattern B. A route port emits the message wrapped, so an edge leaving the router reads ` + "`{{$.context.x}}`" + `, the same as the edge that fed it. Reading ` + "`{{$.x}}`" + ` there resolves to nothing — and because the mapping is structurally valid, the flow builds green, validates green, and shows a blank panel. When in doubt read the route port's schema: a top-level ` + "`context`" + ` field is the answer.
 
 Putting credentials directly on the node that receives the request does NOT propagate their schema downstream. Validator fails with "field not found". Always hold credentials upstream.
 
