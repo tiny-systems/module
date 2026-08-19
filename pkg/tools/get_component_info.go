@@ -133,6 +133,16 @@ func (t *GetComponentInfoTool) Execute(ctx context.Context, execCtx ExecutionCon
 			}
 			compInfo["has_output"] = len(outputPorts) > 0
 
+			// The settings schema names a component's configuration — and
+			// with it the flags that make optional ports exist at all, such as
+			// the one that turns on an error port. It is not reachable from
+			// the port lists, which deliberately exclude system ports, so
+			// without this an agent had to place a throwaway node and read the
+			// schema back off the live graph to find out what it could set.
+			if len(c.SettingsSchema) > 0 {
+				compInfo["settings_schema"] = c.SettingsSchema
+			}
+
 			return ToolResult{
 				Success: true,
 				Output:  compInfo,

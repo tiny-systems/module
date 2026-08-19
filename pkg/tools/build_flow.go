@@ -91,6 +91,10 @@ func (t *BuildFlowTool) Schema() map[string]interface{} {
 							"type":        "object",
 							"description": "Optional settings for _settings port (same as edit_flow action=configure_node)",
 						},
+						"position": map[string]interface{}{
+							"type":        "object",
+							"description": "Canvas position {x, y} in pixels. Provide it for every node — see the layout rules in the flow-building guide. Omitted nodes are auto-placed in a column, which is unreadable for anything but a trivial flow.",
+						},
 						"settings_schema": map[string]interface{}{
 							"type":        "object",
 							"description": "Optional schema for configurable fields in settings (e.g., context type definition)",
@@ -154,6 +158,8 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		Module         string
 		Settings       map[string]interface{}
 		SettingsSchema map[string]interface{}
+		PosX, PosY     int
+		HasPosition    bool
 	}
 
 	nodes := make([]nodeSpec, 0, len(nodesRaw))
@@ -185,6 +191,7 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 
 		settings, _ := m["settings"].(map[string]interface{})
 		settingsSchema, _ := m["settings_schema"].(map[string]interface{})
+		posX, posY, hasPosition := positionFrom(m["position"])
 
 		nodes = append(nodes, nodeSpec{
 			Alias:          alias,
@@ -192,6 +199,9 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			Module:         module,
 			Settings:       settings,
 			SettingsSchema: settingsSchema,
+			PosX:           posX,
+			PosY:           posY,
+			HasPosition:    hasPosition,
 		})
 	}
 
@@ -362,6 +372,15 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("node '%s': %s", n.Alias, err.Error()))
 			continue
+		}
+		// AddNode auto-places into a column. A caller that supplied a layout
+		// gets the layout it asked for — accepting positions and discarding
+		// them, which is what happened before, is worse than refusing them,
+		// because the guide instructs callers to send them on every node.
+		if n.HasPosition && execCtx.NodeRepositioner != nil {
+			if err := execCtx.NodeRepositioner.RepositionNode(ctx, execCtx.ProjectName, execCtx.FlowName, result.NodeID, n.PosX, n.PosY); err != nil {
+				warnings = append(warnings, fmt.Sprintf("node '%s' was created but could not be moved to the position you gave: %s", n.Alias, err.Error()))
+			}
 		}
 
 		aliasToNodeID[n.Alias] = result.NodeID

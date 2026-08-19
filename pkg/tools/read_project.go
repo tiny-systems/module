@@ -17,7 +17,7 @@ func (t *ReadProjectTool) Name() string {
 }
 
 func (t *ReadProjectTool) Description() string {
-	return `Get the complete project structure including all flows and their elements. THIS IS READ-ONLY - use apply_changes to make modifications.
+	return `Get the complete project structure including all flows and their elements. THIS IS READ-ONLY — use build_flow or edit_flow to make modifications.
 
 Returns:
 - flows: List of all flows in the project with their resource_name and title
@@ -28,7 +28,7 @@ Each element includes:
 - flow_title: Human-readable flow title
 - shared_with: (nodes only) List of other flows that connect TO this node
 
-IMPORTANT: This tool only READS the current state. To add nodes, edges, or make any changes, you MUST use the apply_changes tool.`
+IMPORTANT: This tool only READS the current state. To add nodes or edges, or change anything, use build_flow (whole graph in one call) or edit_flow (one incremental change).`
 }
 
 func (t *ReadProjectTool) Schema() map[string]interface{} {
