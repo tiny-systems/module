@@ -215,13 +215,13 @@ Any input port can accept a signal. Common trigger ports: ` + "`signal`" + `, ` 
 
 1. Identify the entry node from ` + "`read_project`" + `
 2. ` + "`get_node_port_schema`" + ` to learn the expected data shape
-3. ` + "`send_signal(node_id, port, data)`" + ` returns ` + "`trace_id`" + ` (signal arrival) AND ` + "`execution_traces`" + ` (the actual chain that fired)
+3. ` + "`send_signal(node_id, port, data)`" + ` confirms the signal was published. It does NOT return the resulting traces — read them with ` + "`get_traces`" + ` a moment later, and expect the chain to be a SEPARATE trace from the signal itself
 4. ` + "`get_trace_detail`" + ` on the trace with the most spans — that's the execution chain, not the signal trace
 5. The returned detail includes an ` + "`issues`" + ` array at the top: every error and expression failure pulled out of span events. Read this FIRST. If it's empty, the chain ran clean.
 
 ` + "```" + `
 send_signal(node_id: ..., port: "_control", data: {"start": true, "context": {...}})
-// → {trace_id: "<signal>", execution_traces: [{id: "<chain>", spans: 8, errors: 0, ...}]}
+// → {node_id: "...", port: "_control", sent: true}   ← then get_traces for the chain
 get_trace_detail(trace_id: "<chain>")
 // → {issues: [{kind: "expression_error", expression: "...", error: "..."}], spans: [...]}
 ` + "```" + `
@@ -329,7 +329,11 @@ Components may have an ` + "`error`" + ` output port. Unconnected error ports si
 
 ## Leave No Port Dangling
 
-Before you call a flow done, walk every node's ports. A port left unwired is unreadable to whoever opens the canvas next: they cannot tell whether the branch was forgotten or deliberately unused, and an unwired OUTPUT means data leaves the graph with nowhere to go. Either wire it to something real (a sink counts, when a branch legitimately has no consumer) or restructure so that surface isn't there — pick a component whose ports you actually use, or drop the node. Treat a leftover port exactly like a red edge: a blocker, not cosmetics.
+Before you call a flow done, walk every node's ports. A port left unwired is unreadable to whoever opens the canvas next: they cannot tell whether the branch was forgotten or deliberately unused, and an unwired OUTPUT means data leaves the graph with nowhere to go. Wire it to something real — a sink counts, when a branch legitimately has no consumer.
+
+Two of these are blockers, and the validator enforces exactly those: a node with NO edges at all, which is dead weight in the graph, and an unwired ERROR port, which drops failures silently. Fix those before calling a flow done.
+
+The rest is judgement. A component that exposes six operations when your flow uses two — a store with delete and find you never call — cannot have those ports hidden, and leaving them unwired is correct. Do not restructure a working flow to chase them.
 
 ## Building Agents — Tool-Using Loops (ReAct)
 
