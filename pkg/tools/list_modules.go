@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -96,6 +97,14 @@ func (t *ListModulesTool) Execute(ctx context.Context, execCtx ExecutionContext,
 			if req := requiredInputs(c); len(req) > 0 {
 				compInfo["requires"] = req
 			}
+			// What a component hands back decides whether it answers the
+			// question at all. Two pod components differ entirely in that one
+			// respect — one returns the pods, the other returns counters
+			// bucketed by phase — and choosing between them was impossible
+			// without fetching both in full.
+			if shapes := outputShapes(c); len(shapes) > 0 {
+				compInfo["outputs"] = shapes
+			}
 			components = append(components, compInfo)
 		}
 		moduleInfo["components"] = components
@@ -107,7 +116,9 @@ func (t *ListModulesTool) Execute(ctx context.Context, execCtx ExecutionContext,
 		Output: map[string]interface{}{
 			"modules": result,
 			"total":   len(result),
-			"hint":    "Component notes are abbreviated here. Use get_component_info(component, module) for the full note and port schemas before wiring a component into a flow.",
+			"hint": "Component notes are abbreviated here, and `requires` lists the fields a component cannot run without (its schema's required fields, minus those with a default). " +
+				"`outputs` names each output port's top-level fields, with [] marking an array. " +
+				"Use get_component_info(component, module) for the full note, value types and constraints before wiring a component into a flow.",
 		},
 	}
 }
@@ -232,8 +243,11 @@ func requiredFieldsIn(schema json.RawMessage) []string {
 // requiredAndProperties reads a schema's required list and properties, whether
 // they sit at the root or behind a $ref into the schema's own $defs.
 func requiredAndProperties(root map[string]interface{}) ([]interface{}, map[string]interface{}) {
-	if required, ok := root["required"].([]interface{}); ok {
-		props, _ := root["properties"].(map[string]interface{})
+	// Properties at the root stand on their own: a schema commonly lists what
+	// it carries without marking any of it required, and keying off `required`
+	// alone made those schemas read as empty.
+	if props, ok := root["properties"].(map[string]interface{}); ok {
+		required, _ := root["required"].([]interface{})
 		return required, props
 	}
 
@@ -256,4 +270,59 @@ func requiredAndProperties(root map[string]interface{}) ([]interface{}, map[stri
 	required, _ := def["required"].([]interface{})
 	props, _ := def["properties"].(map[string]interface{})
 	return required, props
+}
+
+// outputShapes names the top-level fields each output port carries, so a
+// caller can tell what a component actually answers with before fetching it.
+//
+// Names and array-ness only: enough to choose between components, not enough
+// to wire one, which is what get_component_info is for. Nested structure is
+// deliberately not walked — it would cost more than the catalog saves and
+// says little about fit.
+func outputShapes(c ComponentInfo) map[string][]string {
+	shapes := make(map[string][]string)
+	for _, d := range c.OutputPortDetails {
+		if len(wireablePorts([]string{d.Name})) == 0 {
+			continue
+		}
+		if fields := topLevelFields(d.Schema); len(fields) > 0 {
+			shapes[d.Name] = fields
+		}
+	}
+	if len(shapes) == 0 {
+		return nil
+	}
+	return shapes
+}
+
+// topLevelFields lists a schema's own property names, sorted so the catalog
+// is stable between calls, marking arrays with a trailing [].
+func topLevelFields(schema json.RawMessage) []string {
+	if len(schema) == 0 {
+		return nil
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(schema, &root); err != nil {
+		return nil
+	}
+	_, properties := requiredAndProperties(root)
+	if len(properties) == 0 {
+		return nil
+	}
+
+	fields := make([]string, 0, len(properties))
+	for name, raw := range properties {
+		// Nearly every port carries a passthrough context, so naming it
+		// distinguishes nothing while costing something on every component.
+		// The guide covers context passthrough as a rule of the system.
+		if name == "context" {
+			continue
+		}
+		if prop, ok := raw.(map[string]interface{}); ok && prop["type"] == "array" {
+			name += "[]"
+		}
+		fields = append(fields, name)
+	}
+	sort.Strings(fields)
+	return fields
 }

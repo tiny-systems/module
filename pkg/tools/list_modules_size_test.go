@@ -143,3 +143,51 @@ func TestRequiredInputs_SurvivesUnparseableSchemas(t *testing.T) {
 		t.Fatalf("got %v, want nothing", got)
 	}
 }
+
+// The fact that separates two components which sound alike: one hands back
+// the pods, the other hands back counters bucketed by phase. Choosing between
+// them was impossible without fetching both in full.
+func TestOutputShapes_NamesWhatAPortAnswersWith(t *testing.T) {
+	c := ComponentInfo{
+		OutputPortDetails: []PortDetail{{
+			Name:   "result",
+			Schema: []byte(`{"properties":{"pods":{"type":"array"},"count":{"type":"integer"},"context":{"type":"object"}}}`),
+		}},
+	}
+	got := outputShapes(c)
+	fields := got["result"]
+	if len(fields) != 2 || fields[0] != "count" || fields[1] != "pods[]" {
+		t.Fatalf("got %v, want [count pods[]]", fields)
+	}
+	// An array is the difference between "the things" and "a number about
+	// the things", so it has to be visible.
+	if fields[1] != "pods[]" {
+		t.Fatal("array marker lost")
+	}
+}
+
+// Context rides nearly every port, so naming it discriminates nothing while
+// costing something on every component in the catalog.
+func TestOutputShapes_OmitsThePassthroughContext(t *testing.T) {
+	c := ComponentInfo{
+		OutputPortDetails: []PortDetail{{
+			Name:   "out",
+			Schema: []byte(`{"properties":{"context":{"type":"object"}}}`),
+		}},
+	}
+	if got := outputShapes(c); got != nil {
+		t.Fatalf("got %v, want nothing — context alone is not a shape", got)
+	}
+}
+
+func TestOutputShapes_SkipsSystemPortsAndEmptySchemas(t *testing.T) {
+	c := ComponentInfo{
+		OutputPortDetails: []PortDetail{
+			{Name: "_control", Schema: []byte(`{"properties":{"text":{"type":"string"}}}`)},
+			{Name: "out", Schema: nil},
+		},
+	}
+	if got := outputShapes(c); got != nil {
+		t.Fatalf("got %v, want nothing", got)
+	}
+}

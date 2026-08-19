@@ -45,7 +45,19 @@ func (t *ListProjectsTool) Execute(ctx context.Context, execCtx ExecutionContext
 		"projects": projects,
 		"total":    len(projects),
 	}
-	if len(projects) == 0 {
+
+	// A caller had no way to answer "which project am I in?". Every tool
+	// takes a project argument and marks it required, while a bound session
+	// ignores whatever is passed — so a list of eight names with nothing
+	// distinguishing them told an agent nothing about where its work would
+	// actually land.
+	if execCtx.ProjectName != "" {
+		out["current_project"] = execCtx.ProjectName
+		out["hint"] = fmt.Sprintf(
+			"This session works on %q — that is where anything you build will go, whatever the 'project' argument says. "+
+				"The other projects are listed for reference only; to work on one, restart with `tiny -p <name>`.",
+			execCtx.ProjectName)
+	} else if len(projects) == 0 {
 		out["hint"] = "No projects in scope. Create one in the cluster (TinyProject CRD) or via the platform UI before continuing."
 	} else {
 		out["hint"] = "Pass a project's resource_name as the 'project' argument to other tools (read_project, build_flow, etc.)."
