@@ -27,8 +27,8 @@ import (
 	"github.com/tiny-systems/module/pkg/metrics"
 	"github.com/tiny-systems/module/pkg/redact"
 	"github.com/tiny-systems/module/pkg/resource"
-	"github.com/tiny-systems/module/pkg/secret"
 	"github.com/tiny-systems/module/pkg/schema"
+	"github.com/tiny-systems/module/pkg/secret"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/pkg/wire"
 	"go.opentelemetry.io/otel/attribute"
@@ -923,9 +923,18 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 			})
 
 			if debounced {
+				// Read the count under the lock that guards it. The debounced
+				// goroutine clears this slice, so reading its length here to
+				// log it raced with that write — the detector caught it, and
+				// the number was misleading anyway, since by the time it was
+				// read the batch may already have been taken.
+				c.pendingNodeUpdatersLock.Lock()
+				pending := len(c.pendingNodeUpdaters)
+				c.pendingNodeUpdatersLock.Unlock()
+
 				c.log.Info("data handler: reconcile request debounced",
 					"node", c.name,
-					"pendingUpdaters", len(c.pendingNodeUpdaters),
+					"pendingUpdaters", pending,
 				)
 			}
 			return m.Result{}
