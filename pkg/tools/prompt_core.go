@@ -122,7 +122,13 @@ Putting credentials directly on the node that receives the request does NOT prop
 
 ## Credentials — the user supplies them, never the node Spec
 
-A credential is typed by the USER and reaches the flow at runtime. Never write a key into a node's ` + "`settings`" + ` / ` + "`settings_schema`" + ` as a value — that is the TinyNode Spec, plaintext in the CR, and it makes YOU hold the secret. WHERE the user types it is decided by the trigger:
+A credential is typed by the USER and reaches the flow at runtime, as port DATA. It never belongs to the ROUTING — not to a node's ` + "`settings`" + ` / ` + "`settings_schema`" + `, and not to an edge's configuration.
+
+Both are the graph: they live in the TinyNode Spec, in plaintext, and the graph is the thing that TRAVELS — into every export, every published solution, every copy of the CR. Writing a key into an edge is writing it into source code. It also makes YOU hold the secret, which is not your job.
+
+An edge may REFERENCE a credential that arrived at runtime — ` + "`{{$.context.apiKey}}`" + ` is a reference and is correct. It must never contain the value itself.
+
+WHERE the user types it is decided by the trigger:
 
 - **Signal trigger (per run)** — a widget on the ` + "`signal`" + ` node. Declare the field with ` + "`secret: true`" + ` in its settings_schema and it renders masked in the Widgets tab (see get_instructions(section: "dashboards")); the value rides the Send payload into that one run.
 - **Cron / ticker (scheduled)** — the trigger's ` + "`_control`" + ` widget IS the settings form: the user fills it once, presses Start, and the flow runs itself. Put the credential in the ` + "`context`" + ` that Start carries. A scheduled flow has no per-run moment to ask, so do NOT bolt a per-run form onto it and do NOT ship the value in ` + "`settings_schema`" + `.
