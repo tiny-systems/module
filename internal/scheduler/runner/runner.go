@@ -1393,9 +1393,22 @@ func (c *Runner) addSpanUsage(span trace.Span, usage map[string]float64) {
 	span.SetAttributes(attrs...)
 }
 
+// addSpanPortData records what crossed a port, with credentials masked.
+//
+// Credentials belong on input ports rather than in settings — that is the
+// design, and it is right — but it means a key travels through a port as
+// ordinary data, and this is where ordinary data gets written down. A trace is
+// read by the canvas, by get_trace_detail, and by any agent holding an MCP
+// connection, so an unmasked payload hands the key to all three. Found by
+// firing a real flow: 108 characters of Anthropic key sitting in two spans.
+//
+// Masked by shape rather than by field name: the payload here is whatever a
+// component emitted, with no schema to say which field was declared secret,
+// and a key called "token" or buried in a prompt is still a key.
 func (c *Runner) addSpanPortData(span trace.Span, data string) {
+	safe, _ := redact.TextByShape(data)
 	span.AddEvent("data",
-		trace.WithAttributes(attribute.String("payload", data)))
+		trace.WithAttributes(attribute.String("payload", safe)))
 }
 
 // addSpanHandledError records an error-port emission as a countable error.
