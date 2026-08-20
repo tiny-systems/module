@@ -363,6 +363,65 @@ type DashboardWriter interface {
 	// when not. Returns the dashboard page the widget landed on. Pinning an
 	// already-pinned port, or unpinning an absent one, is not an error.
 	SetNodeWidget(ctx context.Context, projectName, nodeID, portName string, enabled bool) (page string, err error)
+
+	// ListPages returns the project's dashboard pages in display order, each
+	// with the widgets placed on it.
+	ListPages(ctx context.Context, projectName string) ([]DashboardPageInfo, error)
+
+	// CreatePage adds an empty page with the given title and returns it. Two
+	// pages may share a title; they are addressed by resource name.
+	CreatePage(ctx context.Context, projectName, title string) (DashboardPageInfo, error)
+
+	// DeletePage removes a page and every placement on it. The nodes behind
+	// those widgets are untouched — a placement is layout, not existence.
+	DeletePage(ctx context.Context, projectName, page string) error
+
+	// PlaceWidget positions a widget on a page, or removes its placement.
+	// Returns the page as it stands afterwards.
+	PlaceWidget(ctx context.Context, projectName string, placement WidgetPlacement) (DashboardPageInfo, error)
+}
+
+// DashboardPageInfo is one dashboard page — a tab in the project's dashboard.
+type DashboardPageInfo struct {
+	// Name is the resource name, and the handle every other call takes.
+	Name    string         `json:"name"`
+	Title   string         `json:"title"`
+	SortIdx int            `json:"sort_idx"`
+	Widgets []PlacedWidget `json:"widgets"`
+}
+
+// PlacedWidget is a widget's placement on one page. The same widget may sit on
+// several pages, with its own position on each.
+type PlacedWidget struct {
+	NodeID string `json:"node_id"`
+	Port   string `json:"port"`
+	Title  string `json:"title,omitempty"`
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	W      int    `json:"w"`
+	H      int    `json:"h"`
+}
+
+// WidgetPlacement asks for a widget to sit somewhere. A zero W or H takes the
+// default size, and omitting Y appends below whatever is already on the page —
+// an agent that just wants the widget visible should not have to solve a
+// packing problem to get it there.
+type WidgetPlacement struct {
+	// Page addresses the target page by resource name or by title. Empty means
+	// the project's first page, created if the project has none.
+	Page   string
+	NodeID string
+	Port   string
+	Title  string
+	X      int
+	Y      int
+	W      int
+	H      int
+	// AutoY places the widget below the page's current content, ignoring Y.
+	AutoY bool
+	// Remove takes the widget off the page instead of placing it. With an empty
+	// Page it comes off every page.
+	Remove bool
 }
 
 // DashboardData is the full dashboard payload for a project.
