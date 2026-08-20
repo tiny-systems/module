@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"github.com/tiny-systems/module/api/v1alpha1"
 	"time"
+
+	"github.com/tiny-systems/module/api/v1alpha1"
+	"github.com/tiny-systems/module/pkg/evals"
 )
 
 // ToolResult represents the result of a tool execution
@@ -708,6 +710,29 @@ type TraceReader interface {
 	ReadTraceDetail(ctx context.Context, projectName, traceID string) ([]TraceSpanInfo, error)
 }
 
+// EvalRunner fires a flow's trigger, waits for the run, and reports what
+// happened. The host owns it because firing and observing need the cluster;
+// the judgement itself lives in pkg/evals so every host reaches the same
+// verdict on the same run.
+type EvalRunner interface {
+	// RunEval executes one spec. A spec with no expectations still runs — the
+	// observed result is how an agent learns what to assert, so writing an
+	// eval does not start with a blank page.
+	RunEval(ctx context.Context, projectName string, spec evals.Spec) (EvalOutcome, error)
+}
+
+// EvalOutcome is one eval's result, plus what the run actually produced so a
+// caller can turn a passing run into assertions.
+type EvalOutcome struct {
+	Passed   bool               `json:"passed"`
+	Failures []string           `json:"failures,omitempty"`
+	TraceID  string             `json:"trace_id,omitempty"`
+	Observed evals.Observed     `json:"-"`
+	Arrived  map[string]int     `json:"arrived,omitempty"`
+	Errors   int                `json:"errors"`
+	Usage    map[string]float64 `json:"usage,omitempty"`
+}
+
 // NodePosition tracks position of a node added during session
 type NodePosition struct {
 	NodeID   string
@@ -769,6 +794,7 @@ type ExecutionContext struct {
 	// Execution and observability
 	SignalSender SignalSender
 	TraceReader  TraceReader
+	EvalRunner   EvalRunner
 
 	// Scenarios (TinyScenario CRD)
 	ScenarioManager ScenarioManager
