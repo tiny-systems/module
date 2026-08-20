@@ -3,10 +3,9 @@ package tools
 import (
 	"context"
 	"fmt"
-)
 
-// controlPort is the only port a dashboard widget can render.
-const controlPort = "_control"
+	"github.com/tiny-systems/module/api/v1alpha1"
+)
 
 // SetNodeDashboardTool pins a node's control form to the project dashboard as a
 // widget, or unpins it.
@@ -40,14 +39,14 @@ The widget renders as a form only if the node's settings.context has a matching
 configurable schema; without it the widget shows "Object is empty". Configure
 the node first, then pin it.
 
-The widget is always the node's _control form — that is the only port the
-dashboard renders.
+The widget defaults to the node's _control form, which is the form tiny and the
+platform render.
 
 Placement: a pinned widget lands on the project's first dashboard page,
 appended below what is already there. Name a page to put it elsewhere (see
 dashboard_page), give it a title so the user reads a label instead of a node
-id, and set grid to lay the page out deliberately. The grid is 6 columns wide;
-a widget defaults to the full width.`
+id, and set grid to lay the page out deliberately. Widths are in grid columns —
+tiny and the platform render six — and a widget defaults to the full width.`
 }
 
 func (t *SetNodeDashboardTool) Schema() map[string]interface{} {
@@ -60,7 +59,7 @@ func (t *SetNodeDashboardTool) Schema() map[string]interface{} {
 			},
 			"port": map[string]interface{}{
 				"type":        "string",
-				"description": "Must be _control (the default) — the dashboard renders no other port.",
+				"description": "Port to expose. Defaults to _control, and hosts that render only the control form will refuse anything else.",
 			},
 			"enabled": map[string]interface{}{
 				"type":        "boolean",
@@ -100,14 +99,7 @@ func (t *SetNodeDashboardTool) Execute(ctx context.Context, execCtx ExecutionCon
 	}
 	port, _ := input["port"].(string)
 	if port == "" {
-		port = controlPort
-	}
-	// The dashboard renders a node's control form and nothing else. Accepting
-	// another port would store a placement that never appears — a widget the
-	// caller was told it created, on a page where it will never be.
-	if port != controlPort {
-		return ToolResult{Success: false, Error: fmt.Sprintf(
-			"port %q cannot be a widget: the dashboard renders a node's %s form only. Expose the values you want shown through that node's control schema.", port, controlPort)}
+		port = v1alpha1.ControlPort
 	}
 	enabled := true
 	if v, ok := input["enabled"].(bool); ok {

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -9,6 +10,7 @@ import (
 // fakeDashboard records what the tools asked for. The interesting behaviour is
 // in the asking — a host implements the writing.
 type fakeDashboard struct {
+	placeErr   error
 	labelled   map[string]bool
 	placements []WidgetPlacement
 	pages      []DashboardPageInfo
@@ -42,6 +44,9 @@ func (f *fakeDashboard) DeletePage(_ context.Context, _, page string) error {
 }
 
 func (f *fakeDashboard) PlaceWidget(_ context.Context, _ string, p WidgetPlacement) (DashboardPageInfo, error) {
+	if f.placeErr != nil {
+		return DashboardPageInfo{}, f.placeErr
+	}
 	f.placements = append(f.placements, p)
 	return DashboardPageInfo{Name: "p1", Title: "Dashboard", Widgets: []PlacedWidget{{NodeID: p.NodeID, Port: p.Port}}}, nil
 }
@@ -131,22 +136,26 @@ func TestUnpinRemovesFromEveryPage(t *testing.T) {
 	}
 }
 
-// The dashboard renders a node's control form and nothing else, so accepting
-// another port would report a widget that can never appear.
-func TestNonControlPortIsRefused(t *testing.T) {
+// Which ports can render is the host's rule, not the SDK's — a host that
+// renders more than the control form must not be blocked here. The tool passes
+// the port through and reports whatever the host says about it.
+func TestPortIsTheHostsRuleNotTheTools(t *testing.T) {
 	f := newFakeDashboard()
 	res := runTool(t, NewSetNodeDashboardTool(), f, map[string]interface{}{
 		"node_id": "n1",
 		"port":    "_settings",
 	})
-	if res.Success {
-		t.Fatal("a port the dashboard cannot render was accepted")
+	if !res.Success {
+		t.Fatalf("the tool refused a port on the host's behalf: %s", res.Error)
 	}
-	if !strings.Contains(res.Error, "_control") {
-		t.Errorf("error does not say which port works: %s", res.Error)
+	if got := f.placements[0].Port; got != "_settings" {
+		t.Errorf("port = %q, want it passed through untouched", got)
 	}
-	if len(f.placements) != 0 {
-		t.Error("a placement was stored for a port that never renders")
+
+	f.placeErr = errors.New("port \"_settings\" cannot be a widget")
+	res = runTool(t, NewSetNodeDashboardTool(), f, map[string]interface{}{"node_id": "n1", "port": "_settings"})
+	if res.Success || !strings.Contains(res.Error, "cannot be a widget") {
+		t.Fatalf("the host's refusal did not reach the caller: %+v", res)
 	}
 }
 
