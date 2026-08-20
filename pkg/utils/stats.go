@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/otel-collector/pkg/api-go"
+	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -267,7 +269,7 @@ func (c *StatsClient) GetTraceByID(ctx context.Context, projectID, traceID strin
 		for j, a := range s.Attributes {
 			attrs[j] = SpanAttribute{
 				Key:   a.Key,
-				Value: a.Value.GetStringValue(),
+				Value: attributeValue(a.Value),
 			}
 		}
 
@@ -277,7 +279,7 @@ func (c *StatsClient) GetTraceByID(ctx context.Context, projectID, traceID strin
 			for k, ea := range e.Attributes {
 				eventAttrs[k] = SpanAttribute{
 					Key:   ea.Key,
-					Value: ea.Value.GetStringValue(),
+					Value: attributeValue(ea.Value),
 				}
 			}
 			events[j] = SpanEvent{
@@ -373,4 +375,34 @@ func ShouldAnimateEdge(lastActivityTimestamp float64, nowSeconds float64) bool {
 
 	timeSinceActivity := nowSeconds - lastActivityTimestamp
 	return timeSinceActivity < EdgeAnimationTimeout.Seconds()
+}
+
+// attributeValue renders a span attribute as text.
+//
+// Reading only the string variant silently dropped every other kind: a bool
+// came back as "", an int as "", a float as "". The runner marks a caught
+// error with handled=true, and that arrived at every reader as an empty
+// string — present in the trace, invisible to anything looking at it.
+//
+// Rendering rather than typing them keeps SpanAttribute a flat pair, which is
+// what every consumer already expects.
+func attributeValue(v *commonv1.AnyValue) string {
+	if v == nil {
+		return ""
+	}
+	switch value := v.Value.(type) {
+	case *commonv1.AnyValue_StringValue:
+		return value.StringValue
+	case *commonv1.AnyValue_BoolValue:
+		return strconv.FormatBool(value.BoolValue)
+	case *commonv1.AnyValue_IntValue:
+		return strconv.FormatInt(value.IntValue, 10)
+	case *commonv1.AnyValue_DoubleValue:
+		return strconv.FormatFloat(value.DoubleValue, 'g', -1, 64)
+	case *commonv1.AnyValue_BytesValue:
+		return string(value.BytesValue)
+	}
+	// Arrays and key-value lists have no obvious flat rendering, and guessing
+	// one would put something misleading in front of a reader.
+	return ""
 }

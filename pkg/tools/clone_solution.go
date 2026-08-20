@@ -203,6 +203,16 @@ func (t *CloneSolutionTool) Execute(ctx context.Context, execCtx ExecutionContex
 		nodeCopy.Labels[v1alpha1.ProjectNameLabel] = execCtx.ProjectName
 		nodeCopy.Labels[v1alpha1.FlowNameLabel] = newFlow
 
+		// A shared node names the flows it is shared into, and those names are
+		// the SOURCE project's. Copied across unchanged they refer to flows
+		// that do not exist here, so the node quietly fails to appear on the
+		// layers the solution's author put it on — the annotation is valid,
+		// the names are simply nobody's. Remap them the same way every other
+		// cross-node reference is remapped.
+		if shared := nodeCopy.Annotations[v1alpha1.SharedWithFlowsAnnotation]; shared != "" {
+			nodeCopy.Annotations[v1alpha1.SharedWithFlowsAnnotation] = moduleutils.ResolveSharedFlows(shared, flowMapping)
+		}
+
 		newName, err := execCtx.TinyNodeCRManager.CreateNodeCR(ctx, nodeCopy)
 		if err != nil {
 			return ToolResult{Success: false, Error: fmt.Sprintf("failed to create node %q: %s", oldID, err.Error())}
