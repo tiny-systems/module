@@ -91,6 +91,10 @@ func (t *BuildFlowTool) Schema() map[string]interface{} {
 							"type":        "object",
 							"description": "Optional settings for _settings port (same as edit_flow action=configure_node)",
 						},
+						"label": map[string]interface{}{
+							"type":        "string",
+							"description": "The node's name, shown on the canvas and used as its dashboard widget's title. Name what it DOES (\"Latest pod summary\"), not what it is (\"Display\") — a widget titled after its component tells a reader nothing.",
+						},
 						"position": map[string]interface{}{
 							"type":        "object",
 							"description": "Canvas position {x, y} in pixels. Provide it for every node — see the layout rules in the flow-building guide. Omitted nodes are auto-placed in a column, which is unreadable for anything but a trivial flow.",
@@ -160,6 +164,7 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		SettingsSchema map[string]interface{}
 		PosX, PosY     int
 		HasPosition    bool
+		Label          string
 	}
 
 	nodes := make([]nodeSpec, 0, len(nodesRaw))
@@ -192,6 +197,7 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		settings, _ := m["settings"].(map[string]interface{})
 		settingsSchema, _ := m["settings_schema"].(map[string]interface{})
 		posX, posY, hasPosition := positionFrom(m["position"])
+		label, _ := m["label"].(string)
 
 		nodes = append(nodes, nodeSpec{
 			Alias:          alias,
@@ -202,6 +208,7 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 			PosX:           posX,
 			PosY:           posY,
 			HasPosition:    hasPosition,
+			Label:          label,
 		})
 	}
 
@@ -377,6 +384,14 @@ func (t *BuildFlowTool) Execute(ctx context.Context, execCtx ExecutionContext, i
 		// gets the layout it asked for — accepting positions and discarding
 		// them, which is what happened before, is worse than refusing them,
 		// because the guide instructs callers to send them on every node.
+		// Name it before anything else reads the graph: the dashboard titles a
+		// widget from this, so an unnamed node shows its component's name on a
+		// surface meant to explain itself.
+		if n.Label != "" && execCtx.NodeLabeler != nil {
+			if err := execCtx.NodeLabeler.LabelNode(ctx, execCtx.ProjectName, execCtx.FlowName, result.NodeID, n.Label); err != nil {
+				warnings = append(warnings, fmt.Sprintf("node '%s' was created but could not be named: %s", n.Alias, err.Error()))
+			}
+		}
 		if n.HasPosition && execCtx.NodeRepositioner != nil {
 			if err := execCtx.NodeRepositioner.RepositionNode(ctx, execCtx.ProjectName, execCtx.FlowName, result.NodeID, n.PosX, n.PosY); err != nil {
 				warnings = append(warnings, fmt.Sprintf("node '%s' was created but could not be moved to the position you gave: %s", n.Alias, err.Error()))

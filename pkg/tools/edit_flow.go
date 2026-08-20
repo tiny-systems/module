@@ -53,7 +53,9 @@ Actions and their required fields:
   keeps one position, and stays read-only elsewhere. The list REPLACES the current
   one — pass [] to un-share.
 
-- action="configure_node": node_id, and settings and/or position
+- action="configure_node": node_id, and settings, position and/or label
+  label names the node — it is what the canvas shows and what a dashboard widget
+  is titled. Name what a node DOES ("Latest pod summary"), not what it is ("Display").
   settings (object, the _settings port configuration) may add/remove output ports (e.g. router routes).
   position ({x, y}) moves the node on the canvas — pass it alone to tidy a layout
   without touching configuration. See the layout rules in the flow-building guide.
@@ -121,6 +123,10 @@ func (t *EditFlowTool) Schema() map[string]interface{} {
 			"settings": map[string]interface{}{
 				"type":        "object",
 				"description": "(configure_node) Settings object for the _settings port. Object or JSON string.",
+			},
+			"label": map[string]interface{}{
+				"type":        "string",
+				"description": "(configure_node) The node's name, shown on the canvas and used as its dashboard widget's title. Name what it does, not what it is.",
 			},
 			"position": map[string]interface{}{
 				"type":        "object",
@@ -449,6 +455,16 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 	// Moving a node changes nothing about what the flow does, so a reposition
 	// stands on its own: requiring settings alongside it would force a caller
 	// tidying a layout to resend configuration it has no reason to touch.
+	label, hasLabel := input["label"].(string)
+	if hasLabel {
+		if execCtx.NodeLabeler == nil {
+			return ToolResult{Success: false, Error: "naming a node is not supported here"}
+		}
+		if err := execCtx.NodeLabeler.LabelNode(ctx, execCtx.ProjectName, execCtx.FlowName, nodeID, label); err != nil {
+			return ToolResult{Success: false, Error: fmt.Sprintf("failed to name node: %s", err.Error())}
+		}
+	}
+
 	x, y, hasPosition := positionFrom(input["position"])
 	if hasPosition {
 		if execCtx.NodeRepositioner == nil {
@@ -465,17 +481,18 @@ func editFlowConfigureNode(ctx context.Context, execCtx ExecutionContext, input 
 			if err := json.Unmarshal([]byte(settingsStr), &settings); err != nil {
 				return ToolResult{Success: false, Error: fmt.Sprintf("settings string is not valid JSON: %v", err)}
 			}
-		} else if hasPosition {
-			// Position only — nothing left to configure.
-			return ToolResult{
-				Success: true,
-				Output: map[string]interface{}{
-					"node_id":  nodeID,
-					"position": map[string]interface{}{"x": x, "y": y},
-				},
+		} else if hasPosition || hasLabel {
+			// Nothing left to configure beyond what was already applied.
+			out := map[string]interface{}{"node_id": nodeID}
+			if hasPosition {
+				out["position"] = map[string]interface{}{"x": x, "y": y}
 			}
+			if hasLabel {
+				out["label"] = label
+			}
+			return ToolResult{Success: true, Output: out}
 		} else {
-			return ToolResult{Success: false, Error: "configure_node needs settings, a position, or both"}
+			return ToolResult{Success: false, Error: "configure_node needs settings, a position, a label, or any combination"}
 		}
 	}
 

@@ -437,6 +437,17 @@ type NodeRepositioner interface {
 	RepositionNode(ctx context.Context, projectName, flowName, nodeID string, x, y int) error
 }
 
+// NodeLabeler names a node.
+//
+// A node's label is what the canvas shows on it and what a dashboard widget is
+// titled — the dashboard already prefers it over the component's description.
+// Without a way to set it, an agent that builds a whole page can only produce
+// widgets called "Cron" and "Display": the component names, on a surface whose
+// entire job is to explain itself to somebody who did not build it.
+type NodeLabeler interface {
+	LabelNode(ctx context.Context, projectName, flowName, nodeID, label string) error
+}
+
 // NodeSharer shares a node into other flows of the same project.
 //
 // Flows are layers of one picture: a node has exactly one home flow, but the
@@ -683,6 +694,7 @@ type ExecutionContext struct {
 	EdgeConfigurer         EdgeConfigurer
 	NodeSettingsConfigurer NodeSettingsConfigurer
 	NodeRepositioner       NodeRepositioner
+	NodeLabeler            NodeLabeler
 	NodeSharer             NodeSharer
 	FlowCreator            FlowCreator
 	SolutionExportFetcher  SolutionExportFetcher
