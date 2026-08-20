@@ -51,6 +51,13 @@ rbac:
   #     resources: ["jobs"]
   #     verbs: ["*"]
   extraRules: []
+  # Extra RBAC rules granted only inside the release namespace.
+  #
+  # extraRules above become a ClusterRole: right for a module that lists pods
+  # wherever they run, wrong for anything a namespace is meant to contain. Put
+  # secrets here — a rule written for one namespace otherwise becomes a grant
+  # over every namespace in the cluster, kube-system included.
+  extraNamespacedRules: []
 # Secret access for module components that resolve
 # '{{secret:<name>/<key>}}' placeholders in node settings via the
 # SDK's pkg/secret resolver. Off by default — modules that don't

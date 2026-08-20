@@ -112,6 +112,43 @@ rules:
 {{- toYaml . | nindent 0 }}
 {{- end }}
 ---
+{{- with .Values.rbac.extraNamespacedRules }}
+# Rules a module needs only inside its own namespace.
+#
+# extraRules above land in a ClusterRole, because a module that lists pods is
+# expected to list them wherever they run. Secrets are the opposite: a rule
+# written for one namespace became a grant over every namespace in the cluster,
+# kube-system included — which is how a component meant to read one registry
+# credential could read all of them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "tinysystems-operator.fullname" $ }}-extra
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: rbac
+  {{- include "tinysystems-operator.labels" $ | nindent 4 }}
+rules:
+{{- toYaml . | nindent 0 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "tinysystems-operator.fullname" $ }}-extra
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: rbac
+  {{- include "tinysystems-operator.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: '{{ include "tinysystems-operator.fullname" $ }}-extra'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "tinysystems-operator.fullname" $ }}-controller-manager'
+  namespace: '{{ $.Release.Namespace }}'
+{{- end }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
