@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // FlowIssues returns human-readable structural faults in a flow graph:
@@ -64,6 +65,16 @@ func FlowIssues(elements []map[string]interface{}) []string {
 			issues = append(issues, fmt.Sprintf(
 				"NODE %s (%s): %s", id, elemDataStr(el, "component"), ce))
 		}
+		// Settings keys the component does not declare. json.Unmarshal drops
+		// them without a word, so the setting does nothing — forever, and most
+		// visibly when the value was a credential and the component reports it
+		// missing. Names only: the value may be the secret itself.
+		if unknown := elemDataStrings(el, "settings_unknown_keys"); len(unknown) > 0 {
+			issues = append(issues, fmt.Sprintf(
+				"IGNORED SETTINGS on %s (%s): %s — the component has no such setting, so %s dropped and does nothing. Check the spelling against get_component_info, and remember a credential belongs on the input port that consumes it, never in settings.",
+				id, elemDataStr(el, "component"), strings.Join(unknown, ", "),
+				map[bool]string{true: "it is", false: "they are"}[len(unknown) == 1]))
+		}
 		if !connected[id] {
 			issues = append(issues, fmt.Sprintf(
 				"DANGLING NODE %s (%s): no edges at all — wire it into the flow or delete it.",
@@ -111,6 +122,28 @@ func elemDataStr(el map[string]interface{}, key string) string {
 
 // elemOutPorts reads data.ports.out as a []string, tolerating the
 // []interface{} form a JSON round-trip produces.
+// elemDataStrings reads a list of strings off an element's data.
+func elemDataStrings(el map[string]interface{}, key string) []string {
+	data, ok := el["data"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	raw, ok := data[key].([]interface{})
+	if !ok {
+		if already, ok := data[key].([]string); ok {
+			return already
+		}
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func elemOutPorts(el map[string]interface{}) []string {
 	data, _ := el["data"].(map[string]interface{})
 	if data == nil {
