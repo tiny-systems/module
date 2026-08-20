@@ -50,10 +50,23 @@ func ExtractScenarioPorts(spans []TraceSpanInfo) map[string]map[string]interface
 	return out
 }
 
-// RedactSecrets walks a decoded JSON value and replaces string values whose
-// key looks credential-shaped. See pkg/redact for the rules.
+// RedactSecrets removes credentials from a captured payload before it is
+// stored as sample data.
+//
+// Both rules are needed, and only having the first is how a real key reached
+// etcd: matching by FIELD NAME hides an apiKey wherever it appears, but a
+// key-value store returns its contents under `value` and a log line carries
+// one mid-sentence under `logs` — names that say nothing about what they hold.
+// Matching the SHAPE of the secret catches those.
+//
+// This is the point of entry. A sample is captured from real traffic, so the
+// credential a user supplied at runtime passes through here on its way to
+// being stored; scrubbing it later, at publish, keeps it out of a solution but
+// not out of the cluster.
 func RedactSecrets(v interface{}) interface{} {
-	return redact.Secrets(v)
+	byName := redact.Secrets(v)
+	byShape, _ := redact.SecretsByShape(byName)
+	return byShape
 }
 
 func isExpression(s string) bool {

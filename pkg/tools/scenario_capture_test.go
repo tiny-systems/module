@@ -2,6 +2,7 @@ package tools
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -81,5 +82,56 @@ func TestRedactSkipsEmpty(t *testing.T) {
 	}
 	if out["token"] != RedactedValue {
 		t.Errorf("non-empty token = %q, want redacted", out["token"])
+	}
+}
+
+// The key that actually reached etcd. A key-value store returns its contents
+// under "value" — a name that says nothing about what it holds — so matching
+// by field name alone let a real Anthropic key be stored as sample data and
+// published with a solution.
+//
+// Capture is the point of entry: scrubbing at publish keeps a credential out
+// of a shipped solution but not out of the cluster.
+func TestRedactSecrets_CatchesAKeyUnderAnInnocuousName(t *testing.T) {
+	captured := map[string]interface{}{
+		"context": map[string]interface{}{"id": "anthropic-main"},
+		"value":   "sk-ant-api03-" + strings.Repeat("A1b2C3d4", 11),
+	}
+
+	out, ok := RedactSecrets(captured).(map[string]interface{})
+	if !ok {
+		t.Fatalf("shape changed: %T", RedactSecrets(captured))
+	}
+	if got, _ := out["value"].(string); strings.Contains(got, "sk-ant-") {
+		t.Fatalf("the key was stored: %q", got)
+	}
+	// The sample's structure is what it exists for; only the value goes.
+	if _, present := out["context"]; !present {
+		t.Fatal("redaction removed unrelated fields")
+	}
+}
+
+// The rule that was already there must keep working: a credential-named field
+// is hidden whatever it holds.
+func TestRedactSecrets_StillCatchesCredentialNames(t *testing.T) {
+	out, _ := RedactSecrets(map[string]interface{}{"apiKey": "hunter2"}).(map[string]interface{})
+	if got, _ := out["apiKey"].(string); got == "hunter2" {
+		t.Fatal("a field named apiKey was stored in the clear")
+	}
+}
+
+// Ordinary sample data must survive untouched — a sample exists to pin the
+// shape of real traffic, and rewriting it would defeat the purpose.
+func TestRedactSecrets_LeavesOrdinaryDataAlone(t *testing.T) {
+	in := map[string]interface{}{
+		"name":     "broken-checkout-657f5f7dd-6mz5c",
+		"restarts": float64(0),
+		"phase":    "ImagePullBackOff",
+	}
+	out, _ := RedactSecrets(in).(map[string]interface{})
+	for k, want := range in {
+		if out[k] != want {
+			t.Errorf("%s = %v, want %v", k, out[k], want)
+		}
 	}
 }
