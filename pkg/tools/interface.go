@@ -609,6 +609,10 @@ type TraceSpanInfo struct {
 	DurationMs   float64          `json:"duration_ms"`
 	Status       string           `json:"status,omitempty"`
 	Events       []TraceEventInfo `json:"events,omitempty"`
+	// Usage is what this hop metered, keyed by the unit the component named.
+	// The units are opaque here: a reader totals them without knowing whether
+	// it is counting tokens, credits or rows.
+	Usage map[string]float64 `json:"usage,omitempty"`
 }
 
 // TraceEventInfo contains a single span event

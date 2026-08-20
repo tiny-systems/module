@@ -732,6 +732,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 		ctx = utils.WithSourceNode(ctx, sourceNode)
 	}
 
+	// Metered work — an LLM call, a paid API — is reported by the component in
+	// units it names, and lands on this hop's span. The runtime never
+	// interprets a unit; it only records what was counted.
+	ctx, usage := m.WithUsage(ctx)
+
 	handleStart := time.Now()
 	c.log.Info("runner msg handler: calling component.Handle",
 		"port", port,
@@ -769,6 +774,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	})
 
 	handleDuration := time.Since(handleStart)
+	c.addSpanUsage(inputSpan, usage.Total())
 
 	if err != nil {
 		c.log.Error(err, "msg handler: component execution failed",
@@ -1368,6 +1374,23 @@ func (c *Runner) addSpanError(span trace.Span, err error) {
 	}
 	span.RecordError(err, trace.WithStackTrace(true))
 	span.SetStatus(codes.Error, err.Error())
+}
+
+// addSpanUsage records what a hop metered, one attribute per unit.
+//
+// The unit names come from the component and are written through untouched:
+// a reader totals by unit without knowing whether it is counting tokens,
+// credits or bytes. Prefixed so a unit can never collide with a span attribute
+// the runtime owns.
+func (c *Runner) addSpanUsage(span trace.Span, usage map[string]float64) {
+	if len(usage) == 0 {
+		return
+	}
+	attrs := make([]attribute.KeyValue, 0, len(usage))
+	for unit, amount := range usage {
+		attrs = append(attrs, attribute.Float64(m.UsageAttrPrefix+unit, amount))
+	}
+	span.SetAttributes(attrs...)
 }
 
 func (c *Runner) addSpanPortData(span trace.Span, data string) {

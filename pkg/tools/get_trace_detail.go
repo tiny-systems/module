@@ -19,7 +19,9 @@ func (t *GetTraceDetailTool) Name() string {
 func (t *GetTraceDetailTool) Description() string {
 	return `Get detailed span information for a specific trace. Shows the execution path through nodes, data passed between them, and any errors. Use this to debug why a flow failed or to verify data transformations.
 
-Each span shows: source node, destination node, port, duration, status, and events (data payloads and errors).`
+Each span shows: source node, destination node, port, duration, status, and events (data payloads and errors).
+
+A hop that consumed metered work — LLM tokens, paid API credits — carries a usage map, and the response totals them for the run. The units are whatever the component reported.`
 }
 
 func (t *GetTraceDetailTool) Schema() map[string]interface{} {
@@ -105,6 +107,12 @@ func (t *GetTraceDetailTool) Execute(ctx context.Context, execCtx ExecutionConte
 		"errors":      errorCount,
 		"spans":       spans,
 	}
+	// What the run consumed, summed per unit. Reading it off the individual
+	// spans is possible and nobody does it — a total is the form the question
+	// is actually asked in.
+	if usage := totalUsage(spans); len(usage) > 0 {
+		output["usage"] = usage
+	}
 	if len(issues) > 0 {
 		output["issues"] = issues
 	}
@@ -113,6 +121,23 @@ func (t *GetTraceDetailTool) Execute(ctx context.Context, execCtx ExecutionConte
 		Success: true,
 		Output:  output,
 	}
+}
+
+// totalUsage sums every hop's metered units across the trace. Units are the
+// components' own strings and are never interpreted here: two components
+// counting "input_tokens" add up, and one counting "credits" keeps its own
+// line.
+func totalUsage(spans []TraceSpanInfo) map[string]float64 {
+	var total map[string]float64
+	for _, s := range spans {
+		for unit, amount := range s.Usage {
+			if total == nil {
+				total = make(map[string]float64, len(s.Usage))
+			}
+			total[unit] += amount
+		}
+	}
+	return total
 }
 
 var _ Tool = (*GetTraceDetailTool)(nil)
