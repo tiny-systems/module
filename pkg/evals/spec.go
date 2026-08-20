@@ -122,11 +122,31 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON writes the duration back the way it was written — "45s", not a
+// nanosecond count. An eval an agent saved has to be one a person can read and
+// edit, or the file is a black box that only tooling can touch.
+func (d Duration) MarshalJSON() ([]byte, error) {
+	if d == 0 {
+		return []byte(`""`), nil
+	}
+	return []byte(`"` + time.Duration(d).String() + `"`), nil
+}
+
 func (d Duration) Or(fallback time.Duration) time.Duration {
 	if d == 0 {
 		return fallback
 	}
 	return time.Duration(d)
+}
+
+// Marshal writes a spec as the YAML a repository holds. The shape is the same
+// one Parse reads, so an eval written by an agent and one written by hand are
+// the same file.
+func Marshal(specs []Spec) ([]byte, error) {
+	if len(specs) == 1 {
+		return yaml.Marshal(specs[0])
+	}
+	return yaml.Marshal(specs)
 }
 
 // Parse reads one eval file. A file may hold several evals as a YAML list, so

@@ -73,6 +73,10 @@ func (t *RunEvalTool) Schema() map[string]interface{} {
 				},
 				"required": []string{"node"},
 			},
+			"save": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Write this eval down so it guards the flow after this session. Do it once a check passes — a check that only ran once inspected the flow, it does not protect it.",
+			},
 			"timeout_seconds": map[string]interface{}{
 				"type":        "integer",
 				"description": "How long to wait for the run to settle. Default 60.",
@@ -146,7 +150,35 @@ func (t *RunEvalTool) Execute(ctx context.Context, execCtx ExecutionContext, inp
 		out["hint"] = "No expectations were given, so this only ran the flow. Turn the payloads above into expect.arrives to make it a check — assert what must be true, not everything that happened."
 	}
 
+	if save, _ := input["save"].(bool); save {
+		out = t.save(ctx, execCtx, spec, outcome, out)
+	}
+
 	return ToolResult{Success: true, Output: out}
+}
+
+// save writes the eval down, and says plainly when it has just written a check
+// that does not currently hold — a red check saved on purpose is a decision,
+// one saved by accident is a lie the next reader inherits.
+func (t *RunEvalTool) save(ctx context.Context, execCtx ExecutionContext, spec evals.Spec, outcome EvalOutcome, out map[string]interface{}) map[string]interface{} {
+	if execCtx.EvalStore == nil {
+		out["save_error"] = "this host cannot save evals"
+		return out
+	}
+	if len(spec.Expect.Arrives) == 0 && len(spec.Expect.Usage) == 0 {
+		out["save_error"] = "nothing to save: an eval with no expectations asserts nothing. Add expect.arrives first."
+		return out
+	}
+	location, err := execCtx.EvalStore.SaveEval(ctx, execCtx.ProjectName, spec)
+	if err != nil {
+		out["save_error"] = err.Error()
+		return out
+	}
+	out["saved_to"] = location
+	if !outcome.Passed {
+		out["save_warning"] = "saved a check that does not currently pass — it will fail until the flow is fixed"
+	}
+	return out
 }
 
 // arrivalReport summarises what reached each port, with the first payload as

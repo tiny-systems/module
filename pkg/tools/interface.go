@@ -733,6 +733,18 @@ type EvalOutcome struct {
 	Usage    map[string]float64 `json:"usage,omitempty"`
 }
 
+// EvalStore keeps an eval past the session that wrote it.
+//
+// Without it a check an agent wrote evaporates the moment the conversation
+// ends, which makes it a one-off inspection rather than something that guards
+// the flow next week. Where it lands is the host's business: a file beside the
+// project locally, something else on a hosted platform.
+type EvalStore interface {
+	// SaveEval persists the spec and returns where it went, in words a person
+	// can act on — a path, not an opaque id.
+	SaveEval(ctx context.Context, projectName string, spec evals.Spec) (location string, err error)
+}
+
 // NodePosition tracks position of a node added during session
 type NodePosition struct {
 	NodeID   string
@@ -795,6 +807,7 @@ type ExecutionContext struct {
 	SignalSender SignalSender
 	TraceReader  TraceReader
 	EvalRunner   EvalRunner
+	EvalStore    EvalStore
 
 	// Scenarios (TinyScenario CRD)
 	ScenarioManager ScenarioManager

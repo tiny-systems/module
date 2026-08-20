@@ -203,3 +203,45 @@ func TestFailureReportsWhatWasThere(t *testing.T) {
 		t.Fatalf("failure reads badly: %s", f[0])
 	}
 }
+
+// An eval an agent saved has to be one a person can read and edit. A duration
+// that comes back as a nanosecond count is a file only tooling can touch — and
+// it would not even parse again.
+func TestSpecsRoundTripThroughTheFileFormat(t *testing.T) {
+	original := Spec{
+		Name:    "csv_decode keeps a quoted comma",
+		Flow:    "csv-smoke",
+		Trigger: Trigger{Node: "signal-1", Port: "_control", Data: map[string]interface{}{"send": true}},
+		Timeout: Duration(45 * time.Second),
+		Expect: Expect{
+			Arrives: []Arrival{{At: "debug-1:in", Path: "$.rows[1].name", Equals: "web, edge"}},
+			Usage:   map[string]Bound{"llm_calls": {Max: float(2)}},
+		},
+	}
+
+	encoded, err := Marshal([]Spec{original})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), "45s") {
+		t.Fatalf("timeout was not written readably:\n%s", encoded)
+	}
+
+	back, err := Parse("round-trip.yaml", encoded)
+	if err != nil {
+		t.Fatalf("the file it wrote does not parse: %v\n%s", err, encoded)
+	}
+	if len(back) != 1 {
+		t.Fatalf("%d specs", len(back))
+	}
+	got := back[0]
+	if got.Name != original.Name || got.Timeout != original.Timeout {
+		t.Fatalf("changed in the round trip: %+v", got)
+	}
+	if len(got.Expect.Arrives) != 1 || got.Expect.Arrives[0].Equals != "web, edge" {
+		t.Fatalf("assertions changed: %+v", got.Expect.Arrives)
+	}
+	if got.Expect.Usage["llm_calls"].Max == nil || *got.Expect.Usage["llm_calls"].Max != 2 {
+		t.Fatalf("usage bound changed: %+v", got.Expect.Usage)
+	}
+}
