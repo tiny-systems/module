@@ -1,9 +1,11 @@
 package runner
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/tiny-systems/module/pkg/redact"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -77,5 +79,37 @@ func TestOrdinaryPayloadsAreUnchanged(t *testing.T) {
 
 	if span.events[0] != payload {
 		t.Fatalf("payload was altered:\n want %s\n got  %s", payload, span.events[0])
+	}
+}
+
+// The component declares which field holds a credential — format:"password",
+// the same tag that makes the editor render it masked. Using that beats both
+// heuristics: it catches a secret whose field name is innocent and whose value
+// looks like nothing in particular.
+func TestDeclaredSecretsNeverReachASpan(t *testing.T) {
+	type req struct {
+		Passphrase string `json:"passphrase" format:"password"`
+		Question   string `json:"question"`
+	}
+
+	safe, changed := redact.Declared(req{Passphrase: "correct horse battery staple", Question: "which pods are down"})
+	if !changed {
+		t.Fatal("the declared field was not masked before marshalling")
+	}
+	encoded, err := json.Marshal(safe)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Runner{}
+	span := &recordingSpan{}
+	c.addSpanPortData(span, string(encoded))
+
+	got := span.events[0]
+	if strings.Contains(got, "correct horse") {
+		t.Fatalf("a declared secret reached the span: %s", got)
+	}
+	if !strings.Contains(got, "which pods are down") {
+		t.Errorf("the rest of the payload was lost: %s", got)
 	}
 }

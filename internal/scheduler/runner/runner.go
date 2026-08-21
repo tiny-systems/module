@@ -721,7 +721,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	}()
 
 	// Always record span port data for tracing
-	inputData, _ := json.Marshal(portData)
+	// Redact from what the component declared, while the payload is still a
+	// typed value and the declaration is still reachable. Past json.Marshal
+	// there is no schema left and the only options are guesses.
+	safeInput, _ := redact.Declared(portData)
+	inputData, _ := json.Marshal(safeInput)
 	c.addSpanPortData(inputSpan, string(inputData))
 
 	var resp m.Result
@@ -961,7 +965,8 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 		defer outputSpan.End()
 
 		// Always record span port data for tracing
-		outputDataBytes, _ := json.Marshal(outputData)
+		safeOutput, _ := redact.Declared(outputData)
+		outputDataBytes, _ := json.Marshal(safeOutput)
 		c.addSpanPortData(outputSpan, string(outputDataBytes))
 
 		// An error-port emission is a caught failure, not a success. The span
@@ -1402,9 +1407,11 @@ func (c *Runner) addSpanUsage(span trace.Span, usage map[string]float64) {
 // connection, so an unmasked payload hands the key to all three. Found by
 // firing a real flow: 108 characters of Anthropic key sitting in two spans.
 //
-// Masked by shape rather than by field name: the payload here is whatever a
-// component emitted, with no schema to say which field was declared secret,
-// and a key called "token" or buried in a prompt is still a key.
+// This is the last line rather than the first: callers redact from the
+// component's own declaration while the value is still typed. What survives to
+// here is a payload that has become bytes, where the only remaining signal is
+// what a credential looks like — which catches a key pasted into a prompt, and
+// misses a password. Both passes are wanted; neither is sufficient alone.
 func (c *Runner) addSpanPortData(span trace.Span, data string) {
 	safe, _ := redact.TextByShape(data)
 	span.AddEvent("data",
