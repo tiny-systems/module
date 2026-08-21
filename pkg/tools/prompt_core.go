@@ -142,8 +142,15 @@ WHERE the user types it is decided by the trigger:
 
   Every consumer then reads the stored value through a ` + "`kv`" + ` query into its context, exactly like any other data. The graph holds a handle, never a value.
 
-- **Signal trigger (genuinely per run)** — a widget on the ` + "`signal`" + ` node. Declare the field ` + "`format: \"password\"`" + ` (` + "`writeOnly: true`" + ` and the older ` + "`secret: true`" + ` are also honoured) in its settings_schema and it renders masked in the Widgets tab (see get_instructions(section: "dashboards")); the value rides the Send payload into that one run. Note what this costs: the person retypes the key EVERY time they press Send. Choose it only when that is the intent.
-- **Cron / ticker (scheduled)** — the trigger's ` + "`_control`" + ` widget IS the settings form: the user fills it once, presses Start, and the flow runs itself. Put the credential in the ` + "`context`" + ` that Start carries. A scheduled flow has no per-run moment to ask, so do NOT bolt a per-run form onto it and do NOT ship the value in ` + "`settings_schema`" + `.
+- **Do NOT put a credential in a trigger's SETTINGS.** Know the difference, because the two look identical in the editor:
+
+  - A trigger's **widget** (` + "`_control`" + `) submission arrives as a message. It is transient — nothing writes it to the Spec — so typing a credential there and pressing Send is fine for a genuinely per-run key.
+  - A trigger's **settings** (` + "`_settings`" + `) is the node Spec. A value there is in the CR, and the CR travels with every export, every published solution, every copy of the graph.
+
+  The trap is that the widget PRE-FILLS from settings. So the obvious way to stop retyping the key — put it in settings once, let the form remember it — is precisely the leak, and the field still renders as dots while it happens. Nine flows on a real cluster were found holding the same live API key that way: masked in the UI, plaintext in the Spec, every one of them.
+
+  So: transient submission for a true per-run secret, and the store for anything reused. Never settings.
+- **Cron / ticker (scheduled)** — the trigger's ` + "`_control`" + ` widget IS its start form: the user fills it once, presses Start, and the flow runs itself. Configure the schedule there, and read the credential from the store — ` + "`_control`" + ` configuration lives in ` + "`spec.ports`" + ` exactly like ` + "`_settings`" + ` does, so a key typed into the Start form is a key in the CR. Worse here than anywhere: cron and ticker PERSIST their start config to node metadata so a restart can resume, so the value lands in a second place too.
 - **Headless / HTTP-triggered (nobody at a dashboard)** — read a Kubernetes Secret the user created once with ` + "`secret_get`" + ` (kubernetes-module): ` + "`{namespace, name, key}`" + ` on its ` + "`request`" + ` port, decoded value out on ` + "`result`" + `. The CR then holds only a name, and the credential arrives on an input port like any other data.
 
 **Never a Secret per flow.** One Secret per credential, read by ` + "`secret_get`" + `, is supported and correct. One Secret for each flow you build is not: modules are shared infrastructure — a single module deployment serves every flow that uses it, so thousands of flows would mean thousands of Secrets that one shared pod must read. Reuse an existing Secret, or ask the user to create the one.

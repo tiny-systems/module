@@ -213,3 +213,43 @@ func TestCredentialGuidanceKeepsItsTwoNonNegotiables(t *testing.T) {
 		}
 	}
 }
+
+// A masked field is not an absent field.
+//
+// The guidance used to offer a trigger's settings widget as a legitimate home
+// for a credential, on the strength of the field rendering as dots. It is not:
+// `_settings` and `_control` configuration both live in spec.ports, so the
+// value is written into the CR and travels with every export. Nine flows on a
+// real cluster were found holding the same live key that way, every one of them
+// masked in the UI.
+//
+// Assert the guide never re-acquires that advice, and that it still says why.
+func TestGuideDoesNotOfferTriggerSettingsAsACredentialHome(t *testing.T) {
+	guide := CorePrompt
+
+	if !strings.Contains(guide, "Do NOT put a credential in a trigger's SETTINGS") {
+		t.Error("the guide stopped warning against credentials in trigger settings")
+	}
+	// The distinction is the whole point: a widget submission is transient, a
+	// settings value is the Spec, and the widget pre-fills FROM settings — which
+	// is what makes the leak look like the convenient option.
+	for _, why := range []string{
+		"the widget PRE-FILLS from settings",
+		"is the node Spec",
+	} {
+		if !strings.Contains(guide, why) {
+			t.Errorf("guidance lost the reason: %q", why)
+		}
+	}
+
+	// The old advice, in the words that made it sound safe. If any of these
+	// come back, the guidance has regressed to writing keys into the graph.
+	for _, gone := range []string{
+		"the value rides the Send payload into that one run",
+		"Put the credential in the `context` that Start carries",
+	} {
+		if strings.Contains(guide, gone) {
+			t.Errorf("guide again offers a trigger's settings as a credential home: %q", gone)
+		}
+	}
+}
