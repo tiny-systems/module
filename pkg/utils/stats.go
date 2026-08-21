@@ -237,8 +237,13 @@ type SpanEvent struct {
 
 // Span represents a trace span with its attributes and events
 type Span struct {
-	TraceID           string          `json:"trace_id"`
-	SpanID            string          `json:"span_id"`
+	TraceID string `json:"trace_id"`
+	SpanID  string `json:"span_id"`
+	// ParentSpanID is what makes a trace a tree rather than a list. Dropped
+	// here until now, which meant a caller could see every hop of a run and
+	// not which hop caused which — and could not tell a re-driven branch from
+	// the run it was re-driving.
+	ParentSpanID      string          `json:"parent_span_id,omitempty"`
 	Name              string          `json:"name"`
 	StartTimeUnixNano int64           `json:"start_time_unix_nano"`
 	EndTimeUnixNano   int64           `json:"end_time_unix_nano"`
@@ -291,6 +296,7 @@ func (c *StatsClient) GetTraceByID(ctx context.Context, projectID, traceID strin
 		spans[i] = Span{
 			TraceID:           hex.EncodeToString(s.TraceId),
 			SpanID:            hex.EncodeToString(s.SpanId),
+			ParentSpanID:      hex.EncodeToString(s.ParentSpanId),
 			Name:              s.Name,
 			StartTimeUnixNano: int64(s.StartTimeUnixNano),
 			EndTimeUnixNano:   int64(s.EndTimeUnixNano),
