@@ -749,6 +749,29 @@ type EvalStore interface {
 	SaveEval(ctx context.Context, projectName string, spec evals.Spec) (location string, err error)
 }
 
+// ReplayRunner re-drives a recorded run and reports what changed.
+//
+// The counterpart to EvalRunner: an eval checks the claims someone wrote down,
+// a replay checks a run that actually happened. After changing a flow — or
+// after a module released underneath it — the second question is the one with
+// no prerequisites.
+type ReplayRunner interface {
+	// ReplayRun re-drives the run's entry hop, or the hop delivered to `at`
+	// when given, and reports the differences.
+	ReplayRun(ctx context.Context, projectName, traceID, at string) (ReplayOutcome, error)
+}
+
+// ReplayOutcome is one replay.
+type ReplayOutcome struct {
+	Hop       string `json:"hop"`
+	Unchanged bool   `json:"unchanged"`
+	// Compared is how many ports the diff judged. Without it "unchanged" is
+	// unfalsifiable: a replay that reached nothing reads the same as one that
+	// reached everything and matched.
+	Compared int      `json:"compared"`
+	Changes  []string `json:"changes,omitempty"`
+}
+
 // NodePosition tracks position of a node added during session
 type NodePosition struct {
 	NodeID   string
@@ -812,6 +835,7 @@ type ExecutionContext struct {
 	TraceReader  TraceReader
 	EvalRunner   EvalRunner
 	EvalStore    EvalStore
+	ReplayRunner ReplayRunner
 
 	// Scenarios (TinyScenario CRD)
 	ScenarioManager ScenarioManager
