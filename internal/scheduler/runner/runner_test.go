@@ -244,4 +244,3 @@ func TestRunner_sendToEdgeWithRetry_NilHandler(t *testing.T) {
 		nil, // nil handler
 	)
 }
-

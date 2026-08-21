@@ -38,12 +38,16 @@ func (m *mockManager) PatchNode(_ context.Context, _ v1alpha1.TinyNode, updater 
 	return updater(node)
 }
 
-func (m *mockManager) CreateModule(_ context.Context, _ m.Info) error                    { return nil }
-func (m *mockManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (m *mockManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (m *mockManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (m *mockManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) { return nil, nil }
-func (m *mockManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error { return nil }
+func (m *mockManager) CreateModule(_ context.Context, _ m.Info) error           { return nil }
+func (m *mockManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (m *mockManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (m *mockManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (m *mockManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) {
+	return nil, nil
+}
+func (m *mockManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error {
+	return nil
+}
 
 func (m *mockManager) getPatchCount() int {
 	m.mu.Lock()
@@ -88,12 +92,16 @@ func (m *patchCapturingManager) getPatchCount() int {
 	return m.patchCount
 }
 
-func (m *patchCapturingManager) CreateModule(_ context.Context, _ m.Info) error                    { return nil }
-func (m *patchCapturingManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (m *patchCapturingManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (m *patchCapturingManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (m *patchCapturingManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) { return nil, nil }
-func (m *patchCapturingManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error { return nil }
+func (m *patchCapturingManager) CreateModule(_ context.Context, _ m.Info) error           { return nil }
+func (m *patchCapturingManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (m *patchCapturingManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (m *patchCapturingManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (m *patchCapturingManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) {
+	return nil, nil
+}
+func (m *patchCapturingManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error {
+	return nil
+}
 
 var _ resource.ManagerInterface = (*patchCapturingManager)(nil)
 
@@ -291,11 +299,11 @@ func TestDataHandler_MultipleUpdatersBatched(t *testing.T) {
 // TestDataHandler_StopLifecycle_FullSequence simulates the complete stop lifecycle
 // as it happens in production:
 //
-//   Ticker handleControl(Stop):
-//     1. clearMetadata → handler(ReconcilePort, deleteFunc)
-//     2. t.stop() → cancels emit goroutine
-//   Emit goroutine defer:
-//     3. handler(ControlPort, stoppedStatus)
+//	Ticker handleControl(Stop):
+//	  1. clearMetadata → handler(ReconcilePort, deleteFunc)
+//	  2. t.stop() → cancels emit goroutine
+//	Emit goroutine defer:
+//	  3. handler(ControlPort, stoppedStatus)
 //
 // The ControlPort debounce REPLACES the ReconcilePort debounce.
 // The test verifies that metadata is cleared despite the replacement.

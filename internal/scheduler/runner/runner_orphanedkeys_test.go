@@ -99,7 +99,7 @@ func TestFindOrphanedKeys_NestedOrphanInArrayItems(t *testing.T) {
 		"context": map[string]interface{}{"foo": "bar"},
 		"conditions": []interface{}{
 			map[string]interface{}{
-				"routeName": "NS",  // WRONG — should be "route"
+				"routeName": "NS", // WRONG — should be "route"
 				"condition": true,
 			},
 			map[string]interface{}{

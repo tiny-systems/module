@@ -90,7 +90,9 @@ type passThroughComponent struct {
 func (p *passThroughComponent) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{Name: p.name}
 }
-func (p *passThroughComponent) Instance() module.Component { return &passThroughComponent{name: p.name} }
+func (p *passThroughComponent) Instance() module.Component {
+	return &passThroughComponent{name: p.name}
+}
 func (p *passThroughComponent) Ports() []module.Port {
 	return []module.Port{
 		{Name: "in", Configuration: map[string]any{}},

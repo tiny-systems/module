@@ -26,6 +26,7 @@ import (
 	operatorv1alpha1 "github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/internal/scheduler"
 	"github.com/tiny-systems/module/module"
+	perrors "github.com/tiny-systems/module/pkg/errors"
 	"github.com/tiny-systems/module/pkg/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -129,9 +130,19 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	ctx = utils.WithLeader(ctx, r.IsLeader.Load())
 
-	// Update scheduler
-	if err := r.Scheduler.Update(ctx, node); err != nil {
-		return ctrl.Result{}, fmt.Errorf("update scheduler: %w", err)
+	// Update scheduler. A failure here must still reach the CRD: the scheduler
+	// writes the reason onto Status on its own failure paths and relies on the
+	// patch below to persist it, so returning early threw every one of them
+	// away. The visible symptom was a node whose component vanished from the
+	// module reporting "OK" indefinitely — with the dead component's ports and
+	// description frozen in from the last reconcile that happened to succeed —
+	// while the controller retried a condition that could never resolve. Anyone
+	// reading the CRD, person or agent, saw a healthy node on a flow that could
+	// not route through it.
+	schedulerErr := r.Scheduler.Update(ctx, node)
+	if schedulerErr != nil {
+		node.Status.Status = schedulerErr.Error()
+		node.Status.Error = true
 	}
 
 	// Mark observed generation
@@ -151,6 +162,16 @@ func (r *TinyNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if err := r.Status().Patch(ctx, node, client.MergeFrom(originNode)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("patch status: %w", err)
+	}
+
+	// Now that the reason is recorded, decide whether it is worth retrying. A
+	// permanent failure (the component is not in this module's compiled-in
+	// registry) cannot resolve on its own, and handing it back would only
+	// produce an error-backoff loop that says nothing the node's own status does
+	// not already say. The periodic requeue still picks it up if a module
+	// upgrade brings the component back.
+	if schedulerErr != nil && !perrors.IsPermanent(schedulerErr) {
+		return ctrl.Result{}, fmt.Errorf("update scheduler: %w", schedulerErr)
 	}
 
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil

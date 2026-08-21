@@ -2,12 +2,12 @@ package runner
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
-	"testing"
 	"github.com/go-logr/logr"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	m "github.com/tiny-systems/module/module"
+	"sync"
+	"sync/atomic"
+	"testing"
 )
 
 // mockComponent is a test component that can dynamically change its ports

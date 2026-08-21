@@ -325,12 +325,15 @@ func (s *Schedule) Update(ctx context.Context, node *v1alpha1.TinyNode) error {
 
 	cmp, ok := s.componentsMap.Get(node.Spec.Component)
 	if !ok {
-		// not recoverable error
+		// The registry is compiled in, so no amount of retrying will make this
+		// component appear — a module that dropped or renamed it leaves the
+		// node's flow permanently unroutable. Mark it permanent so the caller
+		// records the reason instead of retrying forever behind the scenes.
 		s.log.Error(fmt.Errorf("component not registered"), "scheduler update: component not found",
 			"node", node.Name,
 			"component", node.Spec.Component,
 		)
-		return fmt.Errorf("component %s is not registered", node.Spec.Component)
+		return perrors.NewPermanentError(fmt.Errorf("component %s is not registered", node.Spec.Component))
 	}
 
 	// get or create

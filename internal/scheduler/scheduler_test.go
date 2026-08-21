@@ -23,7 +23,7 @@ import (
 // module.K8sClient too, so ClientAware components see a real client.
 type fakeManager struct{}
 
-func (fakeManager) CreateModule(_ context.Context, _ module.Info) error                    { return nil }
+func (fakeManager) CreateModule(_ context.Context, _ module.Info) error { return nil }
 func (fakeManager) PatchNode(_ context.Context, _ v1alpha1.TinyNode, updater func(node *v1alpha1.TinyNode) error) error {
 	// Apply the updater against a fresh node so debounced patches don't
 	// blow up; tests don't assert on what's persisted here.
@@ -32,10 +32,12 @@ func (fakeManager) PatchNode(_ context.Context, _ v1alpha1.TinyNode, updater fun
 	}
 	return updater(&v1alpha1.TinyNode{})
 }
-func (fakeManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (fakeManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (fakeManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error          { return nil }
-func (fakeManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) { return nil, nil }
+func (fakeManager) CreateNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (fakeManager) UpdateNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (fakeManager) DeleteNode(_ context.Context, _ *v1alpha1.TinyNode) error { return nil }
+func (fakeManager) GetNode(_ context.Context, _, _ string) (*v1alpha1.TinyNode, error) {
+	return nil, nil
+}
 func (fakeManager) CreateSignal(_ context.Context, _, _, _ string, _ []byte, _ ...string) error {
 	return nil
 }
