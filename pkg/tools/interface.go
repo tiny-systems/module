@@ -602,15 +602,19 @@ type TraceSummary struct {
 
 // TraceSpanInfo contains a single span's details
 type TraceSpanInfo struct {
-	SpanID       string           `json:"span_id"`
-	ParentSpanID string           `json:"parent_span_id,omitempty"`
-	Name         string           `json:"name"`
-	From         string           `json:"from,omitempty"`
-	To           string           `json:"to,omitempty"`
-	Port         string           `json:"port,omitempty"`
-	DurationMs   float64          `json:"duration_ms"`
-	Status       string           `json:"status,omitempty"`
-	Events       []TraceEventInfo `json:"events,omitempty"`
+	SpanID       string `json:"span_id"`
+	ParentSpanID string `json:"parent_span_id,omitempty"`
+	Name         string `json:"name"`
+	From         string `json:"from,omitempty"`
+	To           string `json:"to,omitempty"`
+	Port         string `json:"port,omitempty"`
+	// EdgeID names the wire that carried this hop. from/to say where a message
+	// went; a graph can hold several edges between the same pair of ports, and
+	// only this says which one ran.
+	EdgeID     string           `json:"edge_id,omitempty"`
+	DurationMs float64          `json:"duration_ms"`
+	Status     string           `json:"status,omitempty"`
+	Events     []TraceEventInfo `json:"events,omitempty"`
 	// Usage is what this hop metered, keyed by the unit the component named.
 	// The units are opaque here: a reader totals them without knowing whether
 	// it is counting tokens, credits or rows.

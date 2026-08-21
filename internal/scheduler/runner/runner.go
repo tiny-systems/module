@@ -697,6 +697,11 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	spanCtx, inputSpan := c.tracer.Start(context.WithoutCancel(ctx), u.String(),
 		trace.WithAttributes(attribute.String("to", utils.GetPortFullName(c.name, port))),
 		trace.WithAttributes(attribute.String("from", msg.From)),
+		// Which edge carried this. from/to say where the message went; only the
+		// edge id says which wire on the canvas did it, and a graph can hold
+		// several between the same two ports. Without it a reader can draw the
+		// run but cannot highlight the path it took.
+		trace.WithAttributes(attribute.String("edgeID", msg.EdgeID)),
 		trace.WithAttributes(attribute.String("flowID", c.flowName)),
 		trace.WithAttributes(attribute.String("projectID", c.projectName)),
 	)
