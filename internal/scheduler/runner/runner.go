@@ -51,6 +51,11 @@ type Runner struct {
 	flowName    string
 	projectName string
 
+	// declaredSecrets caches the field names the node's AUTHORED schemas mark
+	// as credentials (set in SetNode under nodeLock). Recomputed only when the
+	// node changes, because this is consulted on every hop of every flow.
+	declaredSecrets map[string]bool
+
 	// execDurable caches the node's ExecutionModeLabel == durable check
 	// (set in SetNode under nodeLock). Durable nodes mint/continue a run
 	// identity in MsgHandler, which flips edge sends to fire-and-forget
@@ -731,7 +736,7 @@ func (c *Runner) MsgHandler(ctx context.Context, msg *Msg, msgHandler Handler) (
 	// there is no schema left and the only options are guesses.
 	safeInput, _ := redact.Declared(portData)
 	inputData, _ := json.Marshal(safeInput)
-	c.addSpanPortData(inputSpan, string(inputData))
+	c.addSpanPortData(inputSpan, string(c.redactPayload(inputData)))
 
 	var resp m.Result
 
@@ -972,7 +977,7 @@ func (c *Runner) DataHandler(outputHandler Handler) func(outputCtx context.Conte
 		// Always record span port data for tracing
 		safeOutput, _ := redact.Declared(outputData)
 		outputDataBytes, _ := json.Marshal(safeOutput)
-		c.addSpanPortData(outputSpan, string(outputDataBytes))
+		c.addSpanPortData(outputSpan, string(c.redactPayload(outputDataBytes)))
 
 		// An error-port emission is a caught failure, not a success. The span
 		// otherwise carries a `data` event and nothing else, and error counting
@@ -1023,6 +1028,7 @@ func (c *Runner) SetNode(node v1alpha1.TinyNode) *Runner {
 	c.execDurable = node.Labels[v1alpha1.ExecutionModeLabel] == v1alpha1.ExecutionModeDurable
 	c.name = node.Name
 	c.node = node
+	c.declaredSecrets = declaredSecretNames(node)
 	c.nodeLock.Unlock()
 
 	// Cancel in-flight sends for removed edges
@@ -1671,4 +1677,69 @@ func findOrphanedKeys(data map[string]interface{}, t reflect.Type) []string {
 	}
 	sort.Strings(orphaned)
 	return orphaned
+}
+
+// declaredSecretNames gathers the credential field names declared across every
+// schema on the node.
+//
+// The union across all ports is deliberate. A credential is declared once — on
+// the form, on the trigger's settings — and then travels by edge to nodes that
+// declare nothing about it. Scoping the names to the one port a span belongs to
+// would protect the hop where the user typed the value and leak every hop
+// after it, which is the wrong way round: the value is most exposed downstream.
+func declaredSecretNames(node v1alpha1.TinyNode) map[string]bool {
+	var out map[string]bool
+	for _, p := range node.Spec.Ports {
+		for name := range redact.AuthoredSecretNames(p.Schema) {
+			if out == nil {
+				out = map[string]bool{}
+			}
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// redactPayload is the last thing that touches span data before it leaves.
+//
+// Three layers, weakest last, because each covers what the one before it
+// cannot:
+//
+//  1. redact.Declared (already applied by the caller, while the value is still
+//     typed) — the component's own fields, from Go struct tags.
+//  2. redact.ByName with the node's authored schemas — the USER's declaration,
+//     which is the only record for a credential riding inside a `configurable`
+//     field. This is the case the design leads with, since credentials arrive
+//     as port data.
+//  3. redact.Secrets, then the shape pass inside addSpanPortData — heuristics,
+//     for anything nobody declared at either end.
+//
+// Layer 3 is here as defence in depth. It was previously applied only to port
+// CONFIGURATION, so a payload carrying `apiKey` reached traces intact even
+// though the same name in routing was caught.
+func (c *Runner) redactPayload(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+
+	c.nodeLock.Lock()
+	declared := c.declaredSecrets
+	c.nodeLock.Unlock()
+
+	var decoded any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		// json.Marshal produced these bytes. If they somehow do not parse we
+		// cannot inspect them, and publishing an unexamined payload is the
+		// failure this exists to prevent.
+		return nil
+	}
+
+	byName, _ := redact.ByName(decoded, declared)
+	safe := redact.Secrets(byName)
+
+	out, err := json.Marshal(safe)
+	if err != nil {
+		return nil
+	}
+	return out
 }
