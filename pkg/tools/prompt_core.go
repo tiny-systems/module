@@ -130,7 +130,19 @@ An edge may REFERENCE a credential that arrived at runtime — ` + "`{{$.context
 
 WHERE the user types it is decided by the trigger:
 
-- **Signal trigger (per run)** — a widget on the ` + "`signal`" + ` node. Declare the field with ` + "`secret: true`" + ` in its settings_schema and it renders masked in the Widgets tab (see get_instructions(section: "dashboards")); the value rides the Send payload into that one run.
+- **Used repeatedly by one person (the usual case) — the settings form.** Type it once, prove it works, keep it. This is the pattern to reach for by default; the per-run one below is for a key that genuinely changes every run.
+
+  Build it with ` + "`form`" + ` (common-module) and five nodes:
+
+  1. ` + "`form`" + ` — author its context schema with the credential field marked ` + "`format: \"password\"`" + ` and ` + "`writeOnly: true`" + `. The person fills it and presses Submit; the value leaves on ` + "`out`" + `.
+  2. **Validate against the real provider** — e.g. ` + "`llm_complete`" + ` with ` + "`maxTokens: 1`" + ` and a system prompt of "Reply with the single word ok", ` + "`enableErrorPort: true`" + `. A key is not saved until the provider has accepted it, so nobody stores a typo and debugs it later.
+  3. **Store on success** — ` + "`kv`" + ` with ` + "`operation: store`" + ` under a stable handle (` + "`{id: \"anthropic-main\", key: \"{{$.context.key}}\"}`" + `, ` + "`primaryKey: id`" + `).
+  4. **Mask and report** — the store ack into a small ` + "`js_eval`" + ` that returns last-4 only, wired to the form's ` + "`result`" + ` port: ` + "`{text: \"Validated ✓ — key ••••1234 in use\", prefill: {apiKey: \"{{$.outputData.masked}}\"}}`" + `. The masked value sitting IN the password field is what says "a key is set"; a sentence never does.
+  5. **Report failure to the same card** — the validator's ` + "`error`" + ` port into ` + "`form:result`" + ` with ` + "`{text: \"⚠️ Key check failed — not saved.\"}`" + `.
+
+  Every consumer then reads the stored value through a ` + "`kv`" + ` query into its context, exactly like any other data. The graph holds a handle, never a value.
+
+- **Signal trigger (genuinely per run)** — a widget on the ` + "`signal`" + ` node. Declare the field ` + "`format: \"password\"`" + ` (` + "`writeOnly: true`" + ` and the older ` + "`secret: true`" + ` are also honoured) in its settings_schema and it renders masked in the Widgets tab (see get_instructions(section: "dashboards")); the value rides the Send payload into that one run. Note what this costs: the person retypes the key EVERY time they press Send. Choose it only when that is the intent.
 - **Cron / ticker (scheduled)** — the trigger's ` + "`_control`" + ` widget IS the settings form: the user fills it once, presses Start, and the flow runs itself. Put the credential in the ` + "`context`" + ` that Start carries. A scheduled flow has no per-run moment to ask, so do NOT bolt a per-run form onto it and do NOT ship the value in ` + "`settings_schema`" + `.
 - **Headless / HTTP-triggered (nobody at a dashboard)** — read a Kubernetes Secret the user created once with ` + "`secret_get`" + ` (kubernetes-module): ` + "`{namespace, name, key}`" + ` on its ` + "`request`" + ` port, decoded value out on ` + "`result`" + `. The CR then holds only a name, and the credential arrives on an input port like any other data.
 

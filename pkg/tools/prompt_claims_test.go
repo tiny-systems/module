@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tiny-systems/ajson"
+	"github.com/tiny-systems/module/pkg/redact"
 )
 
 // The guide is a second implementation.
@@ -156,4 +157,59 @@ func sectionText(guide, heading string) string {
 		return rest[:end]
 	}
 	return rest
+}
+
+// The credentials section tells an agent to declare a secret field
+// `format: "password"`. Redaction is what makes that declaration worth
+// anything: redact.Declared reads the same attribute to keep the value out of
+// traces. Two places, one contract, and prose cannot fail a build — so assert
+// the mechanism honours exactly what the guide advertises.
+//
+// This matters because the alternative was shape-guessing heuristics. The
+// declared attribute already existed; the guide now points at it, and this
+// stops the two drifting apart.
+func TestGuideNamesTheAttributeRedactionActuallyReads(t *testing.T) {
+	guide := CorePrompt
+
+	if !strings.Contains(guide, `format: "password"`) {
+		t.Fatal(`credentials guidance no longer names format: "password"`)
+	}
+
+	// Declared returns a copy of the SAME type with the field masked — not a
+	// map. Assert against the struct, which is also how callers use it.
+	type creds struct {
+		APIKey string `json:"apiKey" format:"password"`
+		Region string `json:"region"`
+	}
+	got, changed := redact.Declared(creds{APIKey: "sk-not-a-real-key", Region: "eu-west-1"})
+	if !changed {
+		t.Fatal(`redact.Declared ignored format:"password" — the guide is telling agents to declare something inert`)
+	}
+	out, ok := got.(creds)
+	if !ok {
+		t.Fatalf("redact.Declared returned %T, want a creds copy", got)
+	}
+	if out.APIKey == "sk-not-a-real-key" {
+		t.Error("declared secret survived redaction verbatim")
+	}
+	if out.Region != "eu-west-1" {
+		t.Errorf("region = %q, want it untouched — redaction must not eat ordinary fields", out.Region)
+	}
+}
+
+// The settings-form pattern is the default the guide now recommends, and it is
+// only correct if it ends with the value stored under a HANDLE rather than
+// written into the graph. Assert the section still says both halves: validate
+// before storing, and keep the value out of the routing.
+func TestCredentialGuidanceKeepsItsTwoNonNegotiables(t *testing.T) {
+	guide := CorePrompt
+
+	for _, claim := range []string{
+		"never belongs to the ROUTING",
+		"not saved until the provider has accepted it",
+	} {
+		if !strings.Contains(guide, claim) {
+			t.Errorf("credentials guidance lost %q", claim)
+		}
+	}
 }
