@@ -717,7 +717,23 @@ var runCmd = &cobra.Command{
 		})
 
 		l.Info("waiting...")
-		_ = wg.Wait()
+		err = wg.Wait()
+
+		// Exit non-zero when something died, so the container reports Error
+		// rather than Completed.
+		//
+		// A manager that fails to start — RBAC missing for a resource it
+		// watches, the API server briefly unreachable — cancels the group and
+		// unwinds everything, which is right: a controller-runtime manager
+		// cannot be restarted in place, so crashing and letting the kubelet
+		// start a fresh process IS the recovery. But the error was discarded
+		// and the process exited 0, so the pod showed Completed, no restart
+		// was counted, and nothing watching exit codes saw a failure. The
+		// recovery worked; it was invisible.
+		if err != nil {
+			l.Error(err, "module stopped with an error")
+			os.Exit(1)
+		}
 
 		l.Info("all done")
 	},
