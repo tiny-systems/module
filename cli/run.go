@@ -620,6 +620,22 @@ var runCmd = &cobra.Command{
 			return
 		}
 
+		// Components whose definition is a resource. Wired unconditionally: a
+		// module that implements no runtime simply serves none of them and says
+		// so in their status, which is better than a definition sitting inert
+		// because nobody was watching.
+		componentController := &controller.TinyComponentReconciler{
+			Client:    mgr.GetClient(),
+			Scheme:    mgr.GetScheme(),
+			Scheduler: scheduler,
+			Module:    moduleInfo,
+			IsLeader:  isLeader,
+		}
+		if err = componentController.SetupWithManager(mgr); err != nil {
+			l.Error(err, "unable to create tinycomponent controller")
+			return
+		}
+
 		// @todo replace with custom health check
 		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 			l.Error(err, "unable to set up health check")

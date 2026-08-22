@@ -45,6 +45,36 @@ rules:
 - apiGroups:
   - operator.tinysystems.io
   resources:
+  - tinycomponents
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinycomponents/finalizers
+  - tinymodules/finalizers
+  - tinynodes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinycomponents/status
+  - tinymodules/status
+  - tinynodes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
   - tinymodules
   - tinynodes
   verbs:
@@ -56,19 +86,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinymodules/finalizers
-  - tinynodes/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - operator.tinysystems.io
-  resources:
-  - tinymodules/status
-  - tinynodes/status
-  verbs:
-  - get
-  - patch
-  - update
