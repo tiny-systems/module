@@ -147,7 +147,9 @@ func TestPortsMatchBySuffix(t *testing.T) {
 func TestErrorsAreZeroByDefault(t *testing.T) {
 	spec := Spec{}
 	f := Check(spec, Observed{Errors: 1})
-	if len(f) != 1 || !strings.Contains(f[0].What, "0 errors") {
+	// "unhandled" is load-bearing in the wording: a caught error is the flow
+	// working, and the report has to say which kind it counted.
+	if len(f) != 1 || !strings.Contains(f[0].What, "0 unhandled errors") {
 		t.Fatalf("failures = %v", f)
 	}
 
