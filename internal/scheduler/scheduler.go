@@ -24,6 +24,10 @@ import (
 type Scheduler interface {
 	//Install makes component available to run instances
 	Install(component module.Component) error
+	//Uninstall removes a script-defined component and stops its instances
+	Uninstall(name string) bool
+	//InstalledComponent reports what is installed under a name
+	InstalledComponent(name string) (module.Component, bool)
 	//Update creates a new instance by using unique name, if instance exists - updates one using its specs and signals
 	Update(ctx context.Context, node *v1alpha1.TinyNode) error
 	//Handle sync incoming call
@@ -133,6 +137,46 @@ func (s *Schedule) Install(component module.Component) error {
 	}
 	s.componentsMap.Set(component.GetInfo().Name, component)
 	return nil
+}
+
+// Uninstall removes a component, and every running instance of it.
+//
+// Only script-defined components are ever removed: a compiled one exists for
+// the life of the binary. Deleting a definition has to stop the instances too,
+// or nodes keep serving a component that no longer exists — the same silent
+// state that let five nodes report OK for a component their module had dropped.
+//
+// Returns false when nothing was installed under that name, so a caller can
+// tell a real removal from a no-op.
+func (s *Schedule) Uninstall(name string) bool {
+	if name == "" {
+		return false
+	}
+	if _, ok := s.componentsMap.Get(name); !ok {
+		return false
+	}
+	s.componentsMap.Remove(name)
+
+	// Instances outlive the map entry unless they are stopped: Update looks the
+	// component up only when (re)building a runner, so an existing one would go
+	// on handling messages with code that has been withdrawn.
+	for _, item := range s.instancesMap.Items() {
+		if item == nil {
+			continue
+		}
+		if item.GetComponent().GetInfo().Name == name {
+			_ = s.Destroy(item.Node().Name)
+		}
+	}
+	return true
+}
+
+// InstalledComponent returns the component installed under name, if any. A
+// module serving script-defined components uses it to refuse a definition that
+// would shadow a compiled component rather than silently replacing something
+// that already works.
+func (s *Schedule) InstalledComponent(name string) (module.Component, bool) {
+	return s.componentsMap.Get(name)
 }
 
 // Handle could be external and synchronous

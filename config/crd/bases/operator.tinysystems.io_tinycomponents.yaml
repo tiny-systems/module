@@ -1,0 +1,142 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: tinycomponents.operator.tinysystems.io
+spec:
+  group: operator.tinysystems.io
+  names:
+    kind: TinyComponent
+    listKind: TinyComponentList
+    plural: tinycomponents
+    singular: tinycomponent
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.component
+      name: Component
+      type: string
+    - jsonPath: .spec.runtime
+      name: Runtime
+      type: string
+    - jsonPath: .status.installed
+      name: Installed
+      type: boolean
+    - jsonPath: .status.reason
+      name: Reason
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: TinyComponent is the Schema for the tinycomponents API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TinyComponentSpec defines a component implemented by a script.
+            properties:
+              component:
+                description: |-
+                  Component is the name flows reference in TinyNode.Spec.Component, e.g.
+                  "summarise_pods". Conventionally snake_case, like compiled components,
+                  because nothing downstream can tell the two apart — which is the point.
+
+                  It must not collide with a compiled component's name: the module serving
+                  it refuses the definition rather than shadowing something that already
+                  works.
+                type: string
+              description:
+                description: Description is the one-line summary shown in the palette.
+                type: string
+              enableErrorPort:
+                description: |-
+                  EnableErrorPort exposes an `error` port so a caller can catch failures
+                  instead of letting them abort the run. Same contract as every compiled
+                  component's error boundary.
+                type: boolean
+              info:
+                description: |-
+                  Info is the longer explanation an agent reads when deciding whether this
+                  is the component it needs.
+                type: string
+              input:
+                description: |-
+                  Input is the JSON Schema of the request port — the shape upstream edges
+                  must produce. Required, because an edge cannot be validated against a
+                  shape nobody declared.
+                format: byte
+                type: string
+              output:
+                description: |-
+                  Output is the JSON Schema of the response port — the shape downstream
+                  edges may read. Required for the same reason in the other direction:
+                  without it every edge leaving this component is unverifiable.
+                format: byte
+                type: string
+              runtime:
+                default: js
+                description: |-
+                  Runtime names the module that executes this definition. "js" is served by
+                  js-module. A definition whose runtime no module claims is simply never
+                  installed — it is not an error, because the module may be installed later.
+                type: string
+              script:
+                description: |-
+                  Script is the implementation. For the js runtime this is an ES module
+                  with a default export taking the input object and returning the output.
+                type: string
+            required:
+            - component
+            - input
+            - output
+            - script
+            type: object
+          status:
+            description: TinyComponentStatus reports whether a module picked the definition
+              up.
+            properties:
+              installed:
+                description: |-
+                  Installed is true once a module is serving this component. False with a
+                  reason is the useful state: a definition nothing serves looks identical
+                  to a working one from the outside, which is how a flow ends up
+                  referencing a component that will never run.
+                type: boolean
+              module:
+                description: Module names what is serving it.
+                type: string
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status describes, so an
+                  edit that has not been picked up yet is distinguishable from one that was
+                  rejected.
+                format: int64
+                type: integer
+              reason:
+                description: |-
+                  Reason explains a false Installed — an unclaimed runtime, a name that
+                  collides with a compiled component, a script that would not parse.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
