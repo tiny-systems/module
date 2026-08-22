@@ -40,8 +40,12 @@ func (f *failingScheduler) Update(_ context.Context, node *operatorv1alpha1.Tiny
 }
 
 func (f *failingScheduler) Handle(context.Context, *runner.Msg) (any, error) { return nil, nil }
-func (f *failingScheduler) Destroy(string) error                             { return nil }
-func (f *failingScheduler) HasInstance(string) bool                          { return false }
+func (f *failingScheduler) Uninstall(string) bool                            { return false }
+func (f *failingScheduler) InstalledComponent(string) (module.Component, bool) {
+	return nil, false
+}
+func (f *failingScheduler) Destroy(string) error    { return nil }
+func (f *failingScheduler) HasInstance(string) bool { return false }
 
 var _ scheduler.Scheduler = (*failingScheduler)(nil)
 
