@@ -75,12 +75,17 @@ type TinyComponentSpec struct {
 	// Input is the JSON Schema of the request port — the shape upstream edges
 	// must produce. Required, because an edge cannot be validated against a
 	// shape nobody declared.
-	Input []byte `json:"input"`
+	//
+	// A string holding JSON, not []byte. Kubernetes renders []byte as
+	// `format: byte` and demands base64, which would mean hand-encoding a
+	// schema to write a component — TinyNode stores schemas that way because a
+	// machine writes them, and this resource is written by people and agents.
+	Input string `json:"input"`
 
 	// Output is the JSON Schema of the response port — the shape downstream
 	// edges may read. Required for the same reason in the other direction:
 	// without it every edge leaving this component is unverifiable.
-	Output []byte `json:"output"`
+	Output string `json:"output"`
 
 	// EnableErrorPort exposes an `error` port so a caller can catch failures
 	// instead of letting them abort the run. Same contract as every compiled

@@ -175,8 +175,8 @@ func (r *TinyComponentReconciler) install(ctx context.Context, def *operatorv1al
 		Description:     def.Spec.Description,
 		Info:            def.Spec.Info,
 		Script:          def.Spec.Script,
-		InputSchema:     def.Spec.Input,
-		OutputSchema:    def.Spec.Output,
+		InputSchema:     []byte(def.Spec.Input),
+		OutputSchema:    []byte(def.Spec.Output),
 		EnableErrorPort: def.Spec.EnableErrorPort,
 	})
 	if err != nil {

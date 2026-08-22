@@ -82,14 +82,17 @@ spec:
                   Input is the JSON Schema of the request port — the shape upstream edges
                   must produce. Required, because an edge cannot be validated against a
                   shape nobody declared.
-                format: byte
+
+                  A string holding JSON, not []byte. Kubernetes renders []byte as
+                  `format: byte` and demands base64, which would mean hand-encoding a
+                  schema to write a component — TinyNode stores schemas that way because a
+                  machine writes them, and this resource is written by people and agents.
                 type: string
               output:
                 description: |-
                   Output is the JSON Schema of the response port — the shape downstream
                   edges may read. Required for the same reason in the other direction:
                   without it every edge leaving this component is unverifiable.
-                format: byte
                 type: string
               runtime:
                 default: js
