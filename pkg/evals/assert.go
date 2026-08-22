@@ -72,6 +72,15 @@ func Check(spec Spec, got Observed) []Failure {
 		failures = append(failures, checkArrival(a, got)...)
 	}
 
+	for _, port := range spec.Expect.Silent {
+		if payloads := matchPayloads(got.Payloads, port); len(payloads) > 0 {
+			failures = append(failures, Failure{
+				What: fmt.Sprintf("expected nothing at %s", port),
+				Got:  fmt.Sprintf("%d message(s) arrived", len(payloads)),
+			})
+		}
+	}
+
 	for unit, bound := range spec.Expect.Usage {
 		amount, seen := got.Usage[unit]
 		if !seen {

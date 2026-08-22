@@ -79,6 +79,16 @@ type Expect struct {
 	// caught error then DID, with `arrives` on the error port.
 	Errors *int `json:"errors,omitempty"`
 
+	// Silent names ports that must receive NOTHING, as "<node>:<port>" with
+	// the same suffix matching as Arrives.
+	//
+	// Half of any branch is the road not taken. "the approved path fired" is
+	// only a claim about routing when paired with "the denied path did not" —
+	// otherwise a component that fires BOTH branches passes. There was no way
+	// to say this, so every router and error-port eval asserted half its
+	// behaviour.
+	Silent []string `json:"silent,omitempty"`
+
 	// Arrives asserts on payloads that reached a port.
 	Arrives []Arrival `json:"arrives,omitempty"`
 
