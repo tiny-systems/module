@@ -66,8 +66,25 @@ type StorageRequirements struct {
 type RBACRequirements struct {
 	// EnableKubernetesResourceAccess enables access to pods, services, deployments, ingresses
 	EnableKubernetesResourceAccess bool `json:"enableKubernetesResourceAccess,omitempty"`
-	// ExtraRules defines additional RBAC rules needed by the module
+	// ExtraRules defines additional RBAC rules needed by the module. These
+	// become a ClusterRole — cluster-wide, every namespace.
 	ExtraRules []RBACRule `json:"extraRules,omitempty"`
+
+	// ExtraNamespacedRules are granted only in the release namespace, as a
+	// Role rather than a ClusterRole.
+	//
+	// Most of what a module touches is its own namespace: the Secrets holding
+	// its credentials, the workloads it manages, the Services it exposes.
+	// Declaring those cluster-wide hands it every Secret in the cluster to get
+	// at one. Prefer this over ExtraRules and reach for the cluster-wide form
+	// only when a component genuinely reads across namespaces.
+	//
+	// Added after the chart and the published overlays already used
+	// `rbac.extraNamespacedRules` (operator chart 0.2.12) while this type had
+	// no way to express it — so a module could be INSTALLED with narrow
+	// namespaced rules but could not DECLARE them, and the drift gate
+	// correctly reported the two disagreeing.
+	ExtraNamespacedRules []RBACRule `json:"extraNamespacedRules,omitempty"`
 }
 
 // RBACRule defines a single RBAC rule

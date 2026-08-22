@@ -24,7 +24,8 @@ import (
 //	<module-binary> tools rbac-values > modules/<name>/values.yaml
 //
 // The output is exactly the overlay the operator chart's manager-rbac.yaml
-// consumes via .Values.rbac.{enableKubernetesResourceAccess,extraRules}.
+// consumes via .Values.rbac.{enableKubernetesResourceAccess,extraRules,
+// extraNamespacedRules}.
 var rbacValuesCmd = &cobra.Command{
 	Use:   "rbac-values",
 	Short: "Print the operator-chart rbac values overlay derived from SetRequirements",
@@ -32,7 +33,11 @@ var rbacValuesCmd = &cobra.Command{
 
     rbac:
       enableKubernetesResourceAccess: <bool>
-      extraRules:
+      extraRules:              # ClusterRole — every namespace
+      - apiGroups: [...]
+        resources: [...]
+        verbs: [...]
+      extraNamespacedRules:    # Role — the release namespace only
       - apiGroups: [...]
         resources: [...]
         verbs: [...]
@@ -46,7 +51,8 @@ instead of a hand-copied overlay that drifts.`,
 		// gate compares against (empty). Emitting `rbac: {}` here would read as
 		// drift versus a missing file.
 		reqs := registry.GetRequirements()
-		if reqs == nil || (!reqs.RBAC.EnableKubernetesResourceAccess && len(reqs.RBAC.ExtraRules) == 0) {
+		if reqs == nil || (!reqs.RBAC.EnableKubernetesResourceAccess &&
+			len(reqs.RBAC.ExtraRules) == 0 && len(reqs.RBAC.ExtraNamespacedRules) == 0) {
 			return
 		}
 

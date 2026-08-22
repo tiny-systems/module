@@ -21,10 +21,10 @@ import (
 // the cluster into the blast radius of any module that opts into
 // secret reads or RBAC ExtraRules.
 var reservedNamespaces = map[string]bool{
-	"default":          true,
-	"kube-system":      true,
-	"kube-public":      true,
-	"kube-node-lease":  true,
+	"default":         true,
+	"kube-system":     true,
+	"kube-public":     true,
+	"kube-node-lease": true,
 }
 
 // managedLabelKey is the namespace label that opts a namespace into
