@@ -57,6 +57,30 @@ rules:
 - apiGroups:
   - operator.tinysystems.io
   resources:
+  - tinycomponents
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinycomponents/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
+  - tinycomponents/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - operator.tinysystems.io
+  resources:
   - tinymodules
   verbs:
   - create
