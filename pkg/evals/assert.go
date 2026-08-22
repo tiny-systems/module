@@ -31,8 +31,20 @@ type Observed struct {
 	// the trace reported it. A port may receive several times, so the values
 	// are ordered as they arrived.
 	Payloads map[string][]string
-	Errors   int
-	Usage    map[string]float64
+
+	// Errors counts failures that ESCAPED — nothing caught them. A failure a
+	// component routed out of an enabled error port is not one of these: it
+	// was handled, which is the flow working, and counting it would mean every
+	// flow with a recovery path could never assert `errors: 0`. The most
+	// fault-tolerant flows would get the weakest assertions.
+	Errors int
+
+	// Handled counts failures a component caught and routed out of an error
+	// port. Reported rather than asserted: the useful claim is what the caught
+	// error then did, which `arrives` already expresses.
+	Handled int
+
+	Usage map[string]float64
 }
 
 // Check evaluates a spec against what happened. An empty result is a pass.
@@ -44,9 +56,15 @@ func Check(spec Spec, got Observed) []Failure {
 		wantErrors = *spec.Expect.Errors
 	}
 	if got.Errors != wantErrors {
+		got_ := fmt.Sprintf("%d", got.Errors)
+		if got.Handled > 0 {
+			// Name the caught ones so a surprising count is diagnosable: an
+			// escaped failure and a caught one read identically otherwise.
+			got_ += fmt.Sprintf(" (plus %d caught by an error port)", got.Handled)
+		}
 		failures = append(failures, Failure{
-			What: fmt.Sprintf("expected %d errors", wantErrors),
-			Got:  fmt.Sprintf("%d", got.Errors),
+			What: fmt.Sprintf("expected %d unhandled errors", wantErrors),
+			Got:  got_,
 		})
 	}
 

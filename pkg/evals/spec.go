@@ -67,9 +67,16 @@ type Trigger struct {
 
 // Expect is what must hold once the run has settled.
 type Expect struct {
-	// Errors is the number of errors the run may produce. Nil means zero —
-	// the common case, and the one worth defaulting to, since an eval that
-	// tolerates errors by accident checks nothing.
+	// Errors is the number of UNHANDLED errors the run may produce — failures
+	// that escaped, with nothing catching them. Nil means zero: the common
+	// case, and the one worth defaulting to, since an eval that tolerates
+	// errors by accident checks nothing.
+	//
+	// A failure routed out of an enabled error port does not count. That is a
+	// flow handling a fault, which is the flow working; counting it would mean
+	// a flow with any recovery path could never claim `errors: 0`, so the most
+	// fault-tolerant flows would carry the weakest assertions. Assert what the
+	// caught error then DID, with `arrives` on the error port.
 	Errors *int `json:"errors,omitempty"`
 
 	// Arrives asserts on payloads that reached a port.
